@@ -127,36 +127,134 @@ Use British spelling throughout documentation and user-facing text.
 ## Phase 0: Project Setup
 
 ### 0.1 Development Environment
-- [ ] Create `.devcontainer/devcontainer.json` for VS Code / Codespaces / CI
-- [ ] Create `.devcontainer/Dockerfile` with Rust toolchain
-- [ ] Include: rustc, cargo, clippy, rustfmt, rust-analyzer, git, OpenSSL dev libs
+- [x] Create `.devcontainer/devcontainer.json` for VS Code / Codespaces / CI
+- [x] Create `.devcontainer/Dockerfile` with Rust toolchain
+- [x] Include: rustc, cargo, clippy, rustfmt, rust-analyzer, git, OpenSSL dev libs
 - [ ] Test devcontainer works in VS Code and GitHub Codespaces
 
 ### 0.2 Build Configuration
-- [ ] Create `Cargo.toml` with dependencies
-- [ ] Create `src/main.rs` skeleton
-- [ ] Create `.gitignore` for Rust
-- [ ] Add `rust-toolchain.toml` for consistent Rust version (stable)
-- [ ] Create `rustfmt.toml` with formatting rules
-- [ ] Create `clippy.toml` or configure in `Cargo.toml`
+- [x] Create `Cargo.toml` with dependencies
+- [x] Create `src/main.rs` skeleton
+- [x] Create `.gitignore` for Rust
+- [x] Add `rust-toolchain.toml` for consistent Rust version (stable)
+- [x] Create `rustfmt.toml` with formatting rules
+- [x] Configure clippy lints in `Cargo.toml`
 
 ### 0.3 CI/CD Workflows
-- [ ] Update `.github/workflows/ci_pr_validation.yml` for Rust:
-  - [ ] `cargo fmt --check`
-  - [ ] `cargo clippy -- -D warnings`
-  - [ ] `cargo build`
-  - [ ] `cargo test`
-  - [ ] Matrix: ubuntu, macos, windows
+- [x] Update `.github/workflows/ci_pr_validation.yml` for Rust:
+  - [x] `cargo fmt --check`
+  - [x] `cargo clippy -- -D warnings`
+  - [x] `cargo build`
+  - [x] `cargo test`
+  - [x] Matrix: ubuntu, macos, windows
 - [ ] Add `.github/workflows/release.yml` for cross-platform binary releases
 
 ### 0.4 VS Code Configuration
-- [ ] Update `.vscode/extensions.json` for Rust (rust-analyzer, etc.)
-- [ ] Update `.vscode/settings.json` for Rust
+- [x] Update `.vscode/extensions.json` for Rust (rust-analyzer, etc.)
+- [x] Update `.vscode/settings.json` for Rust
 
-### 0.5 Verification
+### 0.5 GitHub Repository Settings
+- [x] Enable GitHub Actions with restricted permissions
+- [x] Add `dtolnay/rust-toolchain@stable` to allowed actions
+- [x] Enable CodeQL analysis for Rust and GitHub Actions
+- [x] Enable Copilot Autofix for CodeQL alerts
+- [x] Configure code review limits
+- [x] Set workflow permissions to read-only
+- [ ] Enable Secret Scanning (critical for credential-handling project!)
+- [ ] Enable Push Protection (block commits containing secrets)
+- [ ] Enable Dependabot security updates
+- [ ] Set up branch protection rules for `main`
+
+### 0.6 Verification
 - [ ] Verify project builds locally
 - [ ] Verify CI passes on all platforms
 - [ ] Verify devcontainer works
+
+---
+
+## Phase 0.5: Open Source Best Practices
+
+Based on https://opensource.guide/ recommendations. Essential for building a welcoming, trustworthy open source project.
+
+### 0.5.1 Security Documentation (Priority: CRITICAL)
+- [ ] Create `SECURITY.md` — **Critical for a credential-handling project!**
+  - [ ] Vulnerability disclosure policy (how to report privately)
+  - [ ] Security update policy
+  - [ ] Supported versions
+  - [ ] Security contact (email or GitHub Security Advisories)
+  - [ ] Response timeline expectations
+  - [ ] Link to GitHub's private vulnerability reporting
+
+### 0.5.2 Community Documentation
+- [ ] Create `CODE_OF_CONDUCT.md`
+  - [ ] Adopt Contributor Covenant (https://www.contributor-covenant.org/)
+  - [ ] Define enforcement contacts
+  - [ ] Link from README and CONTRIBUTING
+- [ ] Create `CONTRIBUTING.md`
+  - [ ] How to report bugs
+  - [ ] How to suggest features
+  - [ ] How to submit pull requests
+  - [ ] Coding style guidelines (link to rustfmt.toml, clippy config)
+  - [ ] Commit message format (conventional commits)
+  - [ ] PR review process
+  - [ ] Testing requirements
+  - [ ] British spelling requirement for docs 🇬🇧
+
+### 0.5.3 Issue & PR Templates
+- [ ] Create `.github/ISSUE_TEMPLATE/bug_report.md`
+  - [ ] Steps to reproduce
+  - [ ] Expected vs actual behaviour
+  - [ ] Environment (OS, version)
+  - [ ] Logs/error messages (remind: no credentials!)
+- [ ] Create `.github/ISSUE_TEMPLATE/feature_request.md`
+  - [ ] Problem description
+  - [ ] Proposed solution
+  - [ ] Alternatives considered
+- [ ] Create `.github/ISSUE_TEMPLATE/config.yml`
+  - [ ] Disable blank issues (require template)
+  - [ ] Link to discussions for questions
+- [ ] Create `.github/PULL_REQUEST_TEMPLATE.md`
+  - [ ] Description of changes
+  - [ ] Related issue(s)
+  - [ ] Checklist: tests, docs, changelog, no credentials in logs
+
+### 0.5.4 Project Documentation
+- [ ] Create `CHANGELOG.md` (Keep a Changelog format)
+  - [ ] Document all notable changes
+  - [ ] Categories: Added, Changed, Deprecated, Removed, Fixed, Security
+- [ ] Expand `README.md`
+  - [ ] Clear project description
+  - [ ] Security architecture diagram
+  - [ ] Installation instructions
+  - [ ] Quick start guide
+  - [ ] Configuration reference
+  - [ ] MCP client setup examples
+  - [ ] Badges: CI status, license, version
+  - [ ] Links to CONTRIBUTING, CODE_OF_CONDUCT, SECURITY
+
+### 0.5.5 GitHub Repository Features
+- [ ] Enable Discussions (for Q&A, ideas)
+- [ ] Configure issue labels (bug, enhancement, security, good first issue, help wanted)
+- [ ] Add repository topics (mcp, git, rust, security, ai, llm)
+- [ ] Set repository description
+- [ ] Add social preview image (optional)
+
+### Open Source Checklist Summary
+
+| Item | Status | Priority |
+|------|--------|----------|
+| LICENSE | ✅ Done | - |
+| README.md | ⚠️ Basic | High |
+| CONTRIBUTING.md | ❌ Missing | High |
+| CODE_OF_CONDUCT.md | ❌ Missing | Medium |
+| SECURITY.md | ❌ Missing | **CRITICAL** |
+| CHANGELOG.md | ❌ Missing | Medium |
+| Issue Templates | ❌ Missing | Medium |
+| PR Template | ❌ Missing | Medium |
+| Branch Protection | ⏳ Pending | High |
+| Secret Scanning | ❌ Disabled | **CRITICAL** |
+| Push Protection | ❌ Disabled | **CRITICAL** |
+| Dependabot | ⚠️ Alerts only | Medium |
 
 ---
 
@@ -170,7 +268,7 @@ Use British spelling throughout documentation and user-facing text.
   - Linux: `~/.config/git-proxy-mcp/config.json`
   - macOS: `~/Library/Application Support/git-proxy-mcp/config.json`
   - Windows: `%APPDATA%\git-proxy-mcp\config.json`
-- [ ] Create `config/example-config.json` as reference
+- [x] Create `config/example-config.json` as reference
 - [ ] Config is loaded ONCE at startup (no hot-reload for security)
 
 ### 1.2 Credential Management
@@ -550,6 +648,17 @@ panic = "abort"
 | Git LFS? | Defer to v1.1 | v1.0: detect & warn only |
 | Spelling? | British 🇬🇧 | colour, behaviour, organisation — it's posh! |
 | Feature tracking? | `features.json` | JSON format, per Anthropic guidance |
+
+---
+
+## References
+
+- **Open Source Guides:** https://opensource.guide/
+- **Contributor Covenant:** https://www.contributor-covenant.org/
+- **Keep a Changelog:** https://keepachangelog.com/
+- **Conventional Commits:** https://www.conventionalcommits.org/
+- **MCP Specification:** https://modelcontextprotocol.io/
+- **git2-rs Documentation:** https://docs.rs/git2
 
 ---
 
