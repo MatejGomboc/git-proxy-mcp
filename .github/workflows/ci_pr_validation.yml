@@ -1,124 +1,104 @@
 name: CI - PR Validation
 
 permissions:
-  contents: read
+    contents: read
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: ["**"]
-  workflow_dispatch:
+    push:
+        branches: [main] # Populate cache after PR merges
+
+    pull_request:
+        branches: ["**"]
+
+    workflow_dispatch:
 
 env:
-  CARGO_TERM_COLOR: always
-  RUSTFLAGS: "-Dwarnings"
+    CARGO_TERM_COLOR: always
+    RUSTFLAGS: "-Dwarnings"
 
 jobs:
-  fmt:
-    name: Format Check
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    # Fast checks that don't need platform matrix or heavy caching
+    quick-checks:
+        name: Quick Checks (fmt, docs)
+        runs-on: ubuntu-latest
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
 
-      - name: Check formatting
-        run: cargo fmt --all --check
+            - name: Install Rust toolchain
+              uses: dtolnay/rust-toolchain@stable
+              with:
+                  components: rustfmt
 
-  clippy:
-    name: Clippy (${{ matrix.os }})
-    needs: fmt
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+            - name: Check formatting
+              run: cargo fmt --all --check
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
+            - name: Check documentation
+              run: cargo doc --no-deps --document-private-items
+              env:
+                  RUSTDOCFLAGS: "-Dwarnings"
 
-      - name: Run Clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+    # Combined build job: clippy + build + test in one job per platform
+    # This avoids recompilation across separate jobs
+    build:
+        name: Build (${{ matrix.os }})
+        needs: quick-checks
+        timeout-minutes: 20
 
-  build:
-    name: Build (${{ matrix.os }})
-    needs: clippy
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+        strategy:
+            fail-fast: false
+            matrix:
+                os: [ubuntu-latest, macos-latest, windows-latest]
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        runs-on: ${{ matrix.os }}
 
-      - name: Build
-        run: cargo build --verbose
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
 
-      - name: Build (release)
-        run: cargo build --release --verbose
+            - name: Install Rust toolchain
+              uses: dtolnay/rust-toolchain@stable
+              with:
+                  components: clippy
 
-  test:
-    name: Test (${{ matrix.os }})
-    needs: build
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+            # Cache cargo registry, index, and build artifacts
+            # PRs: restore only (read-only). Main: restore and save.
+            - name: Cache Rust dependencies
+              uses: Swatinem/rust-cache@v2
+              with:
+                  # Only save cache on main branch pushes
+                  save-if: ${{ github.ref == 'refs/heads/main' }}
+                  # Shared cache key prefix
+                  prefix-key: "v1-rust"
+                  # Include Cargo.lock in cache key
+                  cache-on-failure: true
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+            - name: Run Clippy
+              run: cargo clippy --all-targets --all-features -- -D warnings
 
-      - name: Run tests
-        run: cargo test --verbose
+            - name: Build (debug)
+              run: cargo build --verbose
 
-  docs:
-    name: Documentation
-    needs: fmt
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+            - name: Build (release)
+              run: cargo build --release --verbose
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+            - name: Run tests
+              run: cargo test --verbose
 
-      - name: Check documentation
-        run: cargo doc --no-deps --document-private-items
-        env:
-          RUSTDOCFLAGS: "-Dwarnings"
+    # Summary job for branch protection
+    ci-success:
+        name: CI Success
+        needs: [quick-checks, build]
+        runs-on: ubuntu-latest
+        if: always()
 
-  ci-success:
-    name: CI Success
-    needs: [fmt, clippy, build, test, docs]
-    runs-on: ubuntu-latest
-    if: always()
-    steps:
-      - name: Check if all jobs succeeded
-        run: |
-          if [[ "${{ needs.fmt.result }}" != "success" ]] || \
-             [[ "${{ needs.clippy.result }}" != "success" ]] || \
-             [[ "${{ needs.build.result }}" != "success" ]] || \
-             [[ "${{ needs.test.result }}" != "success" ]] || \
-             [[ "${{ needs.docs.result }}" != "success" ]]; then
-            echo "One or more jobs failed"
-            exit 1
-          fi
-          echo "All jobs completed successfully"
+        steps:
+            - name: Check if all jobs succeeded
+              run: |
+                  if [[ "${{ needs.quick-checks.result }}" != "success" ]] || \
+                     [[ "${{ needs.build.result }}" != "success" ]]; then
+                      echo "One or more jobs failed"
+                      exit 1
+                  fi
+                  echo "All jobs completed successfully"

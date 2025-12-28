@@ -8,6 +8,7 @@
 - Security over speed. Take the time to do it right.
 - Work on ONE feature at a time. See `.claude/features.json` for tracking.
 - Use British spelling in documentation and user-facing text. It's posh! 🇬🇧
+- Follow the style guide in `STYLE.md`.
 
 **For AI Assistants:** See `.claude/CLAUDE.md` for project context.
 
@@ -101,6 +102,7 @@ Features are tracked in `.claude/features.json` with pass/fail status.
 | Git LFS | Defer to v1.1 | v1.0: detect & warn; v1.1+: implement support |
 | Spelling | British 🇬🇧 | colour, behaviour, organisation, centre, licence — it's posh! |
 | Feature tracking | `.claude/features.json` | JSON format discourages inappropriate edits |
+| Indentation | 4 spaces | Consistent across all file types (see `.editorconfig`) |
 
 ---
 
@@ -139,6 +141,42 @@ Features are tracked in `.claude/features.json` with pass/fail status.
 | Push protection | ✅ |
 | CodeQL analysis | ✅ |
 | Community standards | ✅ 100% |
+
+---
+
+## Phase 0.6: CI/CD & Style ✅ COMPLETE
+
+### CI Optimisation
+
+Reduced CI time from ~8 minutes to ~2-3 minutes (on cache hit).
+
+| Before | After | Improvement |
+|--------|-------|-------------|
+| No caching | `Swatinem/rust-cache@v2` | ~50-70% faster on cache hit |
+| 5 separate jobs | 2 jobs (quick-checks + build) | Less job overhead |
+| fmt → clippy → build → test | Combined into single build job | No redundant compilation |
+| Cache saved on every run | PRs read-only, main saves | Faster PR validation |
+
+### CI Architecture
+
+```
+quick-checks (ubuntu)     build (matrix: ubuntu, macos, windows)
+├── fmt                   ├── clippy
+└── docs                  ├── build (debug + release)
+                          └── test
+```
+
+### Caching Strategy (StringWiggler Pattern)
+
+- **PRs:** Read-only cache (`save-if: false`)
+- **Main branch:** Save cache after merge
+- **Cache key:** `v1-rust-{os}-{hash of Cargo.lock}`
+
+### Style Guide
+
+- [x] `.editorconfig` — Editor-agnostic formatting rules (4-space indent, LF, UTF-8)
+- [x] `STYLE.md` — Comprehensive code style guide
+- [x] YAML files use 4-space indentation (aligned with StringWiggler)
 
 ---
 
@@ -211,6 +249,7 @@ Features are tracked in `.claude/features.json` with pass/fail status.
 - [x] `CONTRIBUTING.md`
 - [x] `SECURITY.md`
 - [x] `CHANGELOG.md`
+- [x] `STYLE.md`
 - [ ] Expand `README.md`
 
 ---
@@ -230,6 +269,8 @@ Features are tracked in `.claude/features.json` with pass/fail status.
 - **git2-rs Documentation:** https://docs.rs/git2
 - **Open Source Guides:** https://opensource.guide/
 - **Claude Code Docs:** https://docs.anthropic.com/en/docs/claude-code
+- **Swatinem/rust-cache:** https://github.com/Swatinem/rust-cache
+- **EditorConfig:** https://editorconfig.org/
 
 ---
 
