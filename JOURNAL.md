@@ -77,14 +77,16 @@ See `TODO.md` for the full battle plan.
 - ✅ CI workflow updated for Rust (fmt, clippy, build, test on all platforms)
 - ✅ VS Code extensions and settings updated for Rust
 - ✅ `config/example-config.json` created
+- ✅ GitHub repo settings configured (Actions, CodeQL, security)
+- ✅ Fixed clippy lint errors (thiserror version, multiple_crate_versions, unnecessary_wraps)
 
 **Awaiting verification:**
-- ⏳ CI passes on all platforms (ubuntu, macos, windows)
+- ⏳ CI passes on all platforms (ubuntu, macos, windows) — re-running after fixes
 - ⏳ Devcontainer works in VS Code
 
 **Next steps:**
 1. Verify CI passes — check GitHub Actions
-2. Test devcontainer locally
+2. Test devcontainer locally (optional)
 3. Mark Phase 0 features as complete in `features.json`
 4. Begin Phase 1: Core Infrastructure
 
@@ -93,6 +95,47 @@ See `TODO.md` for the full battle plan.
 ---
 
 ## Session Log
+
+### 2025-12-28 — Repository Configuration & CI Fixes (Claude + MatejGomboc)
+
+**What happened:**
+- Configured GitHub repository settings:
+  - Enabled GitHub Actions with restricted permissions
+  - Added `dtolnay/rust-toolchain@stable` to allowed actions
+  - Enabled CodeQL analysis for Rust and GitHub Actions
+  - Enabled Copilot Autofix for CodeQL alerts
+  - Configured code review limits
+  - Set workflow permissions to read-only (principle of least privilege)
+  - Configured fork PR approval requirements
+- Fixed CI failures caused by clippy lints:
+  - Changed `thiserror` from v2 to v1 (to match git2's dependency)
+  - Added `multiple_crate_versions = "allow"` (transitive deps we can't control)
+  - Added `#[allow(clippy::unnecessary_wraps)]` to main() with explanation
+
+**Files modified:**
+- `Cargo.toml` — Fixed thiserror version, added clippy lint allow
+- `src/main.rs` — Added allow attribute and rustdoc for main()
+
+**Commits made:**
+1. `fix: Resolve clippy dependency version warnings`
+2. `fix: Allow unnecessary_wraps lint on main()`
+
+**Repository settings configured:**
+| Setting | Value |
+|---------|-------|
+| Actions | Restricted (MatejGomboc + GitHub + dtolnay/rust-toolchain) |
+| CodeQL | Enabled (Rust, GitHub Actions) |
+| Copilot Autofix | On |
+| Fork PR approval | All external contributors |
+| Workflow permissions | Read-only |
+
+**Next steps:**
+1. Wait for CI to pass
+2. Set up branch protection rules for `main`
+3. Update `features.json` to mark Phase 0 complete
+4. Begin Phase 1: Core Infrastructure
+
+---
 
 ### 2025-12-28 — Phase 0 Implementation (Claude + MatejGomboc)
 
@@ -132,12 +175,6 @@ See `TODO.md` for the full battle plan.
 10. `feat: Update VS Code settings for Rust`
 11. `fix: Correct Rust toolchain action name`
 12. `docs: Add example configuration file`
-
-**Next session should:**
-1. Verify CI passed on all platforms
-2. Test devcontainer in VS Code
-3. Update `features.json` to mark Phase 0 features as complete
-4. Begin Phase 1: Core Infrastructure (config loading, credential management)
 
 ---
 
