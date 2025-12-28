@@ -18,6 +18,10 @@ cargo fmt                      # Format
 - British spelling in docs 🇬🇧 (colour, behaviour, organisation)
 - Conventional commits: `feat:`, `fix:`, `docs:`, `chore:`
 
+## 🚫 OFF LIMITS — All AI Specialists
+
+**`CODE_OF_CONDUCT.md`** — Owned exclusively by the repository owner and their leadership. No AI specialist may modify this file under any circumstances. If changes are needed, flag it in JOURNAL.md for the owner.
+
 ## Project Structure
 
 ```
