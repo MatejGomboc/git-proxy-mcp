@@ -6,18 +6,12 @@ Handoff document for Claude instances. Read this first to understand current sta
 
 ## Current Status
 
-**Phase:** 0.5 Complete → Ready for Phase 1
+**Phase:** 0.6 Complete → Ready for Phase 1
 
 **Completed:**
 - ✅ Phase 0: Project setup (devcontainer, Cargo.toml, CI)
 - ✅ Phase 0.5: Open source best practices
-  - SECURITY.md, CONTRIBUTING.md, CHANGELOG.md
-  - Issue/PR templates
-  - CODE_OF_CONDUCT.md (owner created)
-  - Branch protection on `main`
-  - Tag protection on all tags
-  - Secret scanning & push protection enabled
-  - CodeQL analysis enabled
+- ✅ Phase 0.6: CI/CD optimisation (caching, job consolidation)
 
 **Next:** Phase 1 — Core Infrastructure
 1. `src/config/` — Config file loading & validation
@@ -28,6 +22,28 @@ Handoff document for Claude instances. Read this first to understand current sta
 
 ## Session Log
 
+### 2025-12-28 — CI/CD Optimisation (Phase 0.6)
+
+**Problem:** CI was taking ~8 minutes per PR.
+
+**Solution:** Applied StringWiggler caching pattern:
+- Added `Swatinem/rust-cache@v2` for cargo registry/target caching
+- PRs use read-only cache, main branch saves cache
+- Combined 5 jobs into 2 (quick-checks + build matrix)
+- Eliminated redundant compilation across jobs
+
+**Expected improvement:** ~50-70% faster on cache hits (~2-3 min)
+
+**CI Architecture:**
+```
+quick-checks (ubuntu)     build (matrix: ubuntu, macos, windows)
+├── fmt                   ├── clippy
+└── docs                  ├── build (debug + release)
+                          └── test
+```
+
+---
+
 ### 2025-12-28 — Claude Code Setup & Phase 0.5 Completion
 
 **What happened:**
@@ -36,19 +52,9 @@ Handoff document for Claude instances. Read this first to understand current sta
 - Owner completed remaining setup:
   - Created CODE_OF_CONDUCT.md
   - Enabled Secret Scanning & Push Protection
-  - Set up branch protection for `main` (PRs required, CI must pass, CodeQL required)
-  - Set up tag protection (restrict create/update/delete, block force push)
+  - Set up branch protection for `main`
+  - Set up tag protection
 - Phase 0 + 0.5 now fully complete!
-
-**Repository Security Summary:**
-| Protection | Status |
-|------------|--------|
-| Branch protection (`main`) | ✅ |
-| Tag protection | ✅ |
-| Secret scanning | ✅ |
-| Push protection | ✅ |
-| CodeQL analysis | ✅ |
-| Community standards | ✅ 100% |
 
 ---
 
