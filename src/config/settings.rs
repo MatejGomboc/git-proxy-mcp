@@ -8,13 +8,7 @@ use std::path::PathBuf;
 use secrecy::SecretString;
 use serde::Deserialize;
 
-use crate::auth::{
-    AuthMethod,
-    Credential,
-    PatCredential,
-    SshAgentCredential,
-    SshKeyCredential,
-};
+use crate::auth::{AuthMethod, Credential, PatCredential, SshAgentCredential, SshKeyCredential};
 use crate::config::expand_tilde;
 use crate::error::ConfigError;
 
@@ -203,10 +197,7 @@ impl AuthConfig {
 impl std::fmt::Debug for AuthConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Pat { .. } => f
-                .debug_struct("Pat")
-                .field("token", &"[REDACTED]")
-                .finish(),
+            Self::Pat { .. } => f.debug_struct("Pat").field("token", &"[REDACTED]").finish(),
             Self::SshKey {
                 key_path,
                 passphrase,
