@@ -29,6 +29,12 @@ struct Args {
     quiet: bool,
 }
 
+/// Entry point for the git-proxy-mcp server.
+///
+/// # Errors
+///
+/// Returns an error if configuration loading or MCP server initialisation fails.
+#[allow(clippy::unnecessary_wraps)] // Will return errors once config/server is implemented
 fn main() -> Result<()> {
     let args = Args::parse();
 
