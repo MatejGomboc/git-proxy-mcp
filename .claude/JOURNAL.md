@@ -8,7 +8,7 @@ Handoff document for Claude specialist agents. Read this first to understand cur
 
 **Phase:** 1 — Core Infrastructure (in progress)
 
-**Last Specialist:** 🔒 Security Lead (credential types)
+**Last Specialist:** ⚙️ Core Developer (config parsing)
 
 **Completed:**
 - ✅ Phase 0: Project setup (Cargo.toml, CI, VS Code config)
@@ -16,13 +16,14 @@ Handoff document for Claude specialist agents. Read this first to understand cur
 - ✅ Phase 0.6: CI/CD optimisation (caching, job consolidation)
 - ✅ `src/auth/credentials.rs` — Secure credential types with secrecy crate
 - ✅ `src/error.rs` — Error types (security-aware)
+- ✅ `src/config/` — Config file loading & validation
 
 **Next:**
-1. `src/config/` — Config file loading & validation (parse into credential types)
-2. `src/auth/matcher.rs` — URL pattern matching for credentials
-3. Wire up config loading in main.rs
+1. `src/auth/matcher.rs` — URL pattern matching for credentials (use `glob` crate)
+2. MCP server skeleton (`src/mcp/`)
+3. Git operations (`src/git/`)
 
-**Suggested Next Specialist:** ⚙️ Core Developer (`/project:core`)
+**Suggested Next Specialist:** 🪟 Windows (`/project:windows`) — or continue with ⚙️ Core for URL matcher
 
 ---
 
@@ -31,8 +32,8 @@ Handoff document for Claude specialist agents. Read this first to understand cur
 | Specialist | Command | Status |
 |------------|---------|--------|
 | 🔒 Security Lead | `/project:security` | ✅ Done (credential types) |
-| ⚙️ Core Developer | `/project:core` | 👈 Next up |
-| 🪟 Windows | `/project:windows` | Ready |
+| ⚙️ Core Developer | `/project:core` | ✅ Done (config parsing) |
+| 🪟 Windows | `/project:windows` | 👈 Next up |
 | 🍎 macOS | `/project:macos` | Ready |
 | 🐧 Linux | `/project:linux` | Ready |
 | 🚀 DevOps | `/project:devops` | Ready |
@@ -68,6 +69,51 @@ When ending your session, add an entry like this:
 ---
 
 ## Session Log
+
+### 2025-12-28 — ⚙️ Config File Parsing
+
+**Specialist:** Core Developer
+
+**What I did:**
+- Created `src/config/mod.rs` with:
+  - `load_config()` — loads and validates config from file
+  - `default_config_path()` — platform-specific default location
+  - `expand_tilde()` — expands `~` in SSH key paths
+- Created `src/config/settings.rs` with:
+  - `Config` — root configuration structure
+  - `RemoteConfig` — remote with name, URL pattern, auth
+  - `AuthConfig` — tagged enum for PAT/SSH key/SSH agent
+  - `AiIdentity` — commit author identity
+  - `SecurityConfig` — force push, protected branches, allowlists
+  - `LoggingConfig` — log level and audit path
+- Updated `src/main.rs` to load and display config on startup
+- Added comprehensive unit tests for parsing and validation
+
+**Decisions made:**
+- Used `#[serde(deny_unknown_fields)]` for strict parsing — catches typos
+- Secrets deserialised directly into `SecretString` via custom deserialiser
+- Custom `Debug` impl for `AuthConfig` shows `[REDACTED]`
+- `Config::into_credentials()` converts parsed config to secure types
+- Tilde expansion happens at conversion time, not parse time
+- Empty remotes list is a validation error
+
+**Security properties:**
+- ✅ Tokens go directly from JSON → `SecretString` (never plain String)
+- ✅ `Debug` output tested to not contain secrets
+- ✅ Passphrase is optional and also uses `SecretString`
+
+**For next specialist (🪟 Windows or ⚙️ Core):**
+- URL matcher (`src/auth/matcher.rs`) still needed — use `glob` crate
+- Platform specialists have nothing to do yet (no credential store integration)
+- Could continue with MCP server skeleton if matcher is deferred
+
+**Stacked PR note:**
+- This PR is based on `feat/auth-credential-types` (PR #7)
+- Merge PR #7 first, then this one
+
+**PR:** https://github.com/MatejGomboc/git-proxy-mcp/pull/8 (pending creation)
+
+---
 
 ### 2025-12-28 — 🔒 Secure Credential Types
 
@@ -217,6 +263,7 @@ Credentials NEVER appear in MCP responses.
 | `clap` | CLI args |
 | `tracing` | Logging (stderr only) |
 | `secrecy` | Credential handling |
+| `dirs` | Platform-specific paths |
 
 ---
 
