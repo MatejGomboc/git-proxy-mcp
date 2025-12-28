@@ -9,7 +9,7 @@
 - Work on ONE feature at a time. See `.claude/features.json` for tracking.
 - Use British spelling in documentation and user-facing text. It's posh! 🇬🇧
 
-**For AI Assistants:** See `.claude/INSTRUCTIONS.md` for quick start guide.
+**For AI Assistants:** See `.claude/CLAUDE.md` for project context.
 
 ---
 
@@ -104,102 +104,45 @@ Features are tracked in `.claude/features.json` with pass/fail status.
 
 ---
 
-## Style Guidelines
+## Phase 0: Project Setup ✅ COMPLETE
 
-### British Spelling 🇬🇧
-
-Use British spelling throughout documentation and user-facing text.
-
-| ❌ American | ✅ British |
-|-------------|------------|
-| color | colour |
-| behavior | behaviour |
-| organization | organisation |
-| center | centre |
-| license (noun) | licence |
-| analyze | analyse |
-| initialize | initialise |
-| customize | customise |
-| serialized | serialised |
-
-**Note:** Code identifiers (variable names, function names) may use American spelling where it matches Rust/library conventions.
+- [x] Devcontainer configuration
+- [x] Cargo.toml with dependencies
+- [x] CI workflow (fmt, clippy, build, test)
+- [x] VS Code configuration
+- [x] GitHub Actions with restricted permissions
+- [x] CodeQL analysis enabled
 
 ---
 
-## Phase 0: Project Setup ✅
+## Phase 0.5: Open Source Best Practices ✅ COMPLETE
 
-### 0.1 Development Environment
-- [x] Create `.devcontainer/devcontainer.json` for VS Code / Codespaces / CI
-- [x] Create `.devcontainer/Dockerfile` with Rust toolchain
-- [x] Include: rustc, cargo, clippy, rustfmt, rust-analyzer, git, OpenSSL dev libs
-- [ ] Test devcontainer works in VS Code and GitHub Codespaces
+- [x] `SECURITY.md` — Vulnerability reporting policy
+- [x] `CONTRIBUTING.md` — Contributor guidelines
+- [x] `CHANGELOG.md` — Keep a Changelog format
+- [x] `CODE_OF_CONDUCT.md` — Contributor Covenant
+- [x] Issue templates (bug report, feature request)
+- [x] PR template with security checklist
+- [x] `.claude/CLAUDE.md` — AI assistant context (Claude Code format)
+- [x] Secret Scanning enabled
+- [x] Push Protection enabled
+- [x] Branch protection on `main` (PRs required, CI must pass, CodeQL required)
+- [x] Tag protection (restrict create/update/delete, block force push)
 
-### 0.2 Build Configuration
-- [x] Create `Cargo.toml` with dependencies
-- [x] Create `src/main.rs` skeleton
-- [x] Create `.gitignore` for Rust
-- [x] Add `rust-toolchain.toml` for consistent Rust version (stable)
-- [x] Create `rustfmt.toml` with formatting rules
-- [x] Configure clippy lints in `Cargo.toml`
+### Repository Security Summary
 
-### 0.3 CI/CD Workflows
-- [x] Update `.github/workflows/ci_pr_validation.yml` for Rust
-- [ ] Add `.github/workflows/release.yml` for cross-platform binary releases
-
-### 0.4 VS Code Configuration
-- [x] Update `.vscode/extensions.json` for Rust (rust-analyzer, etc.)
-- [x] Update `.vscode/settings.json` for Rust
-
-### 0.5 GitHub Repository Settings
-- [x] Enable GitHub Actions with restricted permissions
-- [x] Enable CodeQL analysis
-- [ ] Enable Secret Scanning (critical!)
-- [ ] Enable Push Protection
-- [ ] Set up branch protection rules for `main`
-
-### 0.6 Verification
-- [ ] Verify project builds locally
-- [ ] Verify CI passes on all platforms
-- [ ] Verify devcontainer works
+| Protection | Status |
+|------------|--------|
+| Branch protection (`main`) | ✅ |
+| Tag protection | ✅ |
+| Secret scanning | ✅ |
+| Push protection | ✅ |
+| CodeQL analysis | ✅ |
+| Community standards | ✅ 100% |
 
 ---
 
-## Phase 0.5: Open Source Best Practices ✅
-
-### 0.5.1 Security Documentation
-- [x] Create `SECURITY.md`
-
-### 0.5.2 Community Documentation
-- [ ] Create `CODE_OF_CONDUCT.md` *(owner to create — requires personal contact info)*
-- [x] Create `CONTRIBUTING.md`
-
-### 0.5.3 Issue & PR Templates
-- [x] Create `.github/ISSUE_TEMPLATE/bug_report.md`
-- [x] Create `.github/ISSUE_TEMPLATE/feature_request.md`
-- [x] Create `.github/ISSUE_TEMPLATE/config.yml`
-- [x] Create `.github/PULL_REQUEST_TEMPLATE.md`
-
-### 0.5.4 Project Documentation
-- [x] Create `CHANGELOG.md`
-- [x] Create `.claude/` folder for AI assistant documentation
-- [ ] Expand `README.md`
-
-### Open Source Checklist Summary
-
-| Item | Status |
-|------|--------|
-| LICENSE | ✅ Done |
-| README.md | ⚠️ Basic |
-| CONTRIBUTING.md | ✅ Done |
-| CODE_OF_CONDUCT.md | ⏳ Owner |
-| SECURITY.md | ✅ Done |
-| CHANGELOG.md | ✅ Done |
-| Issue/PR Templates | ✅ Done |
-| .claude/ folder | ✅ Done |
-
----
-
-## Phase 1: Core Infrastructure
+## Phase 1: Core Infrastructure ← CURRENT
 
 ### 1.1 Configuration System
 - [ ] Define config file JSON schema
@@ -286,7 +229,7 @@ Use British spelling throughout documentation and user-facing text.
 - **MCP Specification:** https://modelcontextprotocol.io/
 - **git2-rs Documentation:** https://docs.rs/git2
 - **Open Source Guides:** https://opensource.guide/
-- **Contributor Covenant:** https://www.contributor-covenant.org/
+- **Claude Code Docs:** https://docs.anthropic.com/en/docs/claude-code
 
 ---
 
