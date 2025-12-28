@@ -1,21 +1,18 @@
 {
     "recommendations": [
-        "dan-c-underwood.arm",
+        "rust-lang.rust-analyzer",
+        "tamasfe.even-better-toml",
+        "serayuzgur.crates",
+        "fill-labs.dependi",
+        "vadimcn.vscode-lldb",
+        "usernamehw.errorlens",
+        "editorconfig.editorconfig",
         "davidanson.vscode-markdownlint",
         "donjayamanne.githistory",
-        "editorconfig.editorconfig",
-        "felipecaputo.git-project-manager",
         "github.vscode-github-actions",
-        "Gruntfuggly.todo-tree",
-        "ms-vscode.cmake-tools",
-        "ms-vscode.cpptools-extension-pack",
-        "ms-vscode.cpptools-themes",
-        "ms-vscode.hexeditor",
-        "ms-vscode.notepadplusplus-keybindings",
+        "gruntfuggly.todo-tree",
         "redhat.vscode-yaml",
-        "trond-snekvik.gnu-mapfiles",
-        "xaver.clang-format",
-        "usernamehw.errorlens",
-        "GitHub.copilot"
+        "ms-vscode.hexeditor",
+        "github.copilot"
     ]
 }
