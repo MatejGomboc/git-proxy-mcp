@@ -65,23 +65,81 @@ See `TODO.md` for the full battle plan.
 
 ## Current Status
 
-### Phase: 0 — Project Setup (NOT STARTED)
+### Phase: 0 — Project Setup (IN PROGRESS)
+
+**Completed:**
+- ✅ `.devcontainer/` created (devcontainer.json + Dockerfile)
+- ✅ `Cargo.toml` with all dependencies
+- ✅ `src/main.rs` skeleton with CLI parsing
+- ✅ `.gitignore` for Rust
+- ✅ `rust-toolchain.toml` (stable)
+- ✅ `rustfmt.toml` (formatting rules)
+- ✅ CI workflow updated for Rust (fmt, clippy, build, test on all platforms)
+- ✅ VS Code extensions and settings updated for Rust
+- ✅ `config/example-config.json` created
+
+**Awaiting verification:**
+- ⏳ CI passes on all platforms (ubuntu, macos, windows)
+- ⏳ Devcontainer works in VS Code
 
 **Next steps:**
-1. Create `.devcontainer/` for VS Code / Codespaces / CI
-2. Create `Cargo.toml` with dependencies
-3. Create `src/main.rs` skeleton ("Hello World")
-4. Create `.gitignore` for Rust
-5. Update CI workflow for Rust (currently configured for C++ ARM project)
-6. Update VS Code extensions for Rust
+1. Verify CI passes — check GitHub Actions
+2. Test devcontainer locally
+3. Mark Phase 0 features as complete in `features.json`
+4. Begin Phase 1: Core Infrastructure
 
 **Blockers:** None
-
-**Notes:** The existing CI workflow (`.github/workflows/ci_pr_validation.yml`) is from another project and needs to be replaced with Rust-specific steps.
 
 ---
 
 ## Session Log
+
+### 2025-12-28 — Phase 0 Implementation (Claude + MatejGomboc)
+
+**What happened:**
+- Created `.devcontainer/devcontainer.json` and `Dockerfile`
+- Created `Cargo.toml` with all planned dependencies
+- Created `src/main.rs` with clap CLI skeleton
+- Created `.gitignore`, `rust-toolchain.toml`, `rustfmt.toml`
+- Updated CI workflow from C++ ARM to Rust (fmt, clippy, build, test, docs)
+- Updated VS Code extensions and settings for Rust
+- Created `config/example-config.json` with all auth types documented
+- Fixed CI workflow action name (rust-action → rust-toolchain)
+
+**Files created/modified:**
+- `.devcontainer/devcontainer.json` — NEW
+- `.devcontainer/Dockerfile` — NEW
+- `Cargo.toml` — NEW
+- `src/main.rs` — NEW
+- `.gitignore` — NEW
+- `rust-toolchain.toml` — NEW
+- `rustfmt.toml` — NEW
+- `.github/workflows/ci_pr_validation.yml` — REPLACED (was C++)
+- `.vscode/extensions.json` — UPDATED (Rust extensions)
+- `.vscode/settings.json` — UPDATED (rust-analyzer settings)
+- `config/example-config.json` — NEW
+
+**Commits made:**
+1. `feat: Add devcontainer configuration`
+2. `feat: Add Dockerfile for devcontainer`
+3. `feat: Add Cargo.toml with all dependencies`
+4. `feat: Add src/main.rs skeleton with CLI parsing`
+5. `chore: Add .gitignore for Rust project`
+6. `chore: Add rust-toolchain.toml for consistent Rust version`
+7. `chore: Add rustfmt.toml for consistent code formatting`
+8. `feat: Update CI workflow for Rust`
+9. `feat: Update VS Code extensions for Rust`
+10. `feat: Update VS Code settings for Rust`
+11. `fix: Correct Rust toolchain action name`
+12. `docs: Add example configuration file`
+
+**Next session should:**
+1. Verify CI passed on all platforms
+2. Test devcontainer in VS Code
+3. Update `features.json` to mark Phase 0 features as complete
+4. Begin Phase 1: Core Infrastructure (config loading, credential management)
+
+---
 
 ### 2025-12-28 — Initial Planning (Claude + MatejGomboc)
 
@@ -117,13 +175,6 @@ See `TODO.md` for the full battle plan.
 | Git LFS | v1.1 (detect & warn in v1.0) |
 | Spelling | British 🇬🇧 |
 | Feature tracking | `features.json` (not Markdown) |
-
-**Next session should:**
-1. Start Phase 0: Project Setup
-2. Create devcontainer
-3. Create Cargo.toml and src/main.rs
-4. Update CI workflow for Rust
-5. Get "Hello World" compiling on all platforms
 
 ---
 
@@ -167,66 +218,33 @@ Credentials NEVER appear in MCP responses.
 
 ---
 
-## File Structure (Planned)
+## File Structure (Current)
 
 ```
 git-proxy-mcp/
 ├── .devcontainer/
-│   ├── devcontainer.json
-│   └── Dockerfile
+│   ├── devcontainer.json  ✅
+│   └── Dockerfile         ✅
 ├── .github/
 │   └── workflows/
-│       ├── ci_pr_validation.yml
-│       └── release.yml
+│       └── ci_pr_validation.yml  ✅
 ├── .vscode/
-│   ├── extensions.json
-│   └── settings.json
+│   ├── extensions.json    ✅
+│   └── settings.json      ✅
 ├── config/
-│   └── example-config.json
+│   └── example-config.json  ✅
 ├── src/
-│   ├── main.rs
-│   ├── error.rs
-│   ├── auth/
-│   │   ├── mod.rs
-│   │   ├── credentials.rs
-│   │   └── matcher.rs
-│   ├── config/
-│   │   ├── mod.rs
-│   │   └── settings.rs
-│   ├── git/
-│   │   ├── mod.rs
-│   │   ├── proxy.rs
-│   │   ├── callbacks.rs
-│   │   ├── clone.rs
-│   │   ├── pull.rs
-│   │   ├── push.rs
-│   │   ├── fetch.rs
-│   │   ├── remote_info.rs
-│   │   └── lfs.rs
-│   ├── mcp/
-│   │   ├── mod.rs
-│   │   ├── server.rs
-│   │   ├── transport.rs
-│   │   └── schema.rs
-│   └── security/
-│       ├── mod.rs
-│       ├── audit.rs
-│       └── policy.rs
-├── tests/
-├── Cargo.toml
-├── Cargo.lock
-├── rust-toolchain.toml
-├── rustfmt.toml
-├── .gitignore
-├── .editorconfig
-├── LICENSE
-├── README.md
-├── TODO.md
-├── JOURNAL.md
-├── features.json
-├── CHANGELOG.md
-├── CONTRIBUTING.md
-└── SECURITY.md
+│   └── main.rs            ✅
+├── Cargo.toml             ✅
+├── rust-toolchain.toml    ✅
+├── rustfmt.toml           ✅
+├── .gitignore             ✅
+├── .editorconfig          ✅
+├── LICENSE                ✅
+├── README.md              ✅
+├── TODO.md                ✅
+├── JOURNAL.md             ✅
+└── features.json          ✅
 ```
 
 ---
