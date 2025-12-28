@@ -8,6 +8,7 @@
 - Security over speed. Take the time to do it right.
 - Work on ONE feature at a time. See `.claude/features.json` for tracking.
 - Use British spelling in documentation and user-facing text. It's posh! 🇬🇧
+- Follow the style guide in `STYLE.md`.
 
 **For AI Assistants:** See `.claude/CLAUDE.md` for project context.
 
@@ -101,6 +102,7 @@ Features are tracked in `.claude/features.json` with pass/fail status.
 | Git LFS | Defer to v1.1 | v1.0: detect & warn; v1.1+: implement support |
 | Spelling | British 🇬🇧 | colour, behaviour, organisation, centre, licence — it's posh! |
 | Feature tracking | `.claude/features.json` | JSON format discourages inappropriate edits |
+| Indentation | 4 spaces | Consistent across all file types (see `.editorconfig`) |
 
 ---
 
@@ -142,11 +144,11 @@ Features are tracked in `.claude/features.json` with pass/fail status.
 
 ---
 
-## Phase 0.6: CI/CD Optimisation ✅ COMPLETE
+## Phase 0.6: CI/CD & Style ✅ COMPLETE
+
+### CI Optimisation
 
 Reduced CI time from ~8 minutes to ~2-3 minutes (on cache hit).
-
-### Optimisations Applied
 
 | Before | After | Improvement |
 |--------|-------|-------------|
@@ -170,7 +172,11 @@ quick-checks (ubuntu)     build (matrix: ubuntu, macos, windows)
 - **Main branch:** Save cache after merge
 - **Cache key:** `v1-rust-{os}-{hash of Cargo.lock}`
 
-This prevents cache pollution from PR branches while keeping cache fresh from main.
+### Style Guide
+
+- [x] `.editorconfig` — Editor-agnostic formatting rules (4-space indent, LF, UTF-8)
+- [x] `STYLE.md` — Comprehensive code style guide
+- [x] YAML files use 4-space indentation (aligned with StringWiggler)
 
 ---
 
@@ -243,6 +249,7 @@ This prevents cache pollution from PR branches while keeping cache fresh from ma
 - [x] `CONTRIBUTING.md`
 - [x] `SECURITY.md`
 - [x] `CHANGELOG.md`
+- [x] `STYLE.md`
 - [ ] Expand `README.md`
 
 ---
@@ -263,6 +270,7 @@ This prevents cache pollution from PR branches while keeping cache fresh from ma
 - **Open Source Guides:** https://opensource.guide/
 - **Claude Code Docs:** https://docs.anthropic.com/en/docs/claude-code
 - **Swatinem/rust-cache:** https://github.com/Swatinem/rust-cache
+- **EditorConfig:** https://editorconfig.org/
 
 ---
 
