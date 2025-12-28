@@ -30,7 +30,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Error handling
-thiserror = "2"
+thiserror = "1"
 anyhow = "1"
 
 # Security - secure string handling with zeroize on drop
@@ -64,3 +64,5 @@ all = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 nursery = { level = "warn", priority = -1 }
 cargo = { level = "warn", priority = -1 }
+# Allow multiple versions of transitive dependencies (we can't control these)
+multiple_crate_versions = "allow"
