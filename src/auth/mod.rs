@@ -29,4 +29,6 @@
 
 pub mod credentials;
 
-pub use credentials::{AuthMethod, Credential, PatCredential, SshAgentCredential, SshKeyCredential};
+pub use credentials::{
+    AuthMethod, Credential, PatCredential, SshAgentCredential, SshKeyCredential,
+};
