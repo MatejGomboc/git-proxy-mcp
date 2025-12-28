@@ -79,6 +79,9 @@
 | Concurrent operations | ✅ Yes | Allow multiple repos to be accessed simultaneously |
 | Timeline priority | Security first | Take time to do it right, no rushing |
 | Transport | stdio only (v1) | Simplest, most secure for local MCP clients |
+| SSH keys | User manages | User sets up keys on PC, we reference path or use ssh-agent |
+| Large repos | Chunked streaming | Progress callbacks, stream data in chunks |
+| Git LFS | Defer to v1.1 | v1.0: detect & warn; v1.1+: implement support |
 
 ---
 
@@ -137,7 +140,8 @@
 - [ ] Create `src/auth/matcher.rs` — match URL to credential entry (glob patterns)
 - [ ] Support auth methods:
   - [ ] PAT (Personal Access Token) — HTTPS
-  - [ ] SSH key (file path, optional passphrase prompt at startup)
+  - [ ] SSH key file path (user manages keys, we reference)
+  - [ ] SSH agent (if available, use automatically)
   - [ ] Basic auth (username + password/token)
 - [ ] Use `secrecy` crate for sensitive strings (zeroize on drop)
 - [ ] **Credentials NEVER appear in**:
@@ -191,13 +195,14 @@ Define these MCP tools:
 - [ ] Create `src/git/proxy.rs` — core proxy logic
 - [ ] Create `src/git/callbacks.rs` — git2 credential callbacks
 - [ ] Credential callback injects auth WITHOUT exposing it
+- [ ] Progress callbacks for streaming/chunked operations
 
 ### 3.2 Clone Operation
 - [ ] Create `src/git/clone.rs`
 - [ ] Accept: remote URL, destination path, optional branch, optional depth
 - [ ] Match URL to credentials via `auth/matcher.rs`
 - [ ] Inject credentials via git2 RemoteCallbacks
-- [ ] Stream progress back to MCP client
+- [ ] Stream progress back to MCP client (chunked)
 - [ ] Return: success/failure, final path, branch info, commit hash
 
 ### 3.3 Pull Operation
@@ -223,6 +228,12 @@ Define these MCP tools:
 - [ ] Create `src/git/remote_info.rs`
 - [ ] `list_remote_branches`: ls-remote for branches
 - [ ] `list_remote_tags`: ls-remote for tags
+
+### 3.7 LFS Detection (v1.0)
+- [ ] Create `src/git/lfs.rs`
+- [ ] Detect if repo uses LFS (check `.gitattributes`)
+- [ ] Warn user: "This repo uses Git LFS. Large files are placeholders only."
+- [ ] Clone proceeds — code files work, LFS files are pointer files
 
 ---
 
@@ -366,17 +377,27 @@ Define these MCP tools:
 
 ---
 
-## Future Ideas (Post v1.0)
+## Version Roadmap
 
-- [ ] OS keychain integration for credential storage (keyring crate)
+### v1.0 — Core Functionality
+- Config, credentials, MCP server
+- clone, pull, push, fetch operations
+- Security guardrails, audit logging
+- Cross-platform binaries
+
+### v1.1 — Git LFS Support
+- [ ] Shell out to `git-lfs` binary if available
+- [ ] Or implement LFS protocol directly
+- [ ] Automatic LFS pull after clone
+
+### v1.2+ — Future
+- [ ] OS keychain integration (keyring crate)
 - [ ] Encrypted config file option
-- [ ] Sparse checkout support (clone only specific directories)
-- [ ] Git LFS support
+- [ ] Sparse checkout support
 - [ ] Submodule support
-- [ ] PR/MR creation integration (GitHub/GitLab APIs)
-- [ ] Streamable HTTP transport (for remote MCP scenarios)
-- [ ] Web UI for config management
-- [ ] Package managers: Homebrew, apt, winget, cargo install
+- [ ] PR/MR creation integration
+- [ ] Streamable HTTP transport
+- [ ] Package managers: Homebrew, apt, winget
 
 ---
 
@@ -477,22 +498,17 @@ panic = "abort"
 
 ---
 
-## Open Questions
-
-1. **SSH key passphrase handling** — Prompt at startup? Require unencrypted keys? Use ssh-agent?
-2. **Large repo handling** — Memory limits? Stream in chunks? Progress reporting?
-3. **Git LFS** — Support in v1.0 or defer to future?
-
----
-
 ## Resolved Questions
 
-| Question | Decision |
-|----------|----------|
-| Config hot-reload? | No — security concern, require restart |
-| Concurrent operations? | Yes — allow multiple repos simultaneously |
-| Timeline? | Security over speed, no rushing |
-| Devcontainer? | Yes — for VS Code, CI/CD, Codespaces |
+| Question | Decision | Rationale |
+|----------|----------|-----------|
+| Config hot-reload? | No | Security: prevent runtime injection |
+| Concurrent operations? | Yes | Allow multiple repos simultaneously |
+| Timeline? | Security first | No rushing, do it right |
+| Devcontainer? | Yes | VS Code, CI/CD, Codespaces consistency |
+| SSH keys? | User manages | We reference path or use ssh-agent |
+| Large repos? | Chunked streaming | Progress callbacks, stream in chunks |
+| Git LFS? | Defer to v1.1 | v1.0: detect & warn only |
 
 ---
 
