@@ -1,0 +1,21 @@
+# http://editorconfig.org
+# VS2022: https://marketplace.visualstudio.com/items?itemName=MadsKristensen.TrailingWhitespace64
+# VSCode: https://marketplace.visualstudio.com/items?itemName=EditorConfig.EditorConfig
+
+# top-most EditorConfig file
+root = true
+
+# default settings:
+[*]
+indent_style = space
+indent_size = 4
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# Markdown files need trailing whitespace for line breaks
+[*.md]
+trim_trailing_whitespace = false
+
+# all Shell scripts must use Linux line endings
+[*.sh]
+end_of_line = lf

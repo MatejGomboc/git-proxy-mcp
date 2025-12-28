@@ -1,0 +1,3 @@
+# automatically normalize line endings to the user's GIT preferences
+* text=auto
+*.sh text eol=lf
