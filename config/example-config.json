@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "_comment": "Example configuration for git-proxy-mcp. Copy to your config directory and customise.",
+  
+  "remotes": [
+    {
+      "name": "github",
+      "url_pattern": "https://github.com/*",
+      "auth": {
+        "type": "pat",
+        "token": "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      }
+    },
+    {
+      "name": "gitlab",
+      "url_pattern": "https://gitlab.com/*",
+      "auth": {
+        "type": "pat",
+        "token": "glpat-xxxxxxxxxxxxxxxxxxxx"
+      }
+    },
+    {
+      "name": "company-gitlab",
+      "url_pattern": "https://git.company.com/*",
+      "auth": {
+        "type": "ssh_key",
+        "key_path": "~/.ssh/id_ed25519"
+      }
+    },
+    {
+      "name": "bitbucket-ssh",
+      "url_pattern": "git@bitbucket.org:*",
+      "auth": {
+        "type": "ssh_agent"
+      }
+    }
+  ],
+
+  "ai_identity": {
+    "name": "AI Assistant",
+    "email": "ai-assistant@noreply.local"
+  },
+
+  "security": {
+    "allow_force_push": false,
+    "protected_branches": ["main", "master", "develop"],
+    "repo_allowlist": null,
+    "repo_blocklist": null
+  },
+
+  "logging": {
+    "level": "warn",
+    "audit_log_path": null
+  }
+}
