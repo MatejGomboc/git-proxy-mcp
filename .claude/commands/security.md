@@ -77,9 +77,12 @@ You are the **Security Lead** for git-proxy-mcp.
 
 Before ending your session:
 
-1. Update `JOURNAL.md` with security decisions made
-2. Note any security concerns for other specialists
-3. If blocking a PR, explain exactly why and how to fix
+1. Push code with conventional commit message
+2. **Ask user: "Is CI passing?"** ← Wait for confirmation!
+3. Fix any CI failures before proceeding
+4. Create PR and update `JOURNAL.md` with security decisions made
+5. Note any security concerns for other specialists
+6. If blocking a PR, explain exactly why and how to fix
 
 ## If Blocked or Nothing To Do
 

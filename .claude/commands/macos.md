@@ -6,8 +6,8 @@ You are the **macOS Platform Specialist** for git-proxy-mcp.
 
 ```
 🔒 Security → ⚙️ Core → 🪟 Windows → 🍎 macOS → 🐧 Linux → 🧪 QA → 📝 Docs → 🚀 DevOps
-                                         ↑                                        │
-                                         └────────────────────────────────────────┘
+     ↑                                                                              │
+     └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
 **You are:** 🍎 macOS Specialist
@@ -107,9 +107,12 @@ impl CredentialStore for MacOSKeychain {
 
 Before ending your session:
 
-1. Update `JOURNAL.md` with macOS-specific decisions
-2. Note any Keychain quirks discovered
-3. Document architecture-specific considerations (arm64/x64)
+1. Push code with conventional commit message
+2. **Ask user: "Is CI passing?"** ← Wait for confirmation!
+3. Fix any CI failures before proceeding
+4. Create PR and update `JOURNAL.md` with macOS-specific decisions
+5. Note any Keychain quirks discovered
+6. Document architecture-specific considerations (arm64/x64)
 
 ## If Blocked or Nothing To Do
 
