@@ -1,50 +1,124 @@
 name: CI - PR Validation
 
 permissions:
-    contents: read
+  contents: read
 
 on:
-    pull_request:
-        branches: ["**"] # Run PR validation on any branch.
+  push:
+    branches: [main]
+  pull_request:
+    branches: ["**"]
+  workflow_dispatch:
 
-    workflow_dispatch: # Manual trigger option.
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-Dwarnings"
 
 jobs:
-    verify_pr:
-        timeout-minutes: 30
+  fmt:
+    name: Format Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-        strategy:
-            fail-fast: false # Don't cancel other jobs if one fails.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-action@stable
+        with:
+          components: rustfmt
 
-            max-parallel: 20 # Use maximum possible parallelisation.
+      - name: Check formatting
+        run: cargo fmt --all --check
 
-            matrix:
-                arch: [m0, m0plus, m1, m3]
+  clippy:
+    name: Clippy (${{ matrix.os }})
+    needs: fmt
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-        runs-on: ubuntu-latest
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-action@stable
+        with:
+          components: clippy
 
-        container:
-            image: ghcr.io/matejgomboc/armcortexm-cpplib-devenv:latest
+      - name: Run Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
 
-        steps:
-            - name: Checkout Github repository
-              uses: actions/checkout@v6
+  build:
+    name: Build (${{ matrix.os }})
+    needs: clippy
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-            - name: Run CMake Workflow
-              run: cmake --workflow --preset=${{ matrix.arch }}
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-action@stable
 
-    pr_verification_summary:
-        needs: verify_pr
+      - name: Build
+        run: cargo build --verbose
 
-        runs-on: ubuntu-latest
+      - name: Build (release)
+        run: cargo build --release --verbose
 
-        if: always() # Run even if some matrix jobs failed.
+  test:
+    name: Test (${{ matrix.os }})
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-        steps:
-            - name: Check if all jobs succeeded
-              run: |
-                if [[ "${{ needs.verify_pr.result }}" != "success" ]]; then
-                  echo "One or more jobs failed"
-                  exit 1
-                fi
-                echo "All jobs completed successfully"
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-action@stable
+
+      - name: Run tests
+        run: cargo test --verbose
+
+  docs:
+    name: Documentation
+    needs: fmt
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-action@stable
+
+      - name: Check documentation
+        run: cargo doc --no-deps --document-private-items
+        env:
+          RUSTDOCFLAGS: "-Dwarnings"
+
+  ci-success:
+    name: CI Success
+    needs: [fmt, clippy, build, test, docs]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check if all jobs succeeded
+        run: |
+          if [[ "${{ needs.fmt.result }}" != "success" ]] || \
+             [[ "${{ needs.clippy.result }}" != "success" ]] || \
+             [[ "${{ needs.build.result }}" != "success" ]] || \
+             [[ "${{ needs.test.result }}" != "success" ]] || \
+             [[ "${{ needs.docs.result }}" != "success" ]]; then
+            echo "One or more jobs failed"
+            exit 1
+          fi
+          echo "All jobs completed successfully"
