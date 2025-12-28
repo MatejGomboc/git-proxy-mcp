@@ -21,22 +21,54 @@ cargo fmt                      # Format
 ## Project Structure
 
 ```
-src/           # Rust source code
-config/        # Example configuration files  
-.claude/       # AI assistant context
-  JOURNAL.md   # Development history & session handoff
-  features.json # Feature tracking (pass/fail)
-TODO.md        # Development battle plan
+src/               # Rust source code
+config/            # Example configuration files  
+.claude/           # AI assistant context
+  commands/        # Specialist agent prompts
+  JOURNAL.md       # Development log & handoff notes
+  features.json    # Feature tracking (pass/fail)
+TODO.md            # Development battle plan
 ```
+
+## Virtual Software Team
+
+This project uses specialist Claude agents invoked via `/project:` commands:
+
+| Command | Specialist | Focus |
+|---------|------------|-------|
+| `/project:security` | 🔒 Security Lead | Credentials, auth, security review |
+| `/project:core` | ⚙️ Core Developer | MCP protocol, git2, architecture |
+| `/project:windows` | 🪟 Windows | Credential Manager, Windows paths |
+| `/project:macos` | 🍎 macOS | Keychain, Apple Silicon |
+| `/project:linux` | 🐧 Linux | Secret Service, XDG paths |
+| `/project:devops` | 🚀 DevOps | CI/CD, releases, caching |
+| `/project:docs` | 📝 Docs Pedant | Repo cleanliness, British spelling |
+| `/project:qa` | 🧪 QA | Testing, edge cases |
+
+### Round-Robin Workflow
+
+Specialists take turns, each with fresh context:
+
+```
+Security → Core → Platform Devs → Security Review → QA → Docs
+    └──────────────────────────────────────────────────────┘
+                         (next feature)
+```
+
+### Handoff Protocol
+
+Each specialist, when finishing:
+
+1. **Commit** with conventional commit message
+2. **Update JOURNAL.md** — what was done, what's next
+3. **Update features.json** — mark features passing if verified
+
+Next specialist:
+
+1. **Read JOURNAL.md** — get up to speed
+2. **Check `git log --oneline -10`** — see recent changes
+3. **Read features.json** — know what's done/pending
 
 ## Current Phase
 
 See @.claude/JOURNAL.md for current status and @TODO.md for full roadmap.
-
-## Session Workflow
-
-1. Read `.claude/JOURNAL.md` for current status
-2. Check `git log --oneline -10` for recent changes
-3. Work on ONE feature at a time
-4. Update JOURNAL.md at session end
-5. Ensure CI passes before finishing
