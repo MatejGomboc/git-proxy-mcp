@@ -4,7 +4,9 @@
 
 **Goal:** Build a secure, AI-agnostic Git proxy MCP server in Rust that keeps credentials on the user's machine while allowing AI assistants to work with repos in their own environments.
 
-**Guiding Principle:** Security over speed. Take the time to do it right.
+**Guiding Principles:**
+- Security over speed. Take the time to do it right.
+- Use British spelling in documentation and user-facing text. It's posh! 🇬🇧
 
 ---
 
@@ -64,7 +66,7 @@
 ```
 
 **Key Security Properties:**
-1. Credentials are loaded from config, used internally, and NEVER serialized to MCP responses
+1. Credentials are loaded from config, used internally, and NEVER serialised to MCP responses
 2. stdio transport = local process communication, no network between MCP server and client
 3. Only git pack data (file contents, commits, branches) flows through MCP
 4. Anthropic/vendor handles encryption between their client and AI VM
@@ -82,6 +84,29 @@
 | SSH keys | User manages | User sets up keys on PC, we reference path or use ssh-agent |
 | Large repos | Chunked streaming | Progress callbacks, stream data in chunks |
 | Git LFS | Defer to v1.1 | v1.0: detect & warn; v1.1+: implement support |
+| Spelling | British 🇬🇧 | colour, behaviour, organisation, centre, licence — it's posh! |
+
+---
+
+## Style Guidelines
+
+### British Spelling 🇬🇧
+
+Use British spelling throughout documentation and user-facing text.
+
+| ❌ American | ✅ British |
+|-------------|------------|
+| color | colour |
+| behavior | behaviour |
+| organization | organisation |
+| center | centre |
+| license (noun) | licence |
+| analyze | analyse |
+| initialize | initialise |
+| customize | customise |
+| serialized | serialised |
+
+**Note:** Code identifiers (variable names, function names) may use American spelling where it matches Rust/library conventions.
 
 ---
 
@@ -166,7 +191,7 @@
 - [ ] Create `src/mcp/server.rs` — request/response handling
 - [ ] Create `src/mcp/schema.rs` — tool definitions
 - [ ] Implement MCP lifecycle:
-  - [ ] `initialize` / `initialized`
+  - [ ] `initialise` / `initialised`
   - [ ] `tools/list`
   - [ ] `tools/call`
   - [ ] `shutdown`
@@ -259,7 +284,7 @@ Define these MCP tools:
 
 ### 4.3 Credential Security
 - [ ] Use `secrecy::SecretString` for all credential storage
-- [ ] Credentials zeroized on drop (secrecy crate handles this)
+- [ ] Credentials zeroised on drop (secrecy crate handles this)
 - [ ] No `Debug` impl that could leak credentials
 - [ ] No `Display` impl that could leak credentials
 - [ ] Review all error paths for potential credential leakage
@@ -322,7 +347,7 @@ Define these MCP tools:
 - [ ] Generate checksums (SHA256)
 - [ ] Sign releases (optional, future)
 
-### 7.3 Binary Optimization
+### 7.3 Binary Optimisation
 - [ ] Enable LTO in release profile
 - [ ] Strip symbols
 - [ ] Consider `opt-level = "z"` for size if binary is too large
@@ -357,7 +382,7 @@ Define these MCP tools:
 - [ ] Credential scrubbing tests
 
 ### 9.2 Integration Tests
-- [ ] MCP protocol compliance tests (initialize, tools/list, tools/call)
+- [ ] MCP protocol compliance tests (initialise, tools/list, tools/call)
 - [ ] JSON-RPC message format tests
 - [ ] Git operations against test repos (use temp repos)
 - [ ] End-to-end: clone → modify → commit → push (mock server or real test repo)
@@ -421,7 +446,7 @@ git2 = "0.19"
 # Async runtime
 tokio = { version = "1", features = ["full"] }
 
-# Serialization
+# Serialisation
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
@@ -509,6 +534,7 @@ panic = "abort"
 | SSH keys? | User manages | We reference path or use ssh-agent |
 | Large repos? | Chunked streaming | Progress callbacks, stream in chunks |
 | Git LFS? | Defer to v1.1 | v1.0: detect & warn only |
+| Spelling? | British 🇬🇧 | colour, behaviour, organisation — it's posh! |
 
 ---
 
