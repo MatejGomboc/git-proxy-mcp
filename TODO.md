@@ -6,7 +6,20 @@
 
 **Guiding Principles:**
 - Security over speed. Take the time to do it right.
+- Work on ONE feature at a time. See `features.json` for tracking.
 - Use British spelling in documentation and user-facing text. It's posh! 🇬🇧
+
+---
+
+## Feature Tracking
+
+Features are tracked in `features.json` with pass/fail status. 
+
+**Rules:**
+- Only change the `passes` field when a feature is verified complete
+- Do NOT remove or edit feature descriptions
+- Work on ONE feature at a time
+- Verify each feature works before marking it as passing
 
 ---
 
@@ -85,6 +98,7 @@
 | Large repos | Chunked streaming | Progress callbacks, stream data in chunks |
 | Git LFS | Defer to v1.1 | v1.0: detect & warn; v1.1+: implement support |
 | Spelling | British 🇬🇧 | colour, behaviour, organisation, centre, licence — it's posh! |
+| Feature tracking | `features.json` | JSON format discourages inappropriate edits |
 
 ---
 
@@ -535,6 +549,7 @@ panic = "abort"
 | Large repos? | Chunked streaming | Progress callbacks, stream in chunks |
 | Git LFS? | Defer to v1.1 | v1.0: detect & warn only |
 | Spelling? | British 🇬🇧 | colour, behaviour, organisation — it's posh! |
+| Feature tracking? | `features.json` | JSON format, per Anthropic guidance |
 
 ---
 
