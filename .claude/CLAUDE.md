@@ -32,28 +32,26 @@ TODO.md            # Development battle plan
 
 ## Virtual Software Team
 
-This project uses specialist Claude agents invoked via `/project:` commands:
+This project uses specialist Claude agents invoked via `/project:` commands.
 
-| Command | Specialist | Focus |
-|---------|------------|-------|
-| `/project:security` | 🔒 Security Lead | Credentials, auth, security review |
-| `/project:core` | ⚙️ Core Developer | MCP protocol, git2, architecture |
-| `/project:windows` | 🪟 Windows | Credential Manager, Windows paths |
-| `/project:macos` | 🍎 macOS | Keychain, Apple Silicon |
-| `/project:linux` | 🐧 Linux | Secret Service, XDG paths |
-| `/project:devops` | 🚀 DevOps | CI/CD, releases, caching |
-| `/project:docs` | 📝 Docs Pedant | Repo cleanliness, British spelling |
-| `/project:qa` | 🧪 QA | Testing, edge cases |
-
-### Round-Robin Workflow
-
-Specialists take turns, each with fresh context:
+### Round-Robin Chain
 
 ```
-Security → Core → Platform Devs → Security Review → QA → Docs
-    └──────────────────────────────────────────────────────┘
-                         (next feature)
+🔒 Security → ⚙️ Core → 🪟 Windows → 🍎 macOS → 🐧 Linux → 🧪 QA → 📝 Docs → 🚀 DevOps
+     ↑                                                                              │
+     └──────────────────────────────────────────────────────────────────────────────┘
 ```
+
+| Command | Specialist | Next in Chain |
+|---------|------------|---------------|
+| `/project:security` | 🔒 Security Lead | → `/project:core` |
+| `/project:core` | ⚙️ Core Developer | → `/project:windows` |
+| `/project:windows` | 🪟 Windows | → `/project:macos` |
+| `/project:macos` | 🍎 macOS | → `/project:linux` |
+| `/project:linux` | 🐧 Linux | → `/project:qa` |
+| `/project:qa` | 🧪 QA | → `/project:docs` |
+| `/project:docs` | 📝 Docs Pedant | → `/project:devops` |
+| `/project:devops` | 🚀 DevOps | → `/project:security` |
 
 ### Handoff Protocol
 
@@ -65,9 +63,18 @@ Each specialist, when finishing:
 
 Next specialist:
 
-1. **Read JOURNAL.md** — get up to speed
+1. **Read JOURNAL.md** — get up to speed (check who last worked!)
 2. **Check `git log --oneline -10`** — see recent changes
 3. **Read features.json** — know what's done/pending
+
+### If Blocked or Nothing To Do
+
+If a specialist encounters issues or has no work for their domain:
+
+1. Update `JOURNAL.md` explaining the situation
+2. **Invoke next specialist** in the chain
+
+This keeps the round-robin moving!
 
 ## Current Phase
 
