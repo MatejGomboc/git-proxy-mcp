@@ -19,12 +19,7 @@
 
 mod settings;
 
-pub use settings::{
-    AiIdentity,
-    Config,
-    LoggingConfig,
-    SecurityConfig,
-};
+pub use settings::{AiIdentity, Config, LoggingConfig, SecurityConfig};
 
 use std::path::{Path, PathBuf};
 
@@ -73,11 +68,10 @@ pub fn load_config(path: Option<&Path>) -> Result<Config, ConfigError> {
         source: e,
     })?;
 
-    let config: Config =
-        serde_json::from_str(&contents).map_err(|e| ConfigError::ParseError {
-            path: config_path.clone(),
-            source: e,
-        })?;
+    let config: Config = serde_json::from_str(&contents).map_err(|e| ConfigError::ParseError {
+        path: config_path.clone(),
+        source: e,
+    })?;
 
     // Validate the configuration
     config.validate()?;
