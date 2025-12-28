@@ -1,0 +1,66 @@
+[package]
+name = "git-proxy-mcp"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+license = "GPL-3.0-or-later"
+description = "Secure Git proxy MCP server for AI assistants"
+repository = "https://github.com/MatejGomboc/git-proxy-mcp"
+readme = "README.md"
+keywords = ["mcp", "git", "proxy", "ai", "llm"]
+categories = ["development-tools", "command-line-utilities"]
+authors = ["MatejGomboc"]
+
+[dependencies]
+# Git operations (libgit2 bindings)
+git2 = "0.19"
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Serialisation
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# CLI argument parsing
+clap = { version = "4", features = ["derive"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Security - secure string handling with zeroize on drop
+secrecy = { version = "0.10", features = ["serde"] }
+
+# URL parsing
+url = "2"
+
+# Glob pattern matching for repo allowlists
+glob = "0.3"
+
+# Platform-specific directories
+dirs = "5"
+
+[dev-dependencies]
+# Temporary directories for testing
+tempfile = "3"
+
+[profile.release]
+opt-level = 3
+lto = true
+strip = true
+panic = "abort"
+codegen-units = 1
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+cargo = { level = "warn", priority = -1 }
