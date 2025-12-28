@@ -4,9 +4,48 @@ This file tracks the development progress of `git-proxy-mcp`. It serves as a han
 
 ---
 
+## Getting Up to Speed (for Claude Instances)
+
+**Run these steps at the start of EVERY session:**
+
+```bash
+# 1. Verify you're in the project directory
+pwd
+
+# 2. Read this journal to understand current status
+cat JOURNAL.md
+
+# 3. Read the full battle plan
+cat TODO.md
+
+# 4. See recent commits
+git log --oneline -10
+
+# 5. Check feature completion status
+cat features.json
+
+# 6. Verify project compiles (once Cargo.toml exists)
+cargo build
+
+# 7. Verify tests pass (once tests exist)
+cargo test
+
+# 8. Check for warnings
+cargo clippy
+```
+
+**Then:** Find the next incomplete feature in `features.json` and work on ONE feature at a time.
+
+**At the end of your session:**
+1. Commit your changes with a descriptive message
+2. Update this JOURNAL.md with what you did
+3. Update `features.json` if you completed any features
+
+---
+
 ## How to Use This Journal
 
-**For Claude instances:** Read this file first to understand the current state, then continue from "Current Status".
+**For Claude instances:** Follow "Getting Up to Speed" above, then read "Current Status".
 
 **For humans:** This is an internal dev log. See README.md for user documentation.
 
@@ -58,9 +97,14 @@ See `TODO.md` for the full battle plan.
   - SSH keys: user manages, we reference
   - Large repos: chunked streaming
   - Git LFS: defer to v1.1
+- Reviewed Anthropic's article on long-running agents
+- Added `features.json` for structured feature tracking
+- Added "Getting Up to Speed" routine for Claude instances
 
 **Key files created:**
 - `TODO.md` — Full development battle plan
+- `JOURNAL.md` — This file, for session continuity
+- `features.json` — Structured feature tracking with pass/fail status
 
 **Decisions made:**
 | Decision | Choice |
@@ -71,6 +115,8 @@ See `TODO.md` for the full battle plan.
 | Config reload | No (security) |
 | Concurrency | Yes |
 | Git LFS | v1.1 (detect & warn in v1.0) |
+| Spelling | British 🇬🇧 |
+| Feature tracking | `features.json` (not Markdown) |
 
 **Next session should:**
 1. Start Phase 0: Project Setup
@@ -173,10 +219,11 @@ git-proxy-mcp/
 ├── rustfmt.toml
 ├── .gitignore
 ├── .editorconfig
-├── LICENCE
+├── LICENSE
 ├── README.md
 ├── TODO.md
 ├── JOURNAL.md
+├── features.json
 ├── CHANGELOG.md
 ├── CONTRIBUTING.md
 └── SECURITY.md
@@ -207,13 +254,16 @@ Use British spelling throughout documentation and user-facing text. It's posh!
 
 ## Tips for Future Claude Instances
 
-1. **Always read `TODO.md` first** — it has the full battle plan with checkboxes
-2. **Update this journal** after each session with what you did and what's next
-3. **Security is paramount** — credentials must NEVER leak to logs, errors, or MCP responses
-4. **Test on all platforms** — Windows, macOS, Linux
-5. **Keep commits atomic** — one logical change per commit
-6. **Use conventional commits** — `feat:`, `fix:`, `docs:`, `chore:`, etc.
-7. **Use British spelling** in docs and user-facing text — colour, behaviour, organisation, centre, licence, etc. 🇬🇧
+1. **Follow "Getting Up to Speed"** at the start of every session
+2. **Work on ONE feature at a time** — don't try to do too much
+3. **Update this journal** after each session with what you did and what's next
+4. **Update `features.json`** when you complete features — only change `passes` field
+5. **Security is paramount** — credentials must NEVER leak to logs, errors, or MCP responses
+6. **Test on all platforms** — Windows, macOS, Linux
+7. **Keep commits atomic** — one logical change per commit
+8. **Use conventional commits** — `feat:`, `fix:`, `docs:`, `chore:`, etc.
+9. **Use British spelling** in docs and user-facing text — colour, behaviour, organisation, centre, licence, etc. 🇬🇧
+10. **Leave the codebase in a clean state** — no half-finished features, no broken builds
 
 ---
 
@@ -223,6 +273,7 @@ Use British spelling throughout documentation and user-facing text. It's posh!
 - **MCP Spec:** https://modelcontextprotocol.io
 - **git2-rs:** https://docs.rs/git2
 - **Rust MCP examples:** https://github.com/modelcontextprotocol/servers
+- **Long-running agents guide:** https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents
 
 ---
 
