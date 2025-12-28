@@ -50,7 +50,7 @@ See `TODO.md` for the full battle plan.
 - Discussed the concept of a Git proxy MCP server
 - Designed the security architecture (credentials never leave user's PC)
 - Chose Rust as the implementation language
-- Chose GPL v3 as the license
+- Chose GPL v3 as the licence
 - Created comprehensive `TODO.md` with battle plan
 - Resolved key design decisions:
   - No config hot-reload (security)
@@ -66,7 +66,7 @@ See `TODO.md` for the full battle plan.
 | Decision | Choice |
 |----------|--------|
 | Language | Rust |
-| License | GPL v3 |
+| Licence | GPL v3 |
 | MCP Transport | stdio (v1.0) |
 | Config reload | No (security) |
 | Concurrency | Yes |
@@ -173,7 +173,7 @@ git-proxy-mcp/
 ├── rustfmt.toml
 ├── .gitignore
 ├── .editorconfig
-├── LICENSE
+├── LICENCE
 ├── README.md
 ├── TODO.md
 ├── JOURNAL.md
@@ -181,6 +181,27 @@ git-proxy-mcp/
 ├── CONTRIBUTING.md
 └── SECURITY.md
 ```
+
+---
+
+## Style Guidelines
+
+### British Spelling 🇬🇧
+
+Use British spelling throughout documentation and user-facing text. It's posh!
+
+| ❌ American | ✅ British |
+|-------------|------------|
+| color | colour |
+| behavior | behaviour |
+| organization | organisation |
+| center | centre |
+| license (noun) | licence |
+| analyze | analyse |
+| initialize | initialise |
+| customize | customise |
+
+**Note:** Code identifiers (variable names, function names) can use American spelling if it matches library conventions (e.g., Rust stdlib uses American spelling).
 
 ---
 
@@ -192,6 +213,7 @@ git-proxy-mcp/
 4. **Test on all platforms** — Windows, macOS, Linux
 5. **Keep commits atomic** — one logical change per commit
 6. **Use conventional commits** — `feat:`, `fix:`, `docs:`, `chore:`, etc.
+7. **Use British spelling** in docs and user-facing text — colour, behaviour, organisation, centre, licence, etc. 🇬🇧
 
 ---
 
