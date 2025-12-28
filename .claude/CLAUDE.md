@@ -22,6 +22,42 @@ cargo fmt                      # Format
 
 **`CODE_OF_CONDUCT.md`** — Owned exclusively by the repository owner and their leadership. No AI specialist may modify this file under any circumstances. If changes are needed, flag it in JOURNAL.md for the owner.
 
+## Sprint Discipline — IMPORTANT!
+
+**ONE feature per PR. No exceptions.**
+
+| ✅ Good | ❌ Bad |
+|---------|--------|
+| "Add config file parsing" | "Add config, auth, and git clone" |
+| "Implement Windows Credential Manager" | "Implement all platform credential stores" |
+| "Add error types for auth module" | "Complete Phase 1" |
+
+### Why This Matters
+
+Anthropic's research found that agents fail when they try to "one-shot" everything. Massive PRs:
+- Are impossible to review
+- Break in subtle ways
+- Block other specialists
+- Create merge conflicts
+
+### Sprint Rules
+
+1. **Scope small** — If your PR touches more than ~5 files, it's probably too big
+2. **One concern** — Each PR should do ONE thing well
+3. **Shippable** — PR must leave the repo in a working state (CI passes!)
+4. **Stop early** — If scope is growing, stop, create PR, handoff to next specialist
+5. **Iterate** — Multiple small PRs > one massive PR
+
+### When To Stop and Create PR
+
+- You've implemented one logical feature
+- You've been working for a while and have meaningful progress
+- The change is getting complex
+- You need input from another specialist
+- CI is passing and code works
+
+**Create the PR, update JOURNAL.md, invoke next specialist!**
+
 ## Project Structure
 
 ```
@@ -61,9 +97,10 @@ This project uses specialist Claude agents invoked via `/project:` commands.
 
 Each specialist, when finishing:
 
-1. **Commit** with conventional commit message
-2. **Update JOURNAL.md** — what was done, what's next
-3. **Update features.json** — mark features passing if verified
+1. **Create PR** with small, focused changes (see Sprint Discipline!)
+2. **Commit** with conventional commit message
+3. **Update JOURNAL.md** — what was done, what's next
+4. **Update features.json** — mark features passing if verified
 
 Next specialist:
 
