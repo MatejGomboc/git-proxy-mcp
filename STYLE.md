@@ -9,7 +9,6 @@ Code style conventions for git-proxy-mcp.
 | Rule | Setting |
 |------|---------|
 | Indentation | 4 spaces (no tabs) |
-| Line endings | LF (Unix-style) |
 | Charset | UTF-8 |
 | Final newline | Always |
 | Trailing whitespace | Trim (except Markdown) |
