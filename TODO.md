@@ -142,6 +142,38 @@ Features are tracked in `.claude/features.json` with pass/fail status.
 
 ---
 
+## Phase 0.6: CI/CD Optimisation ✅ COMPLETE
+
+Reduced CI time from ~8 minutes to ~2-3 minutes (on cache hit).
+
+### Optimisations Applied
+
+| Before | After | Improvement |
+|--------|-------|-------------|
+| No caching | `Swatinem/rust-cache@v2` | ~50-70% faster on cache hit |
+| 5 separate jobs | 2 jobs (quick-checks + build) | Less job overhead |
+| fmt → clippy → build → test | Combined into single build job | No redundant compilation |
+| Cache saved on every run | PRs read-only, main saves | Faster PR validation |
+
+### CI Architecture
+
+```
+quick-checks (ubuntu)     build (matrix: ubuntu, macos, windows)
+├── fmt                   ├── clippy
+└── docs                  ├── build (debug + release)
+                          └── test
+```
+
+### Caching Strategy (StringWiggler Pattern)
+
+- **PRs:** Read-only cache (`save-if: false`)
+- **Main branch:** Save cache after merge
+- **Cache key:** `v1-rust-{os}-{hash of Cargo.lock}`
+
+This prevents cache pollution from PR branches while keeping cache fresh from main.
+
+---
+
 ## Phase 1: Core Infrastructure ← CURRENT
 
 ### 1.1 Configuration System
@@ -230,6 +262,7 @@ Features are tracked in `.claude/features.json` with pass/fail status.
 - **git2-rs Documentation:** https://docs.rs/git2
 - **Open Source Guides:** https://opensource.guide/
 - **Claude Code Docs:** https://docs.anthropic.com/en/docs/claude-code
+- **Swatinem/rust-cache:** https://github.com/Swatinem/rust-cache
 
 ---
 
