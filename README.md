@@ -2,7 +2,7 @@
 
 A generic proxy server that bridges MCP and GIT protocols.
 
-##Licence
+## Licence
 
 Copyright (C) 2025 Matej Gomboc <https://github.com/MatejGomboc/git-proxy-mcp>.
 
