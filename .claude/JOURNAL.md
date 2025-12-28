@@ -6,21 +6,23 @@ Handoff document for Claude specialist agents. Read this first to understand cur
 
 ## Current Status
 
-**Phase:** 0.6 Complete → Ready for Phase 1
+**Phase:** 1 — Core Infrastructure (in progress)
 
-**Last Specialist:** 🚀 DevOps (CI optimisation)
+**Last Specialist:** 🔒 Security Lead (credential types)
 
 **Completed:**
 - ✅ Phase 0: Project setup (Cargo.toml, CI, VS Code config)
 - ✅ Phase 0.5: Open source best practices
 - ✅ Phase 0.6: CI/CD optimisation (caching, job consolidation)
+- ✅ `src/auth/credentials.rs` — Secure credential types with secrecy crate
+- ✅ `src/error.rs` — Error types (security-aware)
 
-**Next:** Phase 1 — Core Infrastructure
-1. `src/config/` — Config file loading & validation
-2. `src/auth/` — Credential management with `secrecy` crate
-3. `src/error.rs` — Custom error types
+**Next:**
+1. `src/config/` — Config file loading & validation (parse into credential types)
+2. `src/auth/matcher.rs` — URL pattern matching for credentials
+3. Wire up config loading in main.rs
 
-**Suggested First Specialist:** 🔒 Security (design credential architecture)
+**Suggested Next Specialist:** ⚙️ Core Developer (`/project:core`)
 
 ---
 
@@ -28,8 +30,8 @@ Handoff document for Claude specialist agents. Read this first to understand cur
 
 | Specialist | Command | Status |
 |------------|---------|--------|
-| 🔒 Security Lead | `/project:security` | Ready |
-| ⚙️ Core Developer | `/project:core` | Ready |
+| 🔒 Security Lead | `/project:security` | ✅ Done (credential types) |
+| ⚙️ Core Developer | `/project:core` | 👈 Next up |
 | 🪟 Windows | `/project:windows` | Ready |
 | 🍎 macOS | `/project:macos` | Ready |
 | 🐧 Linux | `/project:linux` | Ready |
@@ -66,6 +68,46 @@ When ending your session, add an entry like this:
 ---
 
 ## Session Log
+
+### 2025-12-28 — 🔒 Secure Credential Types
+
+**Specialist:** Security Lead
+
+**What I did:**
+- Created `src/auth/mod.rs` with security architecture documentation
+- Created `src/auth/credentials.rs` with:
+  - `PatCredential` — PAT with `SecretString`
+  - `SshKeyCredential` — SSH key path + optional passphrase
+  - `SshAgentCredential` — SSH agent auth
+  - `Credential` — URL pattern wrapper
+  - `AuthMethod` — Enum unifying all types
+- Created `src/error.rs` with `AuthError` and `ConfigError`
+- Updated `src/main.rs` to declare new modules
+- Added unit tests verifying `Debug` doesn't leak secrets
+
+**Decisions made:**
+- All sensitive data MUST use `secrecy::SecretString`
+- Custom `Debug` impls show `[REDACTED]` for secrets
+- No `Display` impl for credential types (prevents accidental printing)
+- Explicit `expose_*()` methods required to access secrets
+- Error messages intentionally omit credential values
+- Helper `deserialize_secret()` for future config parsing
+
+**Security properties verified:**
+- ✅ `SecretString` zeroises on drop
+- ✅ `Debug` output tested to not contain secrets
+- ✅ Error messages tested to not contain credential patterns
+
+**For next specialist (⚙️ Core):**
+- Implement `src/config/mod.rs` and `src/config/settings.rs`
+- Parse `config.json` into the credential types I created
+- Use the `deserialize_secret()` helper for token fields
+- Create URL matcher in `src/auth/matcher.rs` using `glob` crate
+- The `Credential` struct is ready to hold parsed config entries
+
+**PR:** https://github.com/MatejGomboc/git-proxy-mcp/pull/7
+
+---
 
 ### 2025-12-28 — 🚀 Virtual Team Setup
 
