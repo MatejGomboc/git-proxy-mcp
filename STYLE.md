@@ -9,6 +9,7 @@ Code style conventions for git-proxy-mcp.
 | Rule | Setting |
 |------|---------|
 | Indentation | 4 spaces (no tabs) |
+| Max line length | 170 characters |
 | Charset | UTF-8 |
 | Final newline | Always |
 | Trailing whitespace | Trim (except Markdown) |
@@ -16,6 +17,8 @@ Code style conventions for git-proxy-mcp.
 These rules are enforced by `.editorconfig`. Install the EditorConfig plugin for your editor:
 - **VS Code:** [EditorConfig for VS Code](https://marketplace.visualstudio.com/items?itemName=EditorConfig.EditorConfig)
 - **VS 2022:** [EditorConfig](https://marketplace.visualstudio.com/items?itemName=MadsKristensen.TrailingWhitespace64)
+
+VS Code also displays a ruler at 170 characters (configured in `.vscode/settings.json`).
 
 ---
 
