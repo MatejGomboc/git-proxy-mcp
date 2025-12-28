@@ -65,39 +65,110 @@ See `TODO.md` for the full battle plan.
 
 ## Current Status
 
-### Phase: 0 — Project Setup (IN PROGRESS)
+### Phase: 0.5 — Open Source Best Practices (NEARLY COMPLETE)
 
 **Completed:**
-- ✅ `.devcontainer/` created (devcontainer.json + Dockerfile)
-- ✅ `Cargo.toml` with all dependencies
-- ✅ `src/main.rs` skeleton with CLI parsing
-- ✅ `.gitignore` for Rust
-- ✅ `rust-toolchain.toml` (stable)
-- ✅ `rustfmt.toml` (formatting rules)
-- ✅ CI workflow updated for Rust (fmt, clippy, build, test on all platforms)
-- ✅ VS Code extensions and settings updated for Rust
-- ✅ `config/example-config.json` created
-- ✅ GitHub repo settings configured (Actions, CodeQL, security)
-- ✅ Fixed clippy lint errors (thiserror version, multiple_crate_versions, unnecessary_wraps)
-- ✅ Added Phase 0.5 Open Source Best Practices to TODO.md
+- ✅ Phase 0 setup complete (devcontainer, Cargo.toml, CI, etc.)
+- ✅ `SECURITY.md` created with comprehensive security policy
+- ✅ `CONTRIBUTING.md` created with contributor guidelines
+- ✅ `CHANGELOG.md` created (Keep a Changelog format)
+- ✅ `.github/ISSUE_TEMPLATE/bug_report.md` created
+- ✅ `.github/ISSUE_TEMPLATE/feature_request.md` created
+- ✅ `.github/ISSUE_TEMPLATE/config.yml` created
+- ✅ `.github/PULL_REQUEST_TEMPLATE.md` created
 
-**Awaiting verification:**
-- ⏳ CI passes on all platforms (ubuntu, macos, windows)
-- ⏳ Devcontainer works in VS Code
+**Pending (owner action required):**
+- ⏳ `CODE_OF_CONDUCT.md` — Owner to create (requires personal enforcement contact)
+- ⏳ Enable Secret Scanning in repo settings
+- ⏳ Enable Push Protection in repo settings
+- ⏳ Set up branch protection rules for `main`
+- ⏳ Enable Discussions
+- ⏳ Expand README.md with full documentation
 
 **Next steps:**
-1. Verify CI passes — check GitHub Actions
-2. Enable Secret Scanning and Push Protection in repo settings
-3. Set up branch protection rules for `main`
-4. Create SECURITY.md (critical for credential-handling project)
-5. Create CODE_OF_CONDUCT.md and CONTRIBUTING.md
-6. Begin Phase 1: Core Infrastructure
+1. Owner creates CODE_OF_CONDUCT.md with personal contact info
+2. Enable Secret Scanning and Push Protection in GitHub settings
+3. Set up branch protection for `main`
+4. Begin Phase 1: Core Infrastructure (config system, credentials)
 
 **Blockers:** None
 
 ---
 
 ## Session Log
+
+### 2025-12-28 — Phase 0.5 Documentation Completion (Claude + MatejGomboc)
+
+**What happened:**
+- Continued from previous Claude instance that was cut off
+- Created all remaining open source documentation files
+- Skipped CODE_OF_CONDUCT.md (requires owner's personal contact info for enforcement)
+
+**Files created:**
+- `CONTRIBUTING.md` — Comprehensive contributor guidelines including:
+  - Bug reporting process with security reminders
+  - Feature request process
+  - Pull request workflow and checklist
+  - Coding standards (rustfmt, clippy, British spelling)
+  - Commit message format (conventional commits)
+  - Testing requirements
+  - Security-conscious coding guidelines
+- `CHANGELOG.md` — Keep a Changelog format with:
+  - Initial project setup items documented
+  - Versioning policy explained
+- `.github/ISSUE_TEMPLATE/bug_report.md` — Bug report template with:
+  - Security reminder to redact credentials
+  - Environment information fields
+  - Link to security advisories for vulnerabilities
+- `.github/ISSUE_TEMPLATE/feature_request.md` — Feature request template with:
+  - Security considerations section
+  - Checklist for contributors
+- `.github/ISSUE_TEMPLATE/config.yml` — Issue template configuration:
+  - Disabled blank issues (require template)
+  - Added link to security advisories
+  - Added link to discussions
+- `.github/PULL_REQUEST_TEMPLATE.md` — PR template with:
+  - Security checklist for credential handling
+  - Testing and code quality checklists
+  - Reminder to update CHANGELOG
+
+**Files modified:**
+- `TODO.md` — Updated Phase 0.5 checklist to reflect completed items
+- `JOURNAL.md` — This file, updated with session log
+
+**Commits made:**
+1. `docs: Add CONTRIBUTING.md with contributor guidelines`
+2. `docs: Add CHANGELOG.md (Keep a Changelog format)`
+3. `docs: Add bug report issue template`
+4. `docs: Add feature request issue template`
+5. `docs: Add issue template config`
+6. `docs: Add pull request template`
+7. `docs: Update TODO.md with Phase 0.5 progress`
+8. `docs: Update JOURNAL.md with session log`
+
+**Note on CODE_OF_CONDUCT.md:**
+Skipped because it requires personal contact information for enforcement. The Contributor Covenant template (https://www.contributor-covenant.org/version/2/1/code_of_conduct/) needs an email address where people can report violations. Owner should create this file with their own contact info.
+
+---
+
+### 2025-12-28 — SECURITY.md Created (Claude + MatejGomboc)
+
+**What happened:**
+- Created comprehensive SECURITY.md with:
+  - Vulnerability disclosure policy (GitHub Security Advisories)
+  - Security update policy
+  - Supported versions (development phase)
+  - Response timeline expectations
+  - Security best practices for users
+  - Security design principles
+
+**Files created:**
+- `SECURITY.md` — Comprehensive security policy
+
+**Commits made:**
+1. `docs: Update SECURITY.md with comprehensive security policy`
+
+---
 
 ### 2025-12-28 — Open Source Best Practices Review (Claude + MatejGomboc)
 
@@ -113,22 +184,6 @@ See `TODO.md` for the full battle plan.
 - CONTRIBUTING.md helps onboard new contributors
 - Issue and PR templates standardise contributions
 - Secret Scanning and Push Protection should be enabled
-
-**Open Source Checklist identified:**
-
-| Item | Status | Priority |
-|------|--------|----------|
-| LICENSE | ✅ Done | - |
-| README.md | ⚠️ Basic | High |
-| CONTRIBUTING.md | ❌ Missing | High |
-| CODE_OF_CONDUCT.md | ❌ Missing | Medium |
-| SECURITY.md | ❌ Missing | **CRITICAL** |
-| CHANGELOG.md | ❌ Missing | Medium |
-| Issue Templates | ❌ Missing | Medium |
-| PR Template | ❌ Missing | Medium |
-| Branch Protection | ⏳ Pending | High |
-| Secret Scanning | ❌ Disabled | **CRITICAL** |
-| Push Protection | ❌ Disabled | **CRITICAL** |
 
 **Files modified:**
 - `TODO.md` — Added Phase 0.5 with detailed open source best practices tasks
@@ -305,6 +360,13 @@ git-proxy-mcp/
 │   ├── devcontainer.json  ✅
 │   └── Dockerfile         ✅
 ├── .github/
+│   ├── CODEOWNERS         ✅
+│   ├── dependabot.yml     ✅
+│   ├── PULL_REQUEST_TEMPLATE.md  ✅ NEW
+│   ├── ISSUE_TEMPLATE/
+│   │   ├── bug_report.md      ✅ NEW
+│   │   ├── feature_request.md ✅ NEW
+│   │   └── config.yml         ✅ NEW
 │   └── workflows/
 │       └── ci_pr_validation.yml  ✅
 ├── .vscode/
@@ -319,25 +381,19 @@ git-proxy-mcp/
 ├── rustfmt.toml           ✅
 ├── .gitignore             ✅
 ├── .editorconfig          ✅
-├── LICENSE                ✅
-├── README.md              ✅
-├── TODO.md                ✅
+├── CHANGELOG.md           ✅ NEW
+├── CONTRIBUTING.md        ✅ NEW
+├── features.json          ✅
 ├── JOURNAL.md             ✅
-└── features.json          ✅
+├── LICENCE                ✅
+├── README.md              ✅ (basic, needs expansion)
+├── SECURITY.md            ✅
+└── TODO.md                ✅
 ```
 
-**Files to add (Phase 0.5):**
+**Files still to add:**
 ```
-├── SECURITY.md            ❌ Critical!
-├── CODE_OF_CONDUCT.md     ❌
-├── CONTRIBUTING.md        ❌
-├── CHANGELOG.md           ❌
-└── .github/
-    ├── ISSUE_TEMPLATE/
-    │   ├── bug_report.md  ❌
-    │   ├── feature_request.md ❌
-    │   └── config.yml     ❌
-    └── PULL_REQUEST_TEMPLATE.md ❌
+├── CODE_OF_CONDUCT.md     ⏳ Owner to create (requires personal contact)
 ```
 
 ---
