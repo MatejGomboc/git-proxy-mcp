@@ -8,6 +8,7 @@ use anyhow::Result;
 use clap::Parser;
 
 pub mod auth;
+pub mod config;
 pub mod error;
 
 /// Secure Git proxy MCP server for AI assistants.
@@ -37,18 +38,46 @@ struct Args {
 /// # Errors
 ///
 /// Returns an error if configuration loading or MCP server initialisation fails.
-#[allow(clippy::unnecessary_wraps)] // Will return errors once config/server is implemented
 fn main() -> Result<()> {
     let args = Args::parse();
 
     // TODO: Initialise tracing/logging based on verbosity
-    // TODO: Load configuration
-    // TODO: Start MCP server
 
     println!("git-proxy-mcp v{}", env!("CARGO_PKG_VERSION"));
-    println!("Config: {:?}", args.config);
-    println!("Verbose level: {}", args.verbose);
-    println!("Quiet mode: {}", args.quiet);
+
+    // Load configuration
+    let config_path = args.config.as_deref();
+    match config::load_config(config_path) {
+        Ok(cfg) => {
+            println!("Configuration loaded successfully!");
+            println!("  Remotes configured: {}", cfg.remotes.len());
+            if let Some(ref identity) = cfg.ai_identity {
+                println!("  AI Identity: {} <{}>", identity.name, identity.email);
+            }
+            println!("  Force push allowed: {}", cfg.security.allow_force_push);
+            println!(
+                "  Protected branches: {:?}",
+                cfg.security.protected_branches
+            );
+            println!("  Log level: {}", cfg.logging.level);
+
+            // Convert to credentials (demonstrates the pipeline works)
+            let credentials = cfg.into_credentials();
+            println!("\nCredentials loaded: {}", credentials.len());
+            for cred in &credentials {
+                println!("  - {} ({})", cred.name(), cred.url_pattern());
+            }
+        }
+        Err(e) => {
+            println!("Configuration error: {e}");
+            if config_path.is_none() {
+                if let Some(default_path) = config::default_config_path() {
+                    println!("\nExpected config at: {}", default_path.display());
+                    println!("Create one based on config/example-config.json");
+                }
+            }
+        }
+    }
 
     println!("\nMCP server not yet implemented. Coming soon!");
 
