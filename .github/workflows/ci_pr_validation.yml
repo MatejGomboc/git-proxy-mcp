@@ -5,7 +5,7 @@ permissions:
 
 on:
   push:
-    branches: [main]
+    branches: [main]  # Populate cache after PR merges
   pull_request:
     branches: ["**"]
   workflow_dispatch:
@@ -15,8 +15,9 @@ env:
   RUSTFLAGS: "-Dwarnings"
 
 jobs:
-  fmt:
-    name: Format Check
+  # Fast checks that don't need platform matrix or heavy caching
+  quick-checks:
+    name: Quick Checks (fmt, docs)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -30,9 +31,17 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all --check
 
-  clippy:
-    name: Clippy (${{ matrix.os }})
-    needs: fmt
+      - name: Check documentation
+        run: cargo doc --no-deps --document-private-items
+        env:
+          RUSTDOCFLAGS: "-Dwarnings"
+
+  # Combined build job: clippy + build + test in one job per platform
+  # This avoids recompilation across separate jobs
+  build:
+    name: Build (${{ matrix.os }})
+    needs: quick-checks
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -47,77 +56,41 @@ jobs:
         with:
           components: clippy
 
+      # Cache cargo registry, index, and build artifacts
+      # PRs: restore only (read-only). Main: restore and save.
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          # Only save cache on main branch pushes
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          # Shared cache key prefix
+          prefix-key: "v1-rust"
+          # Include Cargo.lock in cache key
+          cache-on-failure: true
+
       - name: Run Clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
 
-  build:
-    name: Build (${{ matrix.os }})
-    needs: clippy
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Build
+      - name: Build (debug)
         run: cargo build --verbose
 
       - name: Build (release)
         run: cargo build --release --verbose
 
-  test:
-    name: Test (${{ matrix.os }})
-    needs: build
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
       - name: Run tests
         run: cargo test --verbose
 
-  docs:
-    name: Documentation
-    needs: fmt
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Check documentation
-        run: cargo doc --no-deps --document-private-items
-        env:
-          RUSTDOCFLAGS: "-Dwarnings"
-
+  # Summary job for branch protection
   ci-success:
     name: CI Success
-    needs: [fmt, clippy, build, test, docs]
+    needs: [quick-checks, build]
     runs-on: ubuntu-latest
     if: always()
     steps:
       - name: Check if all jobs succeeded
         run: |
-          if [[ "${{ needs.fmt.result }}" != "success" ]] || \
-             [[ "${{ needs.clippy.result }}" != "success" ]] || \
-             [[ "${{ needs.build.result }}" != "success" ]] || \
-             [[ "${{ needs.test.result }}" != "success" ]] || \
-             [[ "${{ needs.docs.result }}" != "success" ]]; then
+          if [[ "${{ needs.quick-checks.result }}" != "success" ]] || \
+             [[ "${{ needs.build.result }}" != "success" ]]; then
             echo "One or more jobs failed"
             exit 1
           fi
