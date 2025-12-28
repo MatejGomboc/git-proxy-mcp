@@ -9,7 +9,7 @@ Handoff document for Claude instances. Read this first to understand current sta
 **Phase:** 0.6 Complete → Ready for Phase 1
 
 **Completed:**
-- ✅ Phase 0: Project setup (devcontainer, Cargo.toml, CI)
+- ✅ Phase 0: Project setup (Cargo.toml, CI, VS Code config)
 - ✅ Phase 0.5: Open source best practices
 - ✅ Phase 0.6: CI/CD optimisation (caching, job consolidation)
 
@@ -21,6 +21,19 @@ Handoff document for Claude instances. Read this first to understand current sta
 ---
 
 ## Session Log
+
+### 2025-12-28 — Remove Devcontainer
+
+**Decision:** Removed `.devcontainer/` folder.
+
+**Rationale:**
+- Contributors are Rust developers with rustup installed
+- CI tests all 3 platforms anyway
+- Native development provides better debugging
+- Devcontainer only supports Linux
+- Less maintenance overhead
+
+---
 
 ### 2025-12-28 — CI/CD Optimisation (Phase 0.6)
 
@@ -71,7 +84,7 @@ quick-checks (ubuntu)     build (matrix: ubuntu, macos, windows)
 ### 2025-12-28 — Phase 0 Setup
 
 **What happened:**
-- Created devcontainer, Cargo.toml, main.rs skeleton
+- Created Cargo.toml, main.rs skeleton
 - Set up CI workflow for Rust (fmt, clippy, build, test)
 - Created example config file
 - Fixed clippy lints
