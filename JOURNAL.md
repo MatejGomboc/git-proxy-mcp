@@ -79,22 +79,70 @@ See `TODO.md` for the full battle plan.
 - ✅ `config/example-config.json` created
 - ✅ GitHub repo settings configured (Actions, CodeQL, security)
 - ✅ Fixed clippy lint errors (thiserror version, multiple_crate_versions, unnecessary_wraps)
+- ✅ Added Phase 0.5 Open Source Best Practices to TODO.md
 
 **Awaiting verification:**
-- ⏳ CI passes on all platforms (ubuntu, macos, windows) — re-running after fixes
+- ⏳ CI passes on all platforms (ubuntu, macos, windows)
 - ⏳ Devcontainer works in VS Code
 
 **Next steps:**
 1. Verify CI passes — check GitHub Actions
-2. Test devcontainer locally (optional)
-3. Mark Phase 0 features as complete in `features.json`
-4. Begin Phase 1: Core Infrastructure
+2. Enable Secret Scanning and Push Protection in repo settings
+3. Set up branch protection rules for `main`
+4. Create SECURITY.md (critical for credential-handling project)
+5. Create CODE_OF_CONDUCT.md and CONTRIBUTING.md
+6. Begin Phase 1: Core Infrastructure
 
 **Blockers:** None
 
 ---
 
 ## Session Log
+
+### 2025-12-28 — Open Source Best Practices Review (Claude + MatejGomboc)
+
+**What happened:**
+- Reviewed https://opensource.guide/ for open source project best practices
+- Researched security best practices, code of conduct guidelines, documentation standards
+- Identified gaps in current project setup vs recommended practices
+- Added new "Phase 0.5: Open Source Best Practices" section to TODO.md
+
+**Key findings from opensource.guide:**
+- SECURITY.md is **critical** for a credential-handling project
+- CODE_OF_CONDUCT.md establishes community expectations (Contributor Covenant recommended)
+- CONTRIBUTING.md helps onboard new contributors
+- Issue and PR templates standardise contributions
+- Secret Scanning and Push Protection should be enabled
+
+**Open Source Checklist identified:**
+
+| Item | Status | Priority |
+|------|--------|----------|
+| LICENSE | ✅ Done | - |
+| README.md | ⚠️ Basic | High |
+| CONTRIBUTING.md | ❌ Missing | High |
+| CODE_OF_CONDUCT.md | ❌ Missing | Medium |
+| SECURITY.md | ❌ Missing | **CRITICAL** |
+| CHANGELOG.md | ❌ Missing | Medium |
+| Issue Templates | ❌ Missing | Medium |
+| PR Template | ❌ Missing | Medium |
+| Branch Protection | ⏳ Pending | High |
+| Secret Scanning | ❌ Disabled | **CRITICAL** |
+| Push Protection | ❌ Disabled | **CRITICAL** |
+
+**Files modified:**
+- `TODO.md` — Added Phase 0.5 with detailed open source best practices tasks
+
+**Commits made:**
+1. `docs: Add Phase 0.5 Open Source Best Practices to TODO.md`
+
+**References added:**
+- https://opensource.guide/
+- https://www.contributor-covenant.org/
+- https://keepachangelog.com/
+- https://www.conventionalcommits.org/
+
+---
 
 ### 2025-12-28 — Repository Configuration & CI Fixes (Claude + MatejGomboc)
 
@@ -128,12 +176,6 @@ See `TODO.md` for the full battle plan.
 | Copilot Autofix | On |
 | Fork PR approval | All external contributors |
 | Workflow permissions | Read-only |
-
-**Next steps:**
-1. Wait for CI to pass
-2. Set up branch protection rules for `main`
-3. Update `features.json` to mark Phase 0 complete
-4. Begin Phase 1: Core Infrastructure
 
 ---
 
@@ -284,6 +326,20 @@ git-proxy-mcp/
 └── features.json          ✅
 ```
 
+**Files to add (Phase 0.5):**
+```
+├── SECURITY.md            ❌ Critical!
+├── CODE_OF_CONDUCT.md     ❌
+├── CONTRIBUTING.md        ❌
+├── CHANGELOG.md           ❌
+└── .github/
+    ├── ISSUE_TEMPLATE/
+    │   ├── bug_report.md  ❌
+    │   ├── feature_request.md ❌
+    │   └── config.yml     ❌
+    └── PULL_REQUEST_TEMPLATE.md ❌
+```
+
 ---
 
 ## Style Guidelines
@@ -329,6 +385,10 @@ Use British spelling throughout documentation and user-facing text. It's posh!
 - **git2-rs:** https://docs.rs/git2
 - **Rust MCP examples:** https://github.com/modelcontextprotocol/servers
 - **Long-running agents guide:** https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents
+- **Open Source Guides:** https://opensource.guide/
+- **Contributor Covenant:** https://www.contributor-covenant.org/
+- **Keep a Changelog:** https://keepachangelog.com/
+- **Conventional Commits:** https://www.conventionalcommits.org/
 
 ---
 
