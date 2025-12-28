@@ -177,51 +177,51 @@ Use British spelling throughout documentation and user-facing text.
 Based on https://opensource.guide/ recommendations. Essential for building a welcoming, trustworthy open source project.
 
 ### 0.5.1 Security Documentation (Priority: CRITICAL)
-- [ ] Create `SECURITY.md` — **Critical for a credential-handling project!**
-  - [ ] Vulnerability disclosure policy (how to report privately)
-  - [ ] Security update policy
-  - [ ] Supported versions
-  - [ ] Security contact (email or GitHub Security Advisories)
-  - [ ] Response timeline expectations
-  - [ ] Link to GitHub's private vulnerability reporting
+- [x] Create `SECURITY.md` — **Critical for a credential-handling project!**
+  - [x] Vulnerability disclosure policy (how to report privately)
+  - [x] Security update policy
+  - [x] Supported versions
+  - [x] Security contact (email or GitHub Security Advisories)
+  - [x] Response timeline expectations
+  - [x] Link to GitHub's private vulnerability reporting
 
 ### 0.5.2 Community Documentation
-- [ ] Create `CODE_OF_CONDUCT.md`
+- [ ] Create `CODE_OF_CONDUCT.md` *(owner to create — requires personal contact info)*
   - [ ] Adopt Contributor Covenant (https://www.contributor-covenant.org/)
   - [ ] Define enforcement contacts
   - [ ] Link from README and CONTRIBUTING
-- [ ] Create `CONTRIBUTING.md`
-  - [ ] How to report bugs
-  - [ ] How to suggest features
-  - [ ] How to submit pull requests
-  - [ ] Coding style guidelines (link to rustfmt.toml, clippy config)
-  - [ ] Commit message format (conventional commits)
-  - [ ] PR review process
-  - [ ] Testing requirements
-  - [ ] British spelling requirement for docs 🇬🇧
+- [x] Create `CONTRIBUTING.md`
+  - [x] How to report bugs
+  - [x] How to suggest features
+  - [x] How to submit pull requests
+  - [x] Coding style guidelines (link to rustfmt.toml, clippy config)
+  - [x] Commit message format (conventional commits)
+  - [x] PR review process
+  - [x] Testing requirements
+  - [x] British spelling requirement for docs 🇬🇧
 
 ### 0.5.3 Issue & PR Templates
-- [ ] Create `.github/ISSUE_TEMPLATE/bug_report.md`
-  - [ ] Steps to reproduce
-  - [ ] Expected vs actual behaviour
-  - [ ] Environment (OS, version)
-  - [ ] Logs/error messages (remind: no credentials!)
-- [ ] Create `.github/ISSUE_TEMPLATE/feature_request.md`
-  - [ ] Problem description
-  - [ ] Proposed solution
-  - [ ] Alternatives considered
-- [ ] Create `.github/ISSUE_TEMPLATE/config.yml`
-  - [ ] Disable blank issues (require template)
-  - [ ] Link to discussions for questions
-- [ ] Create `.github/PULL_REQUEST_TEMPLATE.md`
-  - [ ] Description of changes
-  - [ ] Related issue(s)
-  - [ ] Checklist: tests, docs, changelog, no credentials in logs
+- [x] Create `.github/ISSUE_TEMPLATE/bug_report.md`
+  - [x] Steps to reproduce
+  - [x] Expected vs actual behaviour
+  - [x] Environment (OS, version)
+  - [x] Logs/error messages (remind: no credentials!)
+- [x] Create `.github/ISSUE_TEMPLATE/feature_request.md`
+  - [x] Problem description
+  - [x] Proposed solution
+  - [x] Alternatives considered
+- [x] Create `.github/ISSUE_TEMPLATE/config.yml`
+  - [x] Disable blank issues (require template)
+  - [x] Link to discussions for questions
+- [x] Create `.github/PULL_REQUEST_TEMPLATE.md`
+  - [x] Description of changes
+  - [x] Related issue(s)
+  - [x] Checklist: tests, docs, changelog, no credentials in logs
 
 ### 0.5.4 Project Documentation
-- [ ] Create `CHANGELOG.md` (Keep a Changelog format)
-  - [ ] Document all notable changes
-  - [ ] Categories: Added, Changed, Deprecated, Removed, Fixed, Security
+- [x] Create `CHANGELOG.md` (Keep a Changelog format)
+  - [x] Document all notable changes
+  - [x] Categories: Added, Changed, Deprecated, Removed, Fixed, Security
 - [ ] Expand `README.md`
   - [ ] Clear project description
   - [ ] Security architecture diagram
@@ -245,12 +245,12 @@ Based on https://opensource.guide/ recommendations. Essential for building a wel
 |------|--------|----------|
 | LICENSE | ✅ Done | - |
 | README.md | ⚠️ Basic | High |
-| CONTRIBUTING.md | ❌ Missing | High |
-| CODE_OF_CONDUCT.md | ❌ Missing | Medium |
-| SECURITY.md | ❌ Missing | **CRITICAL** |
-| CHANGELOG.md | ❌ Missing | Medium |
-| Issue Templates | ❌ Missing | Medium |
-| PR Template | ❌ Missing | Medium |
+| CONTRIBUTING.md | ✅ Done | - |
+| CODE_OF_CONDUCT.md | ⏳ Owner to create | Medium |
+| SECURITY.md | ✅ Done | - |
+| CHANGELOG.md | ✅ Done | - |
+| Issue Templates | ✅ Done | - |
+| PR Template | ✅ Done | - |
 | Branch Protection | ⏳ Pending | High |
 | Secret Scanning | ❌ Disabled | **CRITICAL** |
 | Push Protection | ❌ Disabled | **CRITICAL** |
@@ -476,9 +476,9 @@ Define these MCP tools:
   - [ ] MCP client setup examples (Claude Desktop, VS Code, Cursor, etc.)
   - [ ] Security considerations and threat model
   - [ ] Contributing guidelines
-- [ ] Add `CONTRIBUTING.md`
-- [ ] Add `SECURITY.md` — how to report vulnerabilities
-- [ ] Add `CHANGELOG.md` (keep-a-changelog format)
+- [x] Add `CONTRIBUTING.md`
+- [x] Add `SECURITY.md` — how to report vulnerabilities
+- [x] Add `CHANGELOG.md` (keep-a-changelog format)
 - [ ] Inline rustdoc comments for public APIs
 - [ ] Generate and host rustdoc (GitHub Pages?)
 
