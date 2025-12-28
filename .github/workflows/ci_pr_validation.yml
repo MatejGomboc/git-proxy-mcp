@@ -1,97 +1,104 @@
 name: CI - PR Validation
 
 permissions:
-  contents: read
+    contents: read
 
 on:
-  push:
-    branches: [main]  # Populate cache after PR merges
-  pull_request:
-    branches: ["**"]
-  workflow_dispatch:
+    push:
+        branches: [main] # Populate cache after PR merges
+
+    pull_request:
+        branches: ["**"]
+
+    workflow_dispatch:
 
 env:
-  CARGO_TERM_COLOR: always
-  RUSTFLAGS: "-Dwarnings"
+    CARGO_TERM_COLOR: always
+    RUSTFLAGS: "-Dwarnings"
 
 jobs:
-  # Fast checks that don't need platform matrix or heavy caching
-  quick-checks:
-    name: Quick Checks (fmt, docs)
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    # Fast checks that don't need platform matrix or heavy caching
+    quick-checks:
+        name: Quick Checks (fmt, docs)
+        runs-on: ubuntu-latest
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
 
-      - name: Check formatting
-        run: cargo fmt --all --check
+            - name: Install Rust toolchain
+              uses: dtolnay/rust-toolchain@stable
+              with:
+                  components: rustfmt
 
-      - name: Check documentation
-        run: cargo doc --no-deps --document-private-items
-        env:
-          RUSTDOCFLAGS: "-Dwarnings"
+            - name: Check formatting
+              run: cargo fmt --all --check
 
-  # Combined build job: clippy + build + test in one job per platform
-  # This avoids recompilation across separate jobs
-  build:
-    name: Build (${{ matrix.os }})
-    needs: quick-checks
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+            - name: Check documentation
+              run: cargo doc --no-deps --document-private-items
+              env:
+                  RUSTDOCFLAGS: "-Dwarnings"
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
+    # Combined build job: clippy + build + test in one job per platform
+    # This avoids recompilation across separate jobs
+    build:
+        name: Build (${{ matrix.os }})
+        needs: quick-checks
+        timeout-minutes: 20
 
-      # Cache cargo registry, index, and build artifacts
-      # PRs: restore only (read-only). Main: restore and save.
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
-        with:
-          # Only save cache on main branch pushes
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-          # Shared cache key prefix
-          prefix-key: "v1-rust"
-          # Include Cargo.lock in cache key
-          cache-on-failure: true
+        strategy:
+            fail-fast: false
+            matrix:
+                os: [ubuntu-latest, macos-latest, windows-latest]
 
-      - name: Run Clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        runs-on: ${{ matrix.os }}
 
-      - name: Build (debug)
-        run: cargo build --verbose
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
 
-      - name: Build (release)
-        run: cargo build --release --verbose
+            - name: Install Rust toolchain
+              uses: dtolnay/rust-toolchain@stable
+              with:
+                  components: clippy
 
-      - name: Run tests
-        run: cargo test --verbose
+            # Cache cargo registry, index, and build artifacts
+            # PRs: restore only (read-only). Main: restore and save.
+            - name: Cache Rust dependencies
+              uses: Swatinem/rust-cache@v2
+              with:
+                  # Only save cache on main branch pushes
+                  save-if: ${{ github.ref == 'refs/heads/main' }}
+                  # Shared cache key prefix
+                  prefix-key: "v1-rust"
+                  # Include Cargo.lock in cache key
+                  cache-on-failure: true
 
-  # Summary job for branch protection
-  ci-success:
-    name: CI Success
-    needs: [quick-checks, build]
-    runs-on: ubuntu-latest
-    if: always()
-    steps:
-      - name: Check if all jobs succeeded
-        run: |
-          if [[ "${{ needs.quick-checks.result }}" != "success" ]] || \
-             [[ "${{ needs.build.result }}" != "success" ]]; then
-            echo "One or more jobs failed"
-            exit 1
-          fi
-          echo "All jobs completed successfully"
+            - name: Run Clippy
+              run: cargo clippy --all-targets --all-features -- -D warnings
+
+            - name: Build (debug)
+              run: cargo build --verbose
+
+            - name: Build (release)
+              run: cargo build --release --verbose
+
+            - name: Run tests
+              run: cargo test --verbose
+
+    # Summary job for branch protection
+    ci-success:
+        name: CI Success
+        needs: [quick-checks, build]
+        runs-on: ubuntu-latest
+        if: always()
+
+        steps:
+            - name: Check if all jobs succeeded
+              run: |
+                  if [[ "${{ needs.quick-checks.result }}" != "success" ]] || \
+                     [[ "${{ needs.build.result }}" != "success" ]]; then
+                      echo "One or more jobs failed"
+                      exit 1
+                  fi
+                  echo "All jobs completed successfully"
