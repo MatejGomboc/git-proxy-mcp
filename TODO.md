@@ -103,15 +103,15 @@ Features are tracked in `.claude/features.json` with pass/fail status.
 | Spelling | British 🇬🇧 | colour, behaviour, organisation, centre, licence — it's posh! |
 | Feature tracking | `.claude/features.json` | JSON format discourages inappropriate edits |
 | Indentation | 4 spaces | Consistent across all file types (see `.editorconfig`) |
+| Devcontainer | ❌ No | Native dev preferred; CI tests all platforms; less maintenance |
 
 ---
 
 ## Phase 0: Project Setup ✅ COMPLETE
 
-- [x] Devcontainer configuration
 - [x] Cargo.toml with dependencies
 - [x] CI workflow (fmt, clippy, build, test)
-- [x] VS Code configuration
+- [x] VS Code configuration (settings, extensions, launch)
 - [x] GitHub Actions with restricted permissions
 - [x] CodeQL analysis enabled
 
@@ -174,7 +174,7 @@ quick-checks (ubuntu)     build (matrix: ubuntu, macos, windows)
 
 ### Style Guide
 
-- [x] `.editorconfig` — Editor-agnostic formatting rules (4-space indent, LF, UTF-8)
+- [x] `.editorconfig` — Editor-agnostic formatting rules (4-space indent, UTF-8)
 - [x] `STYLE.md` — Comprehensive code style guide
 - [x] YAML files use 4-space indentation (aligned with StringWiggler)
 
