@@ -1,6 +1,5 @@
 # http://editorconfig.org
 # VS Code: https://marketplace.visualstudio.com/items?itemName=EditorConfig.EditorConfig
-# VS 2022: https://marketplace.visualstudio.com/items?itemName=MadsKristensen.TrailingWhitespace64
 
 # Top-most EditorConfig file
 root = true
