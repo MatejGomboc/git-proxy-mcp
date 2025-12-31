@@ -31,7 +31,7 @@ jobs:
             - name: Run cleanup script
               uses: actions/github-script@v8
               env:
-                  INPUT_STALE_DAYS: ${{ inputs.stale_days || 0 }}
+                  INPUT_STALE_DAYS: ${{ inputs.stale_days || 7 }}
                   INPUT_DRY_RUN: ${{ inputs.dry_run || false }}
               with:
                   script: |
