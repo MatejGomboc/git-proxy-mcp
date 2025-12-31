@@ -11,6 +11,7 @@ pub mod config;
 pub mod error;
 pub mod git;
 pub mod mcp;
+pub mod security;
 
 /// Secure Git proxy MCP server for AI assistants.
 ///

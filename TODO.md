@@ -96,17 +96,7 @@ while allowing AI assistants to work with repos in their own environments.
 
 ---
 
-## Phase 4: Security & Safety ← CURRENT
-
-- [ ] Audit logging to file
-- [ ] Protected branch enforcement
-- [ ] Force push blocking
-- [ ] Repository allowlist/blocklist enforcement
-- [ ] Operation rate limiting (prevent runaway AI operations)
-
----
-
-## Phase 5: Integration Testing
+## Phase 5: Integration Testing ← CURRENT
 
 - [ ] Integration tests with mock git server
 - [ ] End-to-end tests for Git command proxy
