@@ -4,7 +4,6 @@
 //! repositories while keeping credentials secure on the user's machine.
 //! Credentials are never transmitted through MCP responses.
 
-use anyhow::Result;
 use clap::Parser;
 
 pub mod auth;
@@ -34,11 +33,7 @@ struct Args {
 }
 
 /// Entry point for the git-proxy-mcp server.
-///
-/// # Errors
-///
-/// Returns an error if configuration loading or MCP server initialisation fails.
-fn main() -> Result<()> {
+fn main() {
     let args = Args::parse();
 
     // TODO: Initialise tracing/logging based on verbosity
@@ -80,8 +75,6 @@ fn main() -> Result<()> {
     }
 
     println!("\nMCP server not yet implemented. Coming soon!");
-
-    Ok(())
 }
 
 #[cfg(test)]

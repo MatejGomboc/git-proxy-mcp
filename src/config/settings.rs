@@ -160,8 +160,7 @@ impl AuthConfig {
                 if key_path.is_empty() {
                     return Err(ConfigError::ValidationError {
                         message: format!(
-                            "key_path cannot be empty for SSH key auth on remote '{}'",
-                            remote_name
+                            "key_path cannot be empty for SSH key auth on remote '{remote_name}'"
                         ),
                     });
                 }

@@ -84,9 +84,9 @@ pub fn load_config(path: Option<&Path>) -> Result<Config, ConfigError> {
 /// Returns the original path if `~` expansion fails or is not needed.
 #[must_use]
 pub fn expand_tilde(path: &str) -> PathBuf {
-    if path.starts_with("~/") {
+    if let Some(stripped) = path.strip_prefix("~/") {
         if let Some(home) = dirs::home_dir() {
-            return home.join(&path[2..]);
+            return home.join(stripped);
         }
     } else if path == "~" {
         if let Some(home) = dirs::home_dir() {
