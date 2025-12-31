@@ -1,19 +1,12 @@
 /**
  * GitHub Actions Cache Cleanup Script
  *
- * Simple cleanup based on last access time.
- * With the new caching strategy, PRs never create caches and main only
- * saves on tooling changes, so there's minimal cleanup needed.
- *
- * This is mainly a manual utility for proactive cleanup.
+ * Keeps only the most recent cache per group (rust-Windows, rust-Linux, etc.)
+ * and deletes all older/stale caches.
  */
 
 module.exports = async ({ github, context, core }) => {
-    const config = {
-        staleDays: parseInt(process.env.INPUT_STALE_DAYS || '7', 10),
-        dryRun: process.env.INPUT_DRY_RUN === 'true',
-    };
-
+    const dryRun = process.env.INPUT_DRY_RUN === 'true';
     const owner = context.repo.owner;
     const repo = context.repo.repo;
 
@@ -39,7 +32,7 @@ module.exports = async ({ github, context, core }) => {
     }
 
     function log(message, level = 'info') {
-        const prefix = config.dryRun ? '[DRY-RUN] ' : '';
+        const prefix = dryRun ? '[DRY-RUN] ' : '';
         if (level === 'error') {
             core.error(`${prefix}${message}`);
         } else if (level === 'warning') {
@@ -79,7 +72,7 @@ module.exports = async ({ github, context, core }) => {
     }
 
     async function deleteCache(cache, reason) {
-        if (config.dryRun) {
+        if (dryRun) {
             log(`  Would delete: ${cache.key} (${formatBytes(cache.size_in_bytes)}) [${reason}]`);
             stats.freedBytes += cache.size_in_bytes;
             return true;
@@ -107,8 +100,7 @@ module.exports = async ({ github, context, core }) => {
         log('='.repeat(60));
         log('');
         log(`Repository:   ${owner}/${repo}`);
-        log(`Stale days:   ${config.staleDays}${config.staleDays === 0 ? ' (delete all)' : ''}`);
-        log(`Dry run:      ${config.dryRun}`);
+        log(`Dry run:      ${dryRun}`);
         log('');
 
         const caches = await listAllCaches();
@@ -122,12 +114,35 @@ module.exports = async ({ github, context, core }) => {
         log(`Found ${caches.length} cache(s).`);
         log('');
 
+        // Group caches by prefix and keep only the most recent in each group
+        const cacheGroups = {};
         for (const cache of caches) {
-            const daysSinceAccess = getDaysSinceAccess(cache);
+            // Extract prefix: everything before the last hash segment
+            const prefix = cache.key.substring(0, cache.key.lastIndexOf('-'));
 
-            // Delete if stale_days is 0 (all) or cache exceeds threshold
-            if (config.staleDays === 0 || daysSinceAccess >= config.staleDays) {
-                if (await deleteCache(cache, `${daysSinceAccess}d since last access`)) {
+            if (!cacheGroups[prefix]) {
+                cacheGroups[prefix] = [];
+            }
+            cacheGroups[prefix].push(cache);
+        }
+
+        for (const [prefix, groupCaches] of Object.entries(cacheGroups)) {
+            // Sort by last_accessed_at descending (most recent first)
+            groupCaches.sort((a, b) =>
+                new Date(b.last_accessed_at) - new Date(a.last_accessed_at)
+            );
+
+            log(`Group: ${prefix} (${groupCaches.length} cache(s))`);
+
+            // Keep the first (most recent), delete the rest
+            if (groupCaches.length > 0) {
+                log(`  Keeping: ${groupCaches[0].key}`);
+            }
+
+            for (let i = 1; i < groupCaches.length; i++) {
+                const cache = groupCaches[i];
+                const daysSinceAccess = getDaysSinceAccess(cache);
+                if (await deleteCache(cache, `stale, ${daysSinceAccess}d since last access`)) {
                     stats.deletedCaches++;
                 }
             }
@@ -146,7 +161,7 @@ module.exports = async ({ github, context, core }) => {
             log(`  Errors:        ${stats.errors}`, 'warning');
         }
 
-        if (config.dryRun) {
+        if (dryRun) {
             log('');
             log('Dry run - no caches were actually deleted.', 'warning');
         }
@@ -155,7 +170,7 @@ module.exports = async ({ github, context, core }) => {
         core.setOutput('freed_bytes', stats.freedBytes);
 
         log('');
-        log('✅ Cleanup completed');
+        log('Cleanup completed');
 
     } catch (error) {
         core.setFailed(`Cleanup failed: ${error.message}`);
