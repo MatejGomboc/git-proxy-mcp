@@ -96,8 +96,11 @@ jobs:
               run: cargo test --verbose
 
             # Save cache only on cache miss (tooling version changed)
+            # continue-on-error suppresses "unable to reserve cache" warnings
+            # when multiple jobs race to save (harmless, one will succeed)
             - name: Save Rust cache
               if: steps.cache-restore.outputs.cache-hit != 'true'
+              continue-on-error: true
               uses: actions/cache/save@v4
               with:
                   path: |
