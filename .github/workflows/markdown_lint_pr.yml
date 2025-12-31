@@ -1,16 +1,9 @@
-name: Markdown Lint
+name: Markdown Lint - Pull Request
 
 permissions:
     contents: read
 
 on:
-    push:
-        branches: [main]
-        paths:
-            - "**/*.md"
-            - ".markdownlint.json"
-            - ".markdownlint-cli2.jsonc"
-
     pull_request:
         branches: ["**"]
         paths:
@@ -27,15 +20,23 @@ jobs:
             - name: Checkout repository
               uses: actions/checkout@v6
 
-            - name: Setup Node.js with cache
+            - name: Setup Node.js
+              id: setup-node
               uses: actions/setup-node@v4
               with:
                   node-version: "lts/*"
-                  cache: "npm"
-                  # Use workflow file as cache key (no package.json in repo)
-                  cache-dependency-path: ".github/workflows/markdown_lint.yml"
 
-            # Pre-install to populate cache (npx alone doesn't reliably cache)
+            - name: Get markdownlint-cli2 latest version
+              id: mdlint-version
+              run: echo "version=$(npm view markdownlint-cli2 version)" >> "$GITHUB_OUTPUT"
+
+            # Restore cache from main branch (read-only)
+            - name: Restore npm cache
+              uses: actions/cache/restore@v4
+              with:
+                  path: ~/.npm
+                  key: npm-markdownlint-${{ runner.os }}-node-${{ steps.setup-node.outputs.node-version }}-mdlint-${{ steps.mdlint-version.outputs.version }}
+
             - name: Install markdownlint-cli2
               run: npm install -g markdownlint-cli2
 

@@ -1,24 +1,17 @@
-name: CI - PR Validation
+name: CI - Pull Request
 
 permissions:
     contents: read
-    actions: write # Required for cache cleanup on main
 
 on:
-    push:
-        branches: [main] # Populate cache after PR merges
-
     pull_request:
         branches: ["**"]
-
-    workflow_dispatch:
 
 env:
     CARGO_TERM_COLOR: always
     RUSTFLAGS: "-Dwarnings"
 
 jobs:
-    # Fast checks that don't need platform matrix or heavy caching
     quick-checks:
         name: Quick Checks (fmt, docs)
         runs-on: ubuntu-latest
@@ -40,8 +33,6 @@ jobs:
               env:
                   RUSTDOCFLAGS: "-Dwarnings"
 
-    # Combined build job: clippy + build + test in one job per platform
-    # This avoids recompilation across separate jobs
     build:
         name: Build (${{ matrix.os }})
         needs: quick-checks
@@ -63,42 +54,31 @@ jobs:
               with:
                   components: clippy
 
-            # Cache cargo registry, index, and build artifacts
-            # PRs: restore only (read-only). Main: restore and save.
-            - name: Cache Rust dependencies
-              id: rust-cache
-              uses: Swatinem/rust-cache@v2
-              with:
-                  # Only save cache on main branch pushes
-                  save-if: ${{ github.ref == 'refs/heads/main' }}
-                  # Shared cache key prefix
-                  prefix-key: "v1-rust"
-                  # Include Cargo.lock in cache key
-                  cache-on-failure: true
-
-            # Delete old caches only on cache miss (new cache will be created)
-            # This prevents stale caches from accumulating
-            - name: Cleanup old caches (main, cache miss only)
-              if: github.ref == 'refs/heads/main' && steps.rust-cache.outputs.cache-hit != 'true'
+            - name: Get Rust version
+              id: rust-version
+              shell: bash
               run: |
-                  echo "Cache miss detected - cleaning up old caches..."
-
-                  # List caches matching our prefix for this OS
-                  CACHE_KEYS=$(gh actions-cache list --branch main --limit 100 | \
-                      grep -E "^v1-rust-${{ runner.os }}" | cut -f1) || true
-
-                  if [ -n "$CACHE_KEYS" ]; then
-                      echo "Found old caches to delete:"
-                      for KEY in $CACHE_KEYS; do
-                          echo "  Deleting: $KEY"
-                          gh actions-cache delete "$KEY" --branch main --confirm || true
-                      done
+                  # Cross-platform: use shasum on macOS, sha256sum elsewhere
+                  if command -v sha256sum &> /dev/null; then
+                      HASH_CMD="sha256sum"
                   else
-                      echo "No old caches found"
+                      HASH_CMD="shasum -a 256"
                   fi
-              env:
-                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-                  GH_REPO: ${{ github.repository }}
+                  echo "version=$(rustc --version | $HASH_CMD | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+            # Restore cache from main branch (read-only)
+            - name: Restore Rust cache
+              uses: actions/cache/restore@v4
+              with:
+                  path: |
+                      ~/.cargo/bin/
+                      ~/.cargo/registry/index/
+                      ~/.cargo/registry/cache/
+                      ~/.cargo/git/db/
+                      target/
+                  key: rust-${{ runner.os }}-${{ steps.rust-version.outputs.version }}-${{ hashFiles('**/Cargo.lock') }}
+                  restore-keys: |
+                      rust-${{ runner.os }}-${{ steps.rust-version.outputs.version }}-
 
             - name: Run Clippy
               run: cargo clippy --all-targets --all-features -- -D warnings
@@ -112,7 +92,6 @@ jobs:
             - name: Run tests
               run: cargo test --verbose
 
-    # Summary job for branch protection
     ci-success:
         name: CI Success
         needs: [quick-checks, build]
