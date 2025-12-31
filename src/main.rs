@@ -7,6 +7,9 @@
 use anyhow::Result;
 use clap::Parser;
 
+pub mod auth;
+pub mod error;
+
 /// Secure Git proxy MCP server for AI assistants.
 ///
 /// Allows AI assistants to work with private Git repositories while keeping

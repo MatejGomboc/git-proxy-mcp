@@ -2,7 +2,6 @@
     "recommendations": [
         "rust-lang.rust-analyzer",
         "tamasfe.even-better-toml",
-        "serayuzgur.crates",
         "fill-labs.dependi",
         "vadimcn.vscode-lldb",
         "usernamehw.errorlens",
@@ -13,6 +12,7 @@
         "gruntfuggly.todo-tree",
         "redhat.vscode-yaml",
         "ms-vscode.hexeditor",
-        "github.copilot"
+        "github.copilot",
+        "github.vscode-pull-request-github"
     ]
 }
