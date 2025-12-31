@@ -7,24 +7,11 @@
 **Guiding Principles:**
 
 - Security over speed. Take the time to do it right.
-- Work on ONE feature at a time. See `.claude/features.json` for tracking.
-- Use British spelling in documentation and user-facing text. It's posh! 🇬🇧
+- Work on ONE feature at a time.
+- Use British spelling in documentation and user-facing text.
 - Follow the style guide in `STYLE.md`.
 
 **For AI Assistants:** See `.claude/CLAUDE.md` for project context.
-
----
-
-## Feature Tracking
-
-Features are tracked in `.claude/features.json` with pass/fail status.
-
-**Rules:**
-
-- Only change the `passes` field when a feature is verified complete
-- Do NOT remove or edit feature descriptions
-- Work on ONE feature at a time
-- Verify each feature works before marking it as passing
 
 ---
 
@@ -187,21 +174,21 @@ quick-checks (ubuntu)     build (matrix: ubuntu, macos, windows)
 
 ### 1.1 Configuration System
 
-- [ ] Define config file JSON schema
-- [ ] Create `src/config/mod.rs`
-- [ ] Create `src/config/settings.rs`
+- [x] Define config file JSON schema
+- [x] Create `src/config/mod.rs`
+- [x] Create `src/config/settings.rs`
 - [x] Create `config/example-config.json`
 
 ### 1.2 Credential Management
 
-- [ ] Create `src/auth/mod.rs`
-- [ ] Create `src/auth/credentials.rs`
-- [ ] Create `src/auth/matcher.rs`
-- [ ] Use `secrecy` crate for sensitive strings
+- [x] Create `src/auth/mod.rs`
+- [x] Create `src/auth/credentials.rs`
+- [ ] Create `src/auth/matcher.rs` (URL pattern matching)
+- [x] Use `secrecy` crate for sensitive strings
 
 ### 1.3 Error Handling
 
-- [ ] Create `src/error.rs` with custom error types
+- [x] Create `src/error.rs` with custom error types
 
 ---
 
@@ -280,4 +267,4 @@ quick-checks (ubuntu)     build (matrix: ubuntu, macos, windows)
 
 ---
 
-*Last updated: 2025-12-28*
+*Last updated: 2025-12-31*
