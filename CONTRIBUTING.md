@@ -53,11 +53,11 @@ Before submitting a bug report:
 1. Check the [existing issues](https://github.com/MatejGomboc/git-proxy-mcp/issues) to avoid duplicates
 2. Ensure you're using the latest version
 3. Collect relevant information:
-   - Operating system and version
-   - Rust version (`rustc --version`)
-   - git-proxy-mcp version
-   - Steps to reproduce
-   - Expected vs actual behaviour
+    - Operating system and version
+    - Rust version (`rustc --version`)
+    - git-proxy-mcp version
+    - Steps to reproduce
+    - Expected vs actual behaviour
 
 When submitting:
 
