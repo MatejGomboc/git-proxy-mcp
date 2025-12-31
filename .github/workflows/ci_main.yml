@@ -116,6 +116,7 @@ jobs:
 
         steps:
             - name: Check if all jobs succeeded
+              id: check-results
               run: |
                   if [[ "${{ needs.quick-checks.result }}" != "success" ]] || \
                      [[ "${{ needs.build.result }}" != "success" ]]; then
@@ -123,3 +124,74 @@ jobs:
                       exit 1
                   fi
                   echo "All jobs completed successfully"
+
+            - name: Checkout repository
+              if: success()
+              uses: actions/checkout@v6
+
+            - name: Cleanup stale caches
+              if: success()
+              uses: actions/github-script@v8
+              with:
+                  script: |
+                      const owner = context.repo.owner;
+                      const repo = context.repo.repo;
+
+                      // Get current cache keys (just created by this workflow run)
+                      const response = await github.rest.actions.getActionsCacheList({
+                          owner,
+                          repo,
+                          per_page: 100,
+                          sort: 'last_accessed_at',
+                          direction: 'desc',
+                      });
+
+                      const caches = response.data.actions_caches;
+                      if (caches.length === 0) {
+                          core.info('No caches found');
+                          return;
+                      }
+
+                      // Group caches by prefix (rust-Windows, rust-Linux, rust-macOS, npm-markdownlint)
+                      const cacheGroups = {};
+                      for (const cache of caches) {
+                          // Extract prefix: everything before the hash
+                          const match = cache.key.match(/^(.+?-[a-f0-9]{40})/);
+                          const prefix = match ? cache.key.substring(0, cache.key.lastIndexOf('-')) : cache.key;
+
+                          if (!cacheGroups[prefix]) {
+                              cacheGroups[prefix] = [];
+                          }
+                          cacheGroups[prefix].push(cache);
+                      }
+
+                      // For each group, keep only the most recently accessed cache
+                      let deletedCount = 0;
+                      let freedBytes = 0;
+
+                      for (const [prefix, groupCaches] of Object.entries(cacheGroups)) {
+                          // Sort by last_accessed_at descending (most recent first)
+                          groupCaches.sort((a, b) =>
+                              new Date(b.last_accessed_at) - new Date(a.last_accessed_at)
+                          );
+
+                          // Delete all but the first (most recent) cache
+                          for (let i = 1; i < groupCaches.length; i++) {
+                              const cache = groupCaches[i];
+                              try {
+                                  await github.rest.actions.deleteActionsCacheById({
+                                      owner,
+                                      repo,
+                                      cache_id: cache.id,
+                                  });
+                                  core.info(`Deleted stale cache: ${cache.key}`);
+                                  deletedCount++;
+                                  freedBytes += cache.size_in_bytes;
+                              } catch (error) {
+                                  core.warning(`Failed to delete cache ${cache.key}: ${error.message}`);
+                              }
+                          }
+                      }
+
+                      const freedMB = (freedBytes / (1024 * 1024)).toFixed(2);
+                      core.info(`Cleanup complete: deleted ${deletedCount} stale cache(s), freed ${freedMB} MB`);
