@@ -21,7 +21,7 @@ Once we reach v1.0, we will maintain security updates for the current major vers
 
 1. **Preferred:** Use [GitHub Security Advisories](https://github.com/MatejGomboc/git-proxy-mcp/security/advisories/new) to report vulnerabilities privately.
 
-2. **Alternative:** Email the maintainer directly at the email address listed in the [CODEOWNERS](.github/CODEOWNERS) file or on the maintainer's GitHub profile.
+2. **Alternative:** Email the repository owner directly at <matejg03@gmail.com>.
 
 ### What to Include
 
