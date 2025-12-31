@@ -96,19 +96,7 @@ while allowing AI assistants to work with repos in their own environments.
 
 ---
 
-## Phase 3: Git Command Proxy ← CURRENT
-
-- [ ] Parse and validate incoming Git commands
-- [ ] Match remote URL to configured credentials
-- [ ] Inject credentials via Git credential helper or environment
-- [ ] Execute Git command as subprocess
-- [ ] Capture and return stdout, stderr, exit code
-- [ ] Sanitize output to prevent credential leakage
-- [ ] LFS detection and warning
-
----
-
-## Phase 4: Security & Safety
+## Phase 4: Security & Safety ← CURRENT
 
 - [ ] Audit logging to file
 - [ ] Protected branch enforcement

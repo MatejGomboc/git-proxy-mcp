@@ -9,6 +9,7 @@ use clap::Parser;
 pub mod auth;
 pub mod config;
 pub mod error;
+pub mod git;
 pub mod mcp;
 
 /// Secure Git proxy MCP server for AI assistants.
