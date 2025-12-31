@@ -63,12 +63,25 @@ jobs:
               with:
                   components: clippy
 
-            # Delete old main branch caches before saving new ones
-            # This prevents stale caches from consuming storage quota
-            - name: Cleanup old caches (main only)
-              if: github.ref == 'refs/heads/main'
+            # Cache cargo registry, index, and build artifacts
+            # PRs: restore only (read-only). Main: restore and save.
+            - name: Cache Rust dependencies
+              id: rust-cache
+              uses: Swatinem/rust-cache@v2
+              with:
+                  # Only save cache on main branch pushes
+                  save-if: ${{ github.ref == 'refs/heads/main' }}
+                  # Shared cache key prefix
+                  prefix-key: "v1-rust"
+                  # Include Cargo.lock in cache key
+                  cache-on-failure: true
+
+            # Delete old caches only on cache miss (new cache will be created)
+            # This prevents stale caches from accumulating
+            - name: Cleanup old caches (main, cache miss only)
+              if: github.ref == 'refs/heads/main' && steps.rust-cache.outputs.cache-hit != 'true'
               run: |
-                  echo "Cleaning up old caches for main branch..."
+                  echo "Cache miss detected - cleaning up old caches..."
 
                   # List caches matching our prefix for this OS
                   CACHE_KEYS=$(gh actions-cache list --branch main --limit 100 | \
@@ -86,18 +99,6 @@ jobs:
               env:
                   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
                   GH_REPO: ${{ github.repository }}
-
-            # Cache cargo registry, index, and build artifacts
-            # PRs: restore only (read-only). Main: restore and save.
-            - name: Cache Rust dependencies
-              uses: Swatinem/rust-cache@v2
-              with:
-                  # Only save cache on main branch pushes
-                  save-if: ${{ github.ref == 'refs/heads/main' }}
-                  # Shared cache key prefix
-                  prefix-key: "v1-rust"
-                  # Include Cargo.lock in cache key
-                  cache-on-failure: true
 
             - name: Run Clippy
               run: cargo clippy --all-targets --all-features -- -D warnings
