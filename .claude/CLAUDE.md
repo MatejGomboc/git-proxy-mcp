@@ -13,9 +13,15 @@ Secure Git proxy MCP server in Rust. Credentials stay on user's PC, never transm
 | PR requirements | `CONTRIBUTING.md` § Pull Requests |
 | Development roadmap | `TODO.md` |
 
-## Critical Security Rule
+## Critical Rules
+
+### Security
 
 Credentials NEVER in logs, errors, MCP responses, or debug output. See `CONTRIBUTING.md` § Security-Conscious Coding.
+
+### Git Workflow
+
+**NEVER push directly to main.** Always create a feature branch and open a pull request. Do not bypass repository branch protection rules under any circumstances.
 
 ## Off Limits
 
