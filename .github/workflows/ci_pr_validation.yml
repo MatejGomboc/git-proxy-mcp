@@ -2,6 +2,7 @@ name: CI - PR Validation
 
 permissions:
     contents: read
+    actions: write # Required for cache cleanup on main
 
 on:
     push:
@@ -61,6 +62,30 @@ jobs:
               uses: dtolnay/rust-toolchain@stable
               with:
                   components: clippy
+
+            # Delete old main branch caches before saving new ones
+            # This prevents stale caches from consuming storage quota
+            - name: Cleanup old caches (main only)
+              if: github.ref == 'refs/heads/main'
+              run: |
+                  echo "Cleaning up old caches for main branch..."
+
+                  # List caches matching our prefix for this OS
+                  CACHE_KEYS=$(gh actions-cache list --branch main --limit 100 | \
+                      grep -E "^v1-rust-${{ runner.os }}" | cut -f1) || true
+
+                  if [ -n "$CACHE_KEYS" ]; then
+                      echo "Found old caches to delete:"
+                      for KEY in $CACHE_KEYS; do
+                          echo "  Deleting: $KEY"
+                          gh actions-cache delete "$KEY" --branch main --confirm || true
+                      done
+                  else
+                      echo "No old caches found"
+                  fi
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                  GH_REPO: ${{ github.repository }}
 
             # Cache cargo registry, index, and build artifacts
             # PRs: restore only (read-only). Main: restore and save.
