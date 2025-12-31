@@ -1,0 +1,40 @@
+name: Markdown Lint - Pull Request
+
+permissions:
+    contents: read
+
+on:
+    pull_request:
+        branches: ["**"]
+        paths:
+            - "**/*.md"
+            - ".markdownlint.json"
+            - ".markdownlint-cli2.jsonc"
+
+jobs:
+    lint-markdown:
+        name: Lint Markdown
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v6
+
+            - name: Setup Node.js
+              id: setup-node
+              uses: actions/setup-node@v4
+              with:
+                  node-version: "lts/*"
+
+            # Restore cache from main branch (read-only)
+            - name: Restore npm cache
+              uses: actions/cache/restore@v4
+              with:
+                  path: ~/.npm
+                  key: npm-markdownlint-${{ runner.os }}-node-${{ steps.setup-node.outputs.node-version }}
+
+            - name: Install markdownlint-cli2
+              run: npm install -g markdownlint-cli2
+
+            - name: Run markdownlint
+              run: markdownlint-cli2 "**/*.md"
