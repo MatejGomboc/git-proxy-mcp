@@ -8,7 +8,6 @@
 use std::path::PathBuf;
 
 use secrecy::{ExposeSecret, SecretString};
-use serde::Deserialize;
 
 /// Authentication method for a remote.
 ///
@@ -45,7 +44,7 @@ pub struct Credential {
 impl Credential {
     /// Creates a new credential entry.
     #[must_use]
-    pub fn new(name: String, url_pattern: String, auth: AuthMethod) -> Self {
+    pub const fn new(name: String, url_pattern: String, auth: AuthMethod) -> Self {
         Self {
             name,
             url_pattern,
@@ -67,7 +66,7 @@ impl Credential {
 
     /// Returns a reference to the authentication method.
     #[must_use]
-    pub fn auth(&self) -> &AuthMethod {
+    pub const fn auth(&self) -> &AuthMethod {
         &self.auth
     }
 }
@@ -88,7 +87,7 @@ pub struct PatCredential {
 impl PatCredential {
     /// Creates a new PAT credential.
     #[must_use]
-    pub fn new(token: SecretString) -> Self {
+    pub const fn new(token: SecretString) -> Self {
         Self { token }
     }
 
@@ -132,7 +131,7 @@ pub struct SshKeyCredential {
 impl SshKeyCredential {
     /// Creates a new SSH key credential.
     #[must_use]
-    pub fn new(key_path: PathBuf, passphrase: Option<SecretString>) -> Self {
+    pub const fn new(key_path: PathBuf, passphrase: Option<SecretString>) -> Self {
         Self {
             key_path,
             passphrase,
@@ -141,7 +140,7 @@ impl SshKeyCredential {
 
     /// Returns the path to the SSH key file.
     #[must_use]
-    pub fn key_path(&self) -> &PathBuf {
+    pub const fn key_path(&self) -> &PathBuf {
         &self.key_path
     }
 
@@ -154,7 +153,7 @@ impl SshKeyCredential {
     /// Only call this when passing to git2's credential callbacks.
     #[must_use]
     pub fn expose_passphrase(&self) -> Option<&str> {
-        self.passphrase.as_ref().map(|p| p.expose_secret())
+        self.passphrase.as_ref().map(ExposeSecret::expose_secret)
     }
 }
 
@@ -185,13 +184,13 @@ pub struct SshAgentCredential {
 impl SshAgentCredential {
     /// Creates a new SSH agent credential.
     #[must_use]
-    pub fn new(identity_file: Option<PathBuf>) -> Self {
+    pub const fn new(identity_file: Option<PathBuf>) -> Self {
         Self { identity_file }
     }
 
     /// Returns the optional identity file hint.
     #[must_use]
-    pub fn identity_file(&self) -> Option<&PathBuf> {
+    pub const fn identity_file(&self) -> Option<&PathBuf> {
         self.identity_file.as_ref()
     }
 }
@@ -200,18 +199,6 @@ impl Default for SshAgentCredential {
     fn default() -> Self {
         Self::new(None)
     }
-}
-
-/// Helper for deserialising secrets from config.
-///
-/// This ensures secrets are immediately wrapped in `SecretString`
-/// during deserialisation, never existing as plain `String` in memory.
-pub(crate) fn deserialize_secret<'de, D>(deserializer: D) -> Result<SecretString, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let s = String::deserialize(deserializer)?;
-    Ok(SecretString::from(s))
 }
 
 #[cfg(test)]
