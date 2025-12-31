@@ -96,16 +96,7 @@ while allowing AI assistants to work with repos in their own environments.
 
 ---
 
-## Phase 5: Integration Testing ← CURRENT
-
-- [ ] Integration tests with mock git server
-- [ ] End-to-end tests for Git command proxy
-- [ ] Security tests (credential leak detection in output)
-- [ ] Manual testing with MCP clients (Claude Desktop)
-
----
-
-## Phase 6: Cross-Platform Release
+## Phase 6: Cross-Platform Release ← CURRENT
 
 - [ ] GitHub Actions release workflow
 - [ ] Build targets (Windows, macOS, Linux)
