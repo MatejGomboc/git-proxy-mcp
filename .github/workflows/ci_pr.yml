@@ -1,0 +1,109 @@
+name: CI - Pull Request
+
+permissions:
+    contents: read
+
+on:
+    pull_request:
+        branches: ["**"]
+
+env:
+    CARGO_TERM_COLOR: always
+    RUSTFLAGS: "-Dwarnings"
+
+jobs:
+    quick-checks:
+        name: Quick Checks (fmt, docs)
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v6
+
+            - name: Install Rust toolchain
+              uses: dtolnay/rust-toolchain@stable
+              with:
+                  components: rustfmt
+
+            - name: Check formatting
+              run: cargo fmt --all --check
+
+            - name: Check documentation
+              run: cargo doc --no-deps --document-private-items
+              env:
+                  RUSTDOCFLAGS: "-Dwarnings"
+
+    build:
+        name: Build (${{ matrix.os }})
+        needs: quick-checks
+        timeout-minutes: 20
+
+        strategy:
+            fail-fast: false
+            matrix:
+                os: [ubuntu-latest, macos-latest, windows-latest]
+
+        runs-on: ${{ matrix.os }}
+
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v6
+
+            - name: Install Rust toolchain
+              uses: dtolnay/rust-toolchain@stable
+              with:
+                  components: clippy
+
+            - name: Get Rust version
+              id: rust-version
+              shell: bash
+              run: |
+                  # Cross-platform: use shasum on macOS, sha256sum elsewhere
+                  if command -v sha256sum &> /dev/null; then
+                      HASH_CMD="sha256sum"
+                  else
+                      HASH_CMD="shasum -a 256"
+                  fi
+                  echo "version=$(rustc --version | $HASH_CMD | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+            # Restore cache from main branch (read-only)
+            - name: Restore Rust cache
+              uses: actions/cache/restore@v4
+              with:
+                  path: |
+                      ~/.cargo/bin/
+                      ~/.cargo/registry/index/
+                      ~/.cargo/registry/cache/
+                      ~/.cargo/git/db/
+                      target/
+                  key: rust-${{ runner.os }}-${{ steps.rust-version.outputs.version }}-${{ hashFiles('**/Cargo.lock') }}
+                  restore-keys: |
+                      rust-${{ runner.os }}-${{ steps.rust-version.outputs.version }}-
+
+            - name: Run Clippy
+              run: cargo clippy --all-targets --all-features -- -D warnings
+
+            - name: Build (debug)
+              run: cargo build --verbose
+
+            - name: Build (release)
+              run: cargo build --release --verbose
+
+            - name: Run tests
+              run: cargo test --verbose
+
+    ci-success:
+        name: CI Success
+        needs: [quick-checks, build]
+        runs-on: ubuntu-latest
+        if: always()
+
+        steps:
+            - name: Check if all jobs succeeded
+              run: |
+                  if [[ "${{ needs.quick-checks.result }}" != "success" ]] || \
+                     [[ "${{ needs.build.result }}" != "success" ]]; then
+                      echo "One or more jobs failed"
+                      exit 1
+                  fi
+                  echo "All jobs completed successfully"
