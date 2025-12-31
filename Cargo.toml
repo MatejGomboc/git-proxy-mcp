@@ -13,7 +13,7 @@ authors = ["MatejGomboc"]
 
 [dependencies]
 # Git operations (libgit2 bindings)
-git2 = "0.19"
+git2 = "0.20.3"
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
@@ -30,7 +30,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Error handling
-thiserror = "1"
+thiserror = "2.0.17"
 anyhow = "1"
 
 # Security - secure string handling with zeroize on drop
@@ -43,11 +43,11 @@ url = "2"
 glob = "0.3"
 
 # Platform-specific directories
-dirs = "5"
+dirs = "6.0.0"
 
 [dev-dependencies]
 # Temporary directories for testing
-tempfile = "3"
+tempfile = "3.24.0"
 
 [profile.release]
 opt-level = 3

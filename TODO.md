@@ -9,8 +9,7 @@ while allowing AI assistants to work with repos in their own environments.
 
 - Security over speed. Take the time to do it right.
 - Work on ONE feature at a time.
-- Use British spelling in documentation and user-facing text.
-- Follow the style guide in `STYLE.md`.
+- Follow the style guide in `STYLE.md` and contributor guidelines in `CONTRIBUTING.md`.
 
 **For AI Assistants:** See `.claude/CLAUDE.md` for project context.
 
@@ -91,105 +90,13 @@ while allowing AI assistants to work with repos in their own environments.
 | SSH keys | User manages | User sets up keys on PC, we reference path or use ssh-agent |
 | Large repos | Chunked streaming | Progress callbacks, stream data in chunks |
 | Git LFS | Defer to v1.1 | v1.0: detect & warn; v1.1+: implement support |
-| Spelling | British 🇬🇧 | colour, behaviour, organisation, centre, licence — it's posh! |
-| Feature tracking | `.claude/features.json` | JSON format discourages inappropriate edits |
-| Indentation | 4 spaces | Consistent across all file types (see `.editorconfig`) |
-| Devcontainer | ❌ No | Native dev preferred; CI tests all platforms; less maintenance |
-
----
-
-## Phase 0: Project Setup ✅ COMPLETE
-
-- [x] Cargo.toml with dependencies
-- [x] CI workflow (fmt, clippy, build, test)
-- [x] VS Code configuration (settings, extensions, launch)
-- [x] GitHub Actions with restricted permissions
-- [x] CodeQL analysis enabled
-
----
-
-## Phase 0.5: Open Source Best Practices ✅ COMPLETE
-
-- [x] `SECURITY.md` — Vulnerability reporting policy
-- [x] `CONTRIBUTING.md` — Contributor guidelines
-- [x] `CHANGELOG.md` — Keep a Changelog format
-- [x] `CODE_OF_CONDUCT.md` — Contributor Covenant
-- [x] Issue templates (bug report, feature request)
-- [x] PR template with security checklist
-- [x] `.claude/CLAUDE.md` — AI assistant context (Claude Code format)
-- [x] Secret Scanning enabled
-- [x] Push Protection enabled
-- [x] Branch protection on `main` (PRs required, CI must pass, CodeQL required)
-- [x] Tag protection (restrict create/update/delete, block force push)
-
-### Repository Security Summary
-
-| Protection | Status |
-|------------|--------|
-| Branch protection (`main`) | ✅ |
-| Tag protection | ✅ |
-| Secret scanning | ✅ |
-| Push protection | ✅ |
-| CodeQL analysis | ✅ |
-| Community standards | ✅ 100% |
-
----
-
-## Phase 0.6: CI/CD & Style ✅ COMPLETE
-
-### CI Optimisation
-
-Reduced CI time from ~8 minutes to ~2-3 minutes (on cache hit).
-
-| Before | After | Improvement |
-|--------|-------|-------------|
-| No caching | `Swatinem/rust-cache@v2` | ~50-70% faster on cache hit |
-| 5 separate jobs | 2 jobs (quick-checks + build) | Less job overhead |
-| fmt → clippy → build → test | Combined into single build job | No redundant compilation |
-| Cache saved on every run | PRs read-only, main saves | Faster PR validation |
-
-### CI Architecture
-
-```
-quick-checks (ubuntu)     build (matrix: ubuntu, macos, windows)
-├── fmt                   ├── clippy
-└── docs                  ├── build (debug + release)
-                          └── test
-```
-
-### Caching Strategy (StringWiggler Pattern)
-
-- **PRs:** Read-only cache (`save-if: false`)
-- **Main branch:** Save cache after merge
-- **Cache key:** `v1-rust-{os}-{hash of Cargo.lock}`
-
-### Style Guide
-
-- [x] `.editorconfig` — Editor-agnostic formatting rules (4-space indent, UTF-8)
-- [x] `STYLE.md` — Comprehensive code style guide
-- [x] YAML files use 4-space indentation (aligned with StringWiggler)
+| Feature tracking | `TODO.md` | Single source of truth for roadmap and progress |
 
 ---
 
 ## Phase 1: Core Infrastructure ← CURRENT
 
-### 1.1 Configuration System
-
-- [x] Define config file JSON schema
-- [x] Create `src/config/mod.rs`
-- [x] Create `src/config/settings.rs`
-- [x] Create `config/example-config.json`
-
-### 1.2 Credential Management
-
-- [x] Create `src/auth/mod.rs`
-- [x] Create `src/auth/credentials.rs`
 - [ ] Create `src/auth/matcher.rs` (URL pattern matching)
-- [x] Use `secrecy` crate for sensitive strings
-
-### 1.3 Error Handling
-
-- [x] Create `src/error.rs` with custom error types
 
 ---
 
@@ -240,10 +147,6 @@ quick-checks (ubuntu)     build (matrix: ubuntu, macos, windows)
 
 ## Phase 8: Documentation
 
-- [x] `CONTRIBUTING.md`
-- [x] `SECURITY.md`
-- [x] `CHANGELOG.md`
-- [x] `STYLE.md`
 - [ ] Expand `README.md`
 
 ---

@@ -53,11 +53,11 @@ Before submitting a bug report:
 1. Check the [existing issues](https://github.com/MatejGomboc/git-proxy-mcp/issues) to avoid duplicates
 2. Ensure you're using the latest version
 3. Collect relevant information:
-   - Operating system and version
-   - Rust version (`rustc --version`)
-   - git-proxy-mcp version
-   - Steps to reproduce
-   - Expected vs actual behaviour
+    - Operating system and version
+    - Rust version (`rustc --version`)
+    - git-proxy-mcp version
+    - Steps to reproduce
+    - Expected vs actual behaviour
 
 When submitting:
 
@@ -119,16 +119,7 @@ When submitting:
 - Git
 - OpenSSL development libraries (for git2)
 
-### Using the Devcontainer (Recommended)
-
-The easiest way to get started is using VS Code with the Dev Containers extension:
-
-1. Install [VS Code](https://code.visualstudio.com/) and the [Dev Containers extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers)
-2. Clone the repository
-3. Open in VS Code
-4. Click "Reopen in Container" when prompted
-
-### Manual Setup
+### Setup
 
 ```bash
 # Clone the repository
@@ -288,7 +279,6 @@ When adding or modifying code that handles credentials:
 | `SECURITY.md` | Security policy and vulnerability reporting |
 | `CHANGELOG.md` | User-facing change history |
 | `TODO.md` | Development roadmap (internal) |
-| `JOURNAL.md` | Development log for AI assistants (internal) |
 | Rustdoc comments | API documentation |
 
 ### Updating Documentation
