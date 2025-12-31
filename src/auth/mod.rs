@@ -28,7 +28,9 @@
 //! ```
 
 pub mod credentials;
+pub mod matcher;
 
 pub use credentials::{
     AuthMethod, Credential, PatCredential, SshAgentCredential, SshKeyCredential,
 };
+pub use matcher::{CredentialStore, UrlPattern};

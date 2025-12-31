@@ -94,69 +94,48 @@ while allowing AI assistants to work with repos in their own environments.
 
 ---
 
-## Phase 1: Core Infrastructure ← CURRENT
-
-- [ ] Create `src/auth/matcher.rs` (URL pattern matching)
-
----
-
-## Phase 2: MCP Server Implementation
+## Phase 2: MCP Server Implementation ← CURRENT
 
 - [ ] Create `src/mcp/mod.rs`
-- [ ] Create `src/mcp/transport.rs`
+- [ ] Create `src/mcp/transport.rs` (stdio transport)
 - [ ] Create `src/mcp/server.rs`
-- [ ] Implement MCP lifecycle
+- [ ] Implement MCP lifecycle (initialize, list tools, call tool, shutdown)
+- [ ] Define MCP tool schemas for git operations
 
 ---
 
 ## Phase 3: Git Operations (via git2-rs)
 
-- [ ] Clone, Pull, Push, Fetch operations
-- [ ] Progress callbacks
-- [ ] LFS detection
+- [ ] Clone operation with progress callbacks
+- [ ] Pull operation
+- [ ] Push operation
+- [ ] Fetch operation
+- [ ] LFS detection and warning
 
 ---
 
 ## Phase 4: Security & Safety
 
-- [ ] Audit logging
-- [ ] Safety guardrails (protected branches, force push blocking)
-- [ ] Credential security verification
+- [ ] Audit logging to file
+- [ ] Protected branch enforcement
+- [ ] Force push blocking
+- [ ] Repository allowlist/blocklist enforcement
 
 ---
 
-## Phase 5: AI Identity Management
+## Phase 5: Integration Testing
 
-- [ ] Configurable AI identity for commits
-
----
-
-## Phase 6: CLI & UX
-
-- [ ] CLI commands and flags
-- [ ] Logging configuration
+- [ ] Integration tests with mock git server
+- [ ] Security tests (credential leak detection)
+- [ ] Manual testing with MCP clients (Claude Desktop)
 
 ---
 
-## Phase 7: Cross-Platform Release
+## Phase 6: Cross-Platform Release
 
+- [ ] GitHub Actions release workflow
 - [ ] Build targets (Windows, macOS, Linux)
-- [ ] Release workflow
-
----
-
-## Phase 8: Documentation
-
-- [ ] Expand `README.md`
-
----
-
-## Phase 9: Testing
-
-- [ ] Unit tests
-- [ ] Integration tests
-- [ ] Security tests
-- [ ] Manual testing with MCP clients
+- [ ] Binary signing (if applicable)
 
 ---
 

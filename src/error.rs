@@ -62,10 +62,12 @@ pub enum AuthError {
     },
 
     /// URL pattern is malformed.
-    #[error("invalid URL pattern: {pattern}")]
+    #[error("invalid URL pattern '{pattern}': {reason}")]
     InvalidUrlPattern {
         /// The malformed pattern.
         pattern: String,
+        /// Description of why the pattern is invalid.
+        reason: String,
     },
 }
 
