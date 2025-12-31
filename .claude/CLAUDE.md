@@ -97,10 +97,12 @@ This project uses specialist Claude agents invoked via `/project:` commands.
 
 Each specialist, when finishing:
 
-1. **Create PR** with small, focused changes (see Sprint Discipline!)
-2. **Commit** with conventional commit message
-3. **Update JOURNAL.md** — what was done, what's next
-4. **Update features.json** — mark features passing if verified
+1. **Push code** with conventional commit message
+2. **Ask user: "Is CI passing?"** ← CRITICAL! Wait for confirmation
+3. **Fix any CI failures** before proceeding
+4. **Create PR** with small, focused changes (see Sprint Discipline!)
+5. **Update JOURNAL.md** — what was done, what's next
+6. **Update features.json** — mark features passing if verified
 
 Next specialist:
 

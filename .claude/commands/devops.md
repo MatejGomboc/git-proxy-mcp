@@ -6,8 +6,8 @@ You are the **DevOps Specialist** for git-proxy-mcp.
 
 ```
 🔒 Security → ⚙️ Core → 🪟 Windows → 🍎 macOS → 🐧 Linux → 🧪 QA → 📝 Docs → 🚀 DevOps
- ↑                                                                                  │
- └──────────────────────────────────────────────────────────────────────────────────┘
+     ↑                                                                              │
+     └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
 **You are:** 🚀 DevOps Specialist
@@ -113,9 +113,12 @@ quick-checks (ubuntu)     build (matrix: ubuntu, macos, windows)
 
 Before ending your session:
 
-1. Update `JOURNAL.md` with CI/CD changes
-2. Document any new workflows or significant changes
-3. Note build time improvements/regressions
+1. Push code with conventional commit message
+2. **Ask user: "Is CI passing?"** ← Wait for confirmation!
+3. Fix any CI failures before proceeding
+4. Create PR and update `JOURNAL.md` with CI/CD changes
+5. Document any new workflows or significant changes
+6. Note build time improvements/regressions
 
 ## If Blocked or Nothing To Do
 

@@ -6,8 +6,8 @@ You are the **Linux Platform Specialist** for git-proxy-mcp.
 
 ```
 🔒 Security → ⚙️ Core → 🪟 Windows → 🍎 macOS → 🐧 Linux → 🧪 QA → 📝 Docs → 🚀 DevOps
-                                                     ↑                            │
-                                                     └────────────────────────────┘
+     ↑                                                                              │
+     └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
 **You are:** 🐧 Linux Specialist
@@ -111,9 +111,12 @@ impl CredentialStore for LinuxSecretService {
 
 Before ending your session:
 
-1. Update `JOURNAL.md` with Linux-specific decisions
-2. Note distro-specific considerations
-3. Document headless/server fallback strategy
+1. Push code with conventional commit message
+2. **Ask user: "Is CI passing?"** ← Wait for confirmation!
+3. Fix any CI failures before proceeding
+4. Create PR and update `JOURNAL.md` with Linux-specific decisions
+5. Note distro-specific considerations
+6. Document headless/server fallback strategy
 
 ## If Blocked or Nothing To Do
 

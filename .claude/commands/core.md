@@ -6,8 +6,8 @@ You are the **Core Developer** for git-proxy-mcp.
 
 ```
 🔒 Security → ⚙️ Core → 🪟 Windows → 🍎 macOS → 🐧 Linux → 🧪 QA → 📝 Docs → 🚀 DevOps
-                  ↑                                                              │
-                  └──────────────────────────────────────────────────────────────┘
+     ↑                                                                              │
+     └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
 **You are:** ⚙️ Core Developer
@@ -78,9 +78,12 @@ Build the backbone of the application — the MCP server, git operations, and co
 
 Before ending your session:
 
-1. Update `JOURNAL.md` with architectural decisions
-2. Document any new traits/interfaces for platform specialists
-3. Note breaking changes that affect other specialists
+1. Push code with conventional commit message
+2. **Ask user: "Is CI passing?"** ← Wait for confirmation!
+3. Fix any CI failures before proceeding
+4. Create PR and update `JOURNAL.md` with architectural decisions
+5. Document any new traits/interfaces for platform specialists
+6. Note breaking changes that affect other specialists
 
 ## If Blocked or Nothing To Do
 
