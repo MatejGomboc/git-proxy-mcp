@@ -9,6 +9,7 @@
     "files.encoding": "utf8",
     "editor.renderWhitespace": "boundary",
     "[markdown]": {
+        "editor.defaultFormatter": "DavidAnson.vscode-markdownlint",
         "files.trimTrailingWhitespace": false
     },
     "[shellscript]": {
@@ -18,9 +19,26 @@
         "editor.defaultFormatter": "rust-lang.rust-analyzer",
         "editor.formatOnSave": true
     },
+    "[toml]": {
+        "editor.defaultFormatter": "tamasfe.even-better-toml"
+    },
+    "[json]": {
+        "editor.defaultFormatter": "vscode.json-language-features"
+    },
+    "[jsonc]": {
+        "editor.defaultFormatter": "vscode.json-language-features"
+    },
+    "[yaml]": {
+        "editor.defaultFormatter": "redhat.vscode-yaml"
+    },
+    "[github-actions-workflow]": {
+        "editor.defaultFormatter": "redhat.vscode-yaml"
+    },
     "rust-analyzer.check.command": "clippy",
     "rust-analyzer.cargo.features": "all",
     "rust-analyzer.inlayHints.parameterHints.enable": true,
     "rust-analyzer.inlayHints.typeHints.enable": true,
-    "rust-analyzer.lens.enable": true
+    "rust-analyzer.lens.enable": true,
+    "yaml.format.printWidth": 170,
+    "evenBetterToml.formatter.columnWidth": 170
 }
