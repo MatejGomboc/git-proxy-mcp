@@ -1,0 +1,39 @@
+name: Cache Cleanup
+
+permissions:
+    actions: write
+
+on:
+    pull_request:
+        types: [closed]
+
+jobs:
+    cleanup:
+        name: Delete PR Branch Caches
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Delete branch caches
+              run: |
+                  echo "Fetching caches for branch: $BRANCH"
+
+                  # List caches for this branch
+                  CACHE_KEYS=$(gh actions-cache list --branch "$BRANCH" --limit 100 | cut -f1)
+
+                  if [ -z "$CACHE_KEYS" ]; then
+                      echo "No caches found for branch $BRANCH"
+                      exit 0
+                  fi
+
+                  # Delete each cache
+                  echo "Deleting caches..."
+                  for KEY in $CACHE_KEYS; do
+                      echo "  Deleting: $KEY"
+                      gh actions-cache delete "$KEY" --branch "$BRANCH" --confirm || true
+                  done
+
+                  echo "Cache cleanup complete"
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                  GH_REPO: ${{ github.repository }}
+                  BRANCH: ${{ github.head_ref }}
