@@ -23,6 +23,10 @@ Credentials NEVER in logs, errors, MCP responses, or debug output. See `CONTRIBU
 
 **NEVER push directly to main.** Always create a feature branch and open a pull request. Do not bypass repository branch protection rules under any circumstances.
 
+### Task Management
+
+**Remove completed items from `TODO.md`** after finishing a task. Keep the roadmap current by deleting done items.
+
 ## Off Limits
 
 **`CODE_OF_CONDUCT.md`** — Do not modify. Owned by repository owner.
