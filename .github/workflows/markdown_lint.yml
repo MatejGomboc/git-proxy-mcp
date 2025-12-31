@@ -27,5 +27,17 @@ jobs:
             - name: Checkout repository
               uses: actions/checkout@v6
 
+            - name: Setup Node.js with cache
+              uses: actions/setup-node@v4
+              with:
+                  node-version: "lts/*"
+                  cache: "npm"
+                  # Use workflow file as cache key (no package.json in repo)
+                  cache-dependency-path: ".github/workflows/markdown_lint.yml"
+
+            # Pre-install to populate cache (npx alone doesn't reliably cache)
+            - name: Install markdownlint-cli2
+              run: npm install -g markdownlint-cli2
+
             - name: Run markdownlint
-              run: npx markdownlint-cli2 "**/*.md"
+              run: markdownlint-cli2 "**/*.md"
