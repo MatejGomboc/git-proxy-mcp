@@ -88,9 +88,11 @@ while allowing AI assistants to work with repos in their own environments.
 | Timeline priority | Security first | Take time to do it right, no rushing |
 | Transport | stdio only (v1) | Simplest, most secure for local MCP clients |
 | SSH keys | User manages | User sets up keys on PC, we reference path or use ssh-agent |
-| Large repos | Chunked streaming | Progress callbacks, stream data in chunks |
+| Large repos | Stream output | Forward Git's stdout/stderr in real-time to MCP client |
 | Git LFS | Defer to v1.1 | v1.0: detect & warn; v1.1+: implement support |
 | Feature tracking | `TODO.md` | Single source of truth for roadmap and progress |
+| Proxy approach | Pass-through | Proxy Git CLI commands, inject credentials, return output |
+| Scope | Git CLI only | Web UI features (PRs, issues, etc.) are out of scope |
 
 ---
 
@@ -99,17 +101,23 @@ while allowing AI assistants to work with repos in their own environments.
 - [ ] Create `src/mcp/mod.rs`
 - [ ] Create `src/mcp/transport.rs` (stdio transport)
 - [ ] Create `src/mcp/server.rs`
+- [ ] Implement JSON-RPC message parsing and serialization
 - [ ] Implement MCP lifecycle (initialize, list tools, call tool, shutdown)
-- [ ] Define MCP tool schemas for git operations
+- [ ] Implement error responses per MCP specification
+- [ ] Implement request ID correlation
+- [ ] Define MCP tool schema for `git` command proxy
+- [ ] Implement capability negotiation
 
 ---
 
-## Phase 3: Git Operations (via git2-rs)
+## Phase 3: Git Command Proxy
 
-- [ ] Clone operation with progress callbacks
-- [ ] Pull operation
-- [ ] Push operation
-- [ ] Fetch operation
+- [ ] Parse and validate incoming Git commands
+- [ ] Match remote URL to configured credentials
+- [ ] Inject credentials via Git credential helper or environment
+- [ ] Execute Git command as subprocess
+- [ ] Capture and return stdout, stderr, exit code
+- [ ] Sanitize output to prevent credential leakage
 - [ ] LFS detection and warning
 
 ---
@@ -120,13 +128,15 @@ while allowing AI assistants to work with repos in their own environments.
 - [ ] Protected branch enforcement
 - [ ] Force push blocking
 - [ ] Repository allowlist/blocklist enforcement
+- [ ] Operation rate limiting (prevent runaway AI operations)
 
 ---
 
 ## Phase 5: Integration Testing
 
 - [ ] Integration tests with mock git server
-- [ ] Security tests (credential leak detection)
+- [ ] End-to-end tests for Git command proxy
+- [ ] Security tests (credential leak detection in output)
 - [ ] Manual testing with MCP clients (Claude Desktop)
 
 ---
@@ -136,6 +146,9 @@ while allowing AI assistants to work with repos in their own environments.
 - [ ] GitHub Actions release workflow
 - [ ] Build targets (Windows, macOS, Linux)
 - [ ] Binary signing (if applicable)
+- [ ] Semantic versioning and CHANGELOG maintenance
+- [ ] User documentation (installation guide, configuration reference)
+- [ ] Example MCP client configurations (Claude Desktop, etc.)
 
 ---
 
