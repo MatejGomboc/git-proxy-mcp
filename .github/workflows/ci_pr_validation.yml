@@ -2,6 +2,7 @@ name: CI - PR Validation
 
 permissions:
     contents: read
+    actions: write # Required for cache cleanup on main
 
 on:
     push:
@@ -65,6 +66,7 @@ jobs:
             # Cache cargo registry, index, and build artifacts
             # PRs: restore only (read-only). Main: restore and save.
             - name: Cache Rust dependencies
+              id: rust-cache
               uses: Swatinem/rust-cache@v2
               with:
                   # Only save cache on main branch pushes
@@ -73,6 +75,30 @@ jobs:
                   prefix-key: "v1-rust"
                   # Include Cargo.lock in cache key
                   cache-on-failure: true
+
+            # Delete old caches only on cache miss (new cache will be created)
+            # This prevents stale caches from accumulating
+            - name: Cleanup old caches (main, cache miss only)
+              if: github.ref == 'refs/heads/main' && steps.rust-cache.outputs.cache-hit != 'true'
+              run: |
+                  echo "Cache miss detected - cleaning up old caches..."
+
+                  # List caches matching our prefix for this OS
+                  CACHE_KEYS=$(gh actions-cache list --branch main --limit 100 | \
+                      grep -E "^v1-rust-${{ runner.os }}" | cut -f1) || true
+
+                  if [ -n "$CACHE_KEYS" ]; then
+                      echo "Found old caches to delete:"
+                      for KEY in $CACHE_KEYS; do
+                          echo "  Deleting: $KEY"
+                          gh actions-cache delete "$KEY" --branch main --confirm || true
+                      done
+                  else
+                      echo "No old caches found"
+                  fi
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                  GH_REPO: ${{ github.repository }}
 
             - name: Run Clippy
               run: cargo clippy --all-targets --all-features -- -D warnings
