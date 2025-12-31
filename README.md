@@ -6,6 +6,15 @@ A secure MCP server that lets AI assistants work with Git repositories without e
 
 ---
 
+## Who Is This For?
+
+- **Security-conscious developers** who want explicit control over credential flow
+- **Enterprise/regulated environments** where compliance requires credentials to stay in-house
+- **Self-hosters** already running local AI tooling who want the same control for Git
+- **Anyone** who prefers "trust but verify" over "just trust"
+
+---
+
 ## The Problem
 
 **Credential exposure:** When AI coding assistants access your Git repositories, your credentials (PATs, SSH keys,
@@ -28,36 +37,55 @@ git-proxy-mcp acts as a local proxy between your AI assistant and Git hosting se
 - **Runs locally** — stdio transport means no network exposure between the MCP server and client
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                        Your PC                              │
-│                                                             │
-│   ┌─────────────┐      ┌─────────────┐      ┌───────────┐  │
-│   │ Credentials │ ───► │ git-proxy-  │ ───► │  GitHub   │  │
-│   │ (config.json)│      │     mcp     │      │  GitLab   │  │
-│   └─────────────┘      └──────┬──────┘      └───────────┘  │
-│         ▲                     │                             │
-│         │ NEVER               │ Only repo data              │
-│         │ LEAVES              ▼ (no credentials)            │
-│         │              ┌─────────────┐                      │
-│         └───────────── │ MCP Client  │                      │
-│                        │(Claude, etc)│                      │
-│                        └──────┬──────┘                      │
-└───────────────────────────────┼─────────────────────────────┘
-                                │ TLS to AI provider
-                                ▼
-                         ┌─────────────┐
-                         │   AI VM     │
-                         └─────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              User's PC                                      │
+│                                                                             │
+│   ┌─────────────────────────────────────────────────────────────────────┐  │
+│   │                     git-proxy-mcp                                    │  │
+│   │                                                                      │  │
+│   │   config.json ──┐                                                    │  │
+│   │   (PAT, keys)   │  NEVER                                             │  │
+│   │                 │  LEAVES ──────────────────────┐                    │  │
+│   │                 ▼  HERE                         │                    │  │
+│   │          ┌─────────────┐                        │                    │  │
+│   │          │ Auth Module │                        │                    │  │
+│   │          │ (internal)  │                        │                    │  │
+│   │          └──────┬──────┘                        │                    │  │
+│   │                 │                               │                    │  │
+│   │                 │ HTTPS + PAT                   │                    │  │
+│   │                 ▼                               │                    │  │
+│   │          ┌─────────────┐                        │                    │  │
+│   │          │   GitHub    │                        │                    │  │
+│   │          │   GitLab    │                        │                    │  │
+│   │          └──────┬──────┘                        │                    │  │
+│   │                 │                               │                    │  │
+│   │                 │ Git pack data                 │                    │  │
+│   │                 │ (files, commits)              │                    │  │
+│   │                 │ NO CREDENTIALS                │                    │  │
+│   │                 ▼                               │                    │  │
+│   │          ┌─────────────┐                        │                    │  │
+│   │          │ MCP Response│ ◄──────────────────────┘                    │  │
+│   │          │ (data only) │                                             │  │
+│   │          └──────┬──────┘                                             │  │
+│   │                 │                                                    │  │
+│   └─────────────────┼────────────────────────────────────────────────────┘  │
+│                     │ stdio (local process, no network)                     │
+│                     ▼                                                       │
+│              ┌─────────────┐                                                │
+│              │Claude Desktop│                                               │
+│              │ / MCP Client │                                               │
+│              └──────┬──────┘                                                │
+│                     │                                                       │
+└─────────────────────┼───────────────────────────────────────────────────────┘
+                      │
+                      │ TLS (handled by Anthropic/vendor)
+                      ▼
+               ┌─────────────┐
+               │   AI VM     │
+               │ (Claude,    │
+               │  GPT, etc.) │
+               └─────────────┘
 ```
-
----
-
-## Who Is This For?
-
-- **Security-conscious developers** who want explicit control over credential flow
-- **Enterprise/regulated environments** where compliance requires credentials to stay in-house
-- **Self-hosters** already running local AI tooling who want the same control for Git
-- **Anyone** who prefers "trust but verify" over "just trust"
 
 ---
 
