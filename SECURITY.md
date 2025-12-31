@@ -102,4 +102,4 @@ We thank the security researchers and community members who help keep this proje
 
 ---
 
-*This security policy was last updated on 2025-12-28.*
+*This security policy was last updated on 2025-12-31.*

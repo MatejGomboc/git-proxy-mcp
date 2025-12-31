@@ -22,6 +22,30 @@ VS Code also displays a ruler at 170 characters (configured in `.vscode/settings
 
 ---
 
+## Single Source of Truth
+
+Avoid duplicating information across files. Each piece of information should have one canonical location.
+
+| Information | Canonical Source |
+|-------------|------------------|
+| Build commands | `CONTRIBUTING.md` § Development Setup |
+| Coding standards | `CONTRIBUTING.md` § Coding Standards |
+| Commit conventions | `CONTRIBUTING.md` § Commit Messages |
+| British spelling | `CONTRIBUTING.md` § British Spelling |
+| PR requirements | `CONTRIBUTING.md` § Pull Requests |
+| Security policy | `SECURITY.md` |
+| Development roadmap | `TODO.md` |
+| Formatting rules | `.editorconfig` |
+
+**Guidelines:**
+
+- Reference the canonical source instead of duplicating content
+- If information must appear in multiple places (e.g., PR template checklists), keep it minimal
+- When updating information, update the canonical source first
+- Cross-reference using `filename` § Section Name format
+
+---
+
 ## Rust
 
 ### Formatting
@@ -142,59 +166,16 @@ Markdown files are exempt from trailing whitespace trimming (needed for line bre
 
 ## Commit Messages
 
-Use [Conventional Commits](https://www.conventionalcommits.org/):
-
-```
-<type>: <description>
-
-[optional body]
-
-[optional footer]
-```
-
-### Types
-
-| Type | Description |
-|------|-------------|
-| `feat` | New feature |
-| `fix` | Bug fix |
-| `docs` | Documentation only |
-| `style` | Code style (formatting, no logic change) |
-| `refactor` | Code change (no feature or fix) |
-| `perf` | Performance improvement |
-| `test` | Adding/updating tests |
-| `chore` | Maintenance (deps, CI, etc.) |
-
-### Examples
-
-```
-feat: add clone progress streaming
-fix: prevent credential leak in error messages
-docs: update README with installation instructions
-style: fix YAML indentation to 4 spaces
-chore: update dependencies
-```
+See `CONTRIBUTING.md` § Commit Messages for conventions and allowed types.
 
 ---
 
 ## British Spelling 🇬🇧
 
-Use British spelling in all documentation and user-facing text.
+See `CONTRIBUTING.md` § British Spelling for the full reference table.
 
-| ❌ American | ✅ British |
-|-------------|------------|
-| color | colour |
-| behavior | behaviour |
-| organization | organisation |
-| center | centre |
-| license (noun) | licence |
-| analyze | analyse |
-| initialize | initialise |
-| customize | customise |
-| serialized | serialised |
-
-**Note:** Code identifiers may use American spelling where it matches Rust/library conventions (e.g., `Color` if a library uses it).
+**Quick rule:** Use British spelling in documentation (colour, behaviour, organisation). Code identifiers may use American spelling where it matches Rust/library conventions.
 
 ---
 
-*Last updated: 2025-12-28*
+*Last updated: 2025-12-31*
