@@ -78,14 +78,16 @@ jobs:
 
             # Delete old caches only on cache miss (new cache will be created)
             # This prevents stale caches from accumulating
+            # Matches any version prefix (v1, v2, etc.) to clean up after version bumps
             - name: Cleanup old caches (main, cache miss only)
               if: github.ref == 'refs/heads/main' && steps.rust-cache.outputs.cache-hit != 'true'
               run: |
                   echo "Cache miss detected - cleaning up old caches..."
 
-                  # List caches matching our prefix for this OS
+                  # List caches matching any version prefix for this OS
+                  # Pattern: v<number>-rust-<OS>
                   CACHE_KEYS=$(gh actions-cache list --branch main --limit 100 | \
-                      grep -E "^v1-rust-${{ runner.os }}" | cut -f1) || true
+                      grep -E "^v[0-9]+-rust-${{ runner.os }}" | cut -f1) || true
 
                   if [ -n "$CACHE_KEYS" ]; then
                       echo "Found old caches to delete:"

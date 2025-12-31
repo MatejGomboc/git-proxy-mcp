@@ -2,6 +2,11 @@ name: Markdown Lint
 
 permissions:
     contents: read
+    actions: write # Required for cache cleanup on main
+
+env:
+    # Bump this to force npm cache invalidation (e.g., after markdownlint-cli2 major update)
+    NPM_CACHE_VERSION: "1"
 
 on:
     push:
@@ -27,17 +32,62 @@ jobs:
             - name: Checkout repository
               uses: actions/checkout@v6
 
-            - name: Setup Node.js with cache
+            - name: Setup Node.js
               uses: actions/setup-node@v4
               with:
                   node-version: "lts/*"
-                  cache: "npm"
-                  # Use workflow file as cache key (no package.json in repo)
-                  cache-dependency-path: ".github/workflows/markdown_lint.yml"
 
-            # Pre-install to populate cache (npx alone doesn't reliably cache)
+            # Cache npm global packages
+            # PRs: restore only (read-only). Main: restore and save.
+            - name: Restore npm cache
+              id: npm-cache
+              uses: actions/cache/restore@v4
+              with:
+                  path: |
+                      ~/.npm
+                      ~/AppData/npm-cache
+                  key: v${{ env.NPM_CACHE_VERSION }}-npm-markdownlint-${{ runner.os }}-${{ hashFiles('.github/workflows/markdown_lint.yml') }}
+                  restore-keys: |
+                      v${{ env.NPM_CACHE_VERSION }}-npm-markdownlint-${{ runner.os }}-
+
+            # Delete old caches only on cache miss (new cache will be created)
+            # This prevents stale caches from accumulating
+            # Matches any version prefix (v1, v2, etc.) to clean up after version bumps
+            - name: Cleanup old caches (main, cache miss only)
+              if: github.ref == 'refs/heads/main' && steps.npm-cache.outputs.cache-hit != 'true'
+              run: |
+                  echo "Cache miss detected - cleaning up old caches..."
+
+                  # List caches matching any version prefix for this OS
+                  # Pattern: v<number>-npm-markdownlint-<OS>
+                  CACHE_KEYS=$(gh actions-cache list --branch main --limit 100 | \
+                      grep -E "^v[0-9]+-npm-markdownlint-${{ runner.os }}" | cut -f1) || true
+
+                  if [ -n "$CACHE_KEYS" ]; then
+                      echo "Found old caches to delete:"
+                      for KEY in $CACHE_KEYS; do
+                          echo "  Deleting: $KEY"
+                          gh actions-cache delete "$KEY" --branch main --confirm || true
+                      done
+                  else
+                      echo "No old caches found"
+                  fi
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                  GH_REPO: ${{ github.repository }}
+
             - name: Install markdownlint-cli2
               run: npm install -g markdownlint-cli2
 
             - name: Run markdownlint
               run: markdownlint-cli2 "**/*.md"
+
+            # Save cache only on main branch (after successful run)
+            - name: Save npm cache (main only)
+              if: github.ref == 'refs/heads/main' && steps.npm-cache.outputs.cache-hit != 'true'
+              uses: actions/cache/save@v4
+              with:
+                  path: |
+                      ~/.npm
+                      ~/AppData/npm-cache
+                  key: v${{ env.NPM_CACHE_VERSION }}-npm-markdownlint-${{ runner.os }}-${{ hashFiles('.github/workflows/markdown_lint.yml') }}

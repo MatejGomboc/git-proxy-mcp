@@ -1,0 +1,78 @@
+name: Cache Cleanup
+
+permissions:
+    actions: write
+
+on:
+    schedule:
+        # Run daily at 00:00 UTC
+        - cron: "0 0 * * *"
+
+    workflow_dispatch:
+
+jobs:
+    cleanup-caches:
+        name: Cleanup Stale Caches
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Cleanup all npm markdownlint caches
+              run: |
+                  echo "Cleaning up npm markdownlint caches..."
+
+                  CACHE_KEYS=$(gh actions-cache list --branch main --limit 100 | \
+                      grep -E "^v[0-9]+-npm-markdownlint-" | cut -f1) || true
+
+                  if [ -n "$CACHE_KEYS" ]; then
+                      echo "Found npm caches to delete:"
+                      for KEY in $CACHE_KEYS; do
+                          echo "  Deleting: $KEY"
+                          gh actions-cache delete "$KEY" --branch main --confirm || true
+                      done
+                  else
+                      echo "No npm caches found"
+                  fi
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                  GH_REPO: ${{ github.repository }}
+
+            - name: Cleanup all Rust caches
+              run: |
+                  echo "Cleaning up Rust caches..."
+
+                  CACHE_KEYS=$(gh actions-cache list --branch main --limit 100 | \
+                      grep -E "^v[0-9]+-rust-" | cut -f1) || true
+
+                  if [ -n "$CACHE_KEYS" ]; then
+                      echo "Found Rust caches to delete:"
+                      for KEY in $CACHE_KEYS; do
+                          echo "  Deleting: $KEY"
+                          gh actions-cache delete "$KEY" --branch main --confirm || true
+                      done
+                  else
+                      echo "No Rust caches found"
+                  fi
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                  GH_REPO: ${{ github.repository }}
+
+            - name: Cleanup PR branch caches
+              run: |
+                  echo "Cleaning up stale PR branch caches..."
+
+                  # Delete caches from closed/merged PR branches
+                  CACHE_KEYS=$(gh actions-cache list --limit 100 | \
+                      grep -E "refs/pull/[0-9]+/merge" | cut -f1) || true
+
+                  if [ -n "$CACHE_KEYS" ]; then
+                      echo "Found PR caches to delete:"
+                      for KEY in $CACHE_KEYS; do
+                          echo "  Deleting: $KEY"
+                          gh actions-cache delete "$KEY" --confirm || true
+                      done
+                  else
+                      echo "No PR caches found"
+                  fi
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                  GH_REPO: ${{ github.repository }}
