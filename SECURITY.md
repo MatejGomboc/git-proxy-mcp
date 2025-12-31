@@ -2,7 +2,8 @@
 
 ## Our Commitment
 
-**git-proxy-mcp** is a security-focused project designed to keep your Git credentials safe while enabling AI assistants to work with private repositories. We take security vulnerabilities extremely seriously.
+**git-proxy-mcp** is a security-focused project designed to keep your Git credentials safe
+while enabling AI assistants to work with private repositories. We take security vulnerabilities extremely seriously.
 
 ## Supported Versions
 
@@ -48,7 +49,7 @@ Given our focus on credential security, we consider these especially critical:
 ### Response Timeline
 
 | Action | Timeframe |
-|--------|-----------|
+|--------|----------|
 | Initial acknowledgement | Within 48 hours |
 | Preliminary assessment | Within 1 week |
 | Fix development | Depends on severity and complexity |

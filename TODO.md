@@ -2,7 +2,8 @@
 
 ## Overview
 
-**Goal:** Build a secure, AI-agnostic Git proxy MCP server in Rust that keeps credentials on the user's machine while allowing AI assistants to work with repos in their own environments.
+**Goal:** Build a secure, AI-agnostic Git proxy MCP server in Rust that keeps credentials on the user's machine
+while allowing AI assistants to work with repos in their own environments.
 
 **Guiding Principles:**
 
@@ -82,7 +83,7 @@
 ## Design Decisions (Locked In)
 
 | Decision | Choice | Rationale |
-|----------|--------|-----------|
+|----------|--------|----------|
 | Config hot-reload | ❌ No | Security: config changes require restart to prevent runtime injection |
 | Concurrent operations | ✅ Yes | Allow multiple repos to be accessed simultaneously |
 | Timeline priority | Security first | Take time to do it right, no rushing |
