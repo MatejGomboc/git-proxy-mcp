@@ -26,4 +26,7 @@ jobs:
               uses: actions/checkout@v6
 
             - name: Run markdownlint
-              run: npx markdownlint-cli2 "**/*.md"
+              run: |
+                  npx markdownlint-cli2 "**/*.md" \
+                      "#CODE_OF_CONDUCT.md" \
+                      "#.github/ISSUE_TEMPLATE/**"
