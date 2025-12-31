@@ -5,6 +5,7 @@
 **Goal:** Build a secure, AI-agnostic Git proxy MCP server in Rust that keeps credentials on the user's machine while allowing AI assistants to work with repos in their own environments.
 
 **Guiding Principles:**
+
 - Security over speed. Take the time to do it right.
 - Work on ONE feature at a time. See `.claude/features.json` for tracking.
 - Use British spelling in documentation and user-facing text. It's posh! 🇬🇧
@@ -16,9 +17,10 @@
 
 ## Feature Tracking
 
-Features are tracked in `.claude/features.json` with pass/fail status. 
+Features are tracked in `.claude/features.json` with pass/fail status.
 
 **Rules:**
+
 - Only change the `passes` field when a feature is verified complete
 - Do NOT remove or edit feature descriptions
 - Work on ONE feature at a time
@@ -82,6 +84,7 @@ Features are tracked in `.claude/features.json` with pass/fail status.
 ```
 
 **Key Security Properties:**
+
 1. Credentials are loaded from config, used internally, and NEVER serialised to MCP responses
 2. stdio transport = local process communication, no network between MCP server and client
 3. Only git pack data (file contents, commits, branches) flows through MCP
@@ -183,18 +186,21 @@ quick-checks (ubuntu)     build (matrix: ubuntu, macos, windows)
 ## Phase 1: Core Infrastructure ← CURRENT
 
 ### 1.1 Configuration System
+
 - [ ] Define config file JSON schema
 - [ ] Create `src/config/mod.rs`
 - [ ] Create `src/config/settings.rs`
 - [x] Create `config/example-config.json`
 
 ### 1.2 Credential Management
+
 - [ ] Create `src/auth/mod.rs`
 - [ ] Create `src/auth/credentials.rs`
 - [ ] Create `src/auth/matcher.rs`
 - [ ] Use `secrecy` crate for sensitive strings
 
 ### 1.3 Error Handling
+
 - [ ] Create `src/error.rs` with custom error types
 
 ---
@@ -265,12 +271,12 @@ quick-checks (ubuntu)     build (matrix: ubuntu, macos, windows)
 
 ## References
 
-- **MCP Specification:** https://modelcontextprotocol.io/
-- **git2-rs Documentation:** https://docs.rs/git2
-- **Open Source Guides:** https://opensource.guide/
-- **Claude Code Docs:** https://docs.anthropic.com/en/docs/claude-code
-- **Swatinem/rust-cache:** https://github.com/Swatinem/rust-cache
-- **EditorConfig:** https://editorconfig.org/
+- **MCP Specification:** <https://modelcontextprotocol.io/>
+- **git2-rs Documentation:** <https://docs.rs/git2>
+- **Open Source Guides:** <https://opensource.guide/>
+- **Claude Code Docs:** <https://docs.anthropic.com/en/docs/claude-code>
+- **Swatinem/rust-cache:** <https://github.com/Swatinem/rust-cache>
+- **EditorConfig:** <https://editorconfig.org/>
 
 ---
 
