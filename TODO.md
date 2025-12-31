@@ -96,21 +96,7 @@ while allowing AI assistants to work with repos in their own environments.
 
 ---
 
-## Phase 2: MCP Server Implementation ← CURRENT
-
-- [ ] Create `src/mcp/mod.rs`
-- [ ] Create `src/mcp/transport.rs` (stdio transport)
-- [ ] Create `src/mcp/server.rs`
-- [ ] Implement JSON-RPC message parsing and serialization
-- [ ] Implement MCP lifecycle (initialize, list tools, call tool, shutdown)
-- [ ] Implement error responses per MCP specification
-- [ ] Implement request ID correlation
-- [ ] Define MCP tool schema for `git` command proxy
-- [ ] Implement capability negotiation
-
----
-
-## Phase 3: Git Command Proxy
+## Phase 3: Git Command Proxy ← CURRENT
 
 - [ ] Parse and validate incoming Git commands
 - [ ] Match remote URL to configured credentials
