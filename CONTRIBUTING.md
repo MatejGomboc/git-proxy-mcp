@@ -7,9 +7,9 @@ Thank you for your interest in contributing to git-proxy-mcp! This document prov
 - [Code of Conduct](#code-of-conduct)
 - [Security Considerations](#security-considerations)
 - [How to Contribute](#how-to-contribute)
-  - [Reporting Bugs](#reporting-bugs)
-  - [Suggesting Features](#suggesting-features)
-  - [Pull Requests](#pull-requests)
+    - [Reporting Bugs](#reporting-bugs)
+    - [Suggesting Features](#suggesting-features)
+    - [Pull Requests](#pull-requests)
 - [Development Setup](#development-setup)
 - [Coding Standards](#coding-standards)
 - [Commit Messages](#commit-messages)
@@ -20,7 +20,8 @@ Thank you for your interest in contributing to git-proxy-mcp! This document prov
 
 ## Code of Conduct
 
-This project adheres to the Contributor Covenant Code of Conduct. By participating, you are expected to uphold this code. Please see [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for details.
+This project adheres to the Contributor Covenant Code of Conduct.
+By participating, you are expected to uphold this code. Please see [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for details.
 
 ---
 
@@ -281,7 +282,7 @@ When adding or modifying code that handles credentials:
 ### Types of Documentation
 
 | Location | Purpose |
-|----------|---------|
+|----------|--------|
 | `README.md` | User-facing overview and quick start |
 | `CONTRIBUTING.md` | This file — contributor guidelines |
 | `SECURITY.md` | Security policy and vulnerability reporting |

@@ -7,7 +7,7 @@ Code style conventions for git-proxy-mcp.
 ## General Rules
 
 | Rule | Setting |
-|------|---------|
+|------|--------|
 | Indentation | 4 spaces (no tabs) |
 | Max line length | 170 characters |
 | Charset | UTF-8 |
@@ -15,6 +15,7 @@ Code style conventions for git-proxy-mcp.
 | Trailing whitespace | Trim (except Markdown) |
 
 These rules are enforced by `.editorconfig`. Install the EditorConfig plugin for your editor:
+
 - **VS Code:** [EditorConfig for VS Code](https://marketplace.visualstudio.com/items?itemName=EditorConfig.EditorConfig)
 
 VS Code also displays a ruler at 170 characters (configured in `.vscode/settings.json`).
@@ -43,7 +44,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 ### Naming Conventions
 
 | Item | Convention | Example |
-|------|------------|---------|
+|------|------------|--------|
 | Crates | snake_case | `git_proxy_mcp` |
 | Modules | snake_case | `credential_store` |
 | Types | PascalCase | `GitCredential` |
@@ -125,13 +126,13 @@ Use `-` for unordered lists, `1.` for ordered lists.
 
 Always specify the language:
 
-~~~markdown
+````markdown
 ```rust
 fn main() {
     println!("Hello!");
 }
 ```
-~~~
+````
 
 ### Trailing Whitespace
 
