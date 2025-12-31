@@ -1,0 +1,31 @@
+name: Markdown Lint
+
+permissions:
+    contents: read
+
+on:
+    push:
+        branches: [main]
+        paths:
+            - "**/*.md"
+            - ".markdownlint.json"
+
+    pull_request:
+        branches: ["**"]
+        paths:
+            - "**/*.md"
+            - ".markdownlint.json"
+
+jobs:
+    lint-markdown:
+        name: Lint Markdown
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v6
+
+            - name: Run markdownlint
+              uses: DavidAnson/markdownlint-cli2-action@v20
+              with:
+                  globs: "**/*.md"
