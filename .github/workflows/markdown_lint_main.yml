@@ -29,12 +29,16 @@ jobs:
               with:
                   node-version: "lts/*"
 
+            - name: Get markdownlint-cli2 latest version
+              id: mdlint-version
+              run: echo "version=$(npm view markdownlint-cli2 version)" >> "$GITHUB_OUTPUT"
+
             - name: Restore npm cache
               id: cache-restore
               uses: actions/cache/restore@v4
               with:
                   path: ~/.npm
-                  key: npm-markdownlint-${{ runner.os }}-node-${{ steps.setup-node.outputs.node-version }}
+                  key: npm-markdownlint-${{ runner.os }}-node-${{ steps.setup-node.outputs.node-version }}-mdlint-${{ steps.mdlint-version.outputs.version }}
 
             - name: Install markdownlint-cli2
               run: npm install -g markdownlint-cli2
@@ -42,10 +46,10 @@ jobs:
             - name: Run markdownlint
               run: markdownlint-cli2 "**/*.md"
 
-            # Save cache only on cache miss (Node version changed)
+            # Save cache only on cache miss (Node or markdownlint-cli2 version changed)
             - name: Save npm cache
               if: steps.cache-restore.outputs.cache-hit != 'true'
               uses: actions/cache/save@v4
               with:
                   path: ~/.npm
-                  key: npm-markdownlint-${{ runner.os }}-node-${{ steps.setup-node.outputs.node-version }}
+                  key: npm-markdownlint-${{ runner.os }}-node-${{ steps.setup-node.outputs.node-version }}-mdlint-${{ steps.mdlint-version.outputs.version }}
