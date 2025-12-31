@@ -9,12 +9,14 @@ on:
         paths:
             - "**/*.md"
             - ".markdownlint.json"
+            - ".markdownlint-cli2.jsonc"
 
     pull_request:
         branches: ["**"]
         paths:
             - "**/*.md"
             - ".markdownlint.json"
+            - ".markdownlint-cli2.jsonc"
 
 jobs:
     lint-markdown:
@@ -26,7 +28,4 @@ jobs:
               uses: actions/checkout@v6
 
             - name: Run markdownlint
-              run: |
-                  npx markdownlint-cli2 "**/*.md" \
-                      "#CODE_OF_CONDUCT.md" \
-                      "#.github/ISSUE_TEMPLATE/**"
+              run: npx markdownlint-cli2 "**/*.md"
