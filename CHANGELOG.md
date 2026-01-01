@@ -11,14 +11,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- MCP server with JSON-RPC 2.0 protocol support
-- Git command proxy for remote operations (clone, fetch, pull, push, ls-remote)
+- MCP server infrastructure with JSON-RPC 2.0 protocol support
+- Git command parsing and validation for remote operations (clone, fetch, pull, push, ls-remote)
+- Git command executor with credential injection
 - Configuration system with credential management
 - Security guards for protected branches and force push prevention
-- Rate limiting for Git operations
+- Rate limiting implementation
 - Audit logging framework
+- Output sanitisation to remove credentials from git output
 - Cross-platform CI/CD pipeline (Windows, macOS, Linux)
 - GitHub Actions release workflow with automated binary builds
+
+### In Progress
+
+- MCP server integration (wiring executor to tool handler)
+- End-to-end git command execution via MCP
 
 ### Security
 

@@ -110,16 +110,17 @@ AI assistants can run these directly — they don't need credential injection.
 
 | Feature | Status |
 |---------|--------|
-| Credential isolation | ✅ Implemented |
-| GitHub/GitLab support | ✅ Implemented |
-| Remote-only command proxy | ✅ Implemented |
-| SSH key support | ✅ Implemented |
-| Audit logging | ✅ Implemented |
-| Protected branch guardrails | ✅ Implemented |
-| Rate limiting | ✅ Implemented |
+| Credential isolation | 🔧 In Progress |
+| GitHub/GitLab support | 🔧 In Progress |
+| Remote-only command proxy | 🔧 In Progress |
+| SSH key support | 🔧 In Progress |
+| Audit logging | 🔧 In Progress |
+| Protected branch guardrails | 🔧 In Progress |
+| Rate limiting | 🔧 In Progress |
 | Git LFS support | Future |
 
-See [TODO.md](TODO.md) for the full roadmap.
+> **Note:** Core modules are implemented and tested, but MCP server integration is in progress.
+> See [TODO.md](TODO.md) for the full roadmap.
 
 ---
 
