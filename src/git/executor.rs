@@ -190,7 +190,7 @@ impl GitExecutor {
                     cmd.env("GIT_PASSWORD", token);
                     // For simple echo-based approach
                     cmd.env("GIT_ASKPASS", "/bin/sh");
-                    cmd.args(["-c", &format!("echo '{}'", token)]);
+                    cmd.args(["-c", &format!("echo '{token}'")]);
                 }
 
                 // Alternative: use the credential helper protocol
