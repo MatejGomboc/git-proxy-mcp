@@ -32,7 +32,7 @@ jobs:
 
             # Restore cache from main branch (read-only)
             - name: Restore npm cache
-              uses: actions/cache/restore@v4
+              uses: actions/cache/restore@v5
               with:
                   path: ~/.npm
                   key: npm-markdownlint-${{ runner.os }}-node-${{ steps.setup-node.outputs.node-version }}-mdlint-${{ steps.mdlint-version.outputs.version }}
