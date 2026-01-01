@@ -33,6 +33,6 @@ pub mod audit;
 pub mod guards;
 pub mod rate_limit;
 
-pub use audit::{AuditEvent, AuditLogger};
+pub use audit::{AuditEvent, AuditLogger, ShutdownReason};
 pub use guards::{BranchGuard, PushGuard, RepoFilter, SecurityGuard};
 pub use rate_limit::RateLimiter;
