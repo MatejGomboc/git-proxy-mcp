@@ -106,6 +106,8 @@ Instead, it relies on the user's existing Git configuration (credential helpers,
 - [ ] Graceful shutdown handling (SIGTERM/SIGINT)
 - [ ] Output size limits (prevent protocol buffer overflow)
 - [ ] Configurable rate limiting (currently hardcoded: 20 burst, 5/sec)
+- [ ] Documentation: mention per-repo git config (without `--global`) as alternative
+- [ ] Rust code: add explicit type annotations where types aren't obvious
 
 ---
 
