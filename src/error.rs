@@ -107,6 +107,27 @@ pub enum ConfigError {
         /// Description of the validation failure.
         message: String,
     },
+
+    /// Configuration file has insecure permissions.
+    ///
+    /// This is a warning on Unix systems when the config file is readable
+    /// by other users, which could expose credentials.
+    #[error("insecure file permissions on {path}: {message}")]
+    InsecurePermissions {
+        /// Path to the file with insecure permissions.
+        path: PathBuf,
+        /// Description of the permission issue.
+        message: String,
+    },
+
+    /// SSH key file not found or inaccessible.
+    #[error("SSH key file error for '{remote_name}': {message}")]
+    SshKeyFileError {
+        /// Name of the remote with the SSH key issue.
+        remote_name: String,
+        /// Description of the error.
+        message: String,
+    },
 }
 
 #[cfg(test)]

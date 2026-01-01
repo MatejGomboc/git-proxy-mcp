@@ -97,18 +97,7 @@ while allowing AI assistants to work with repos in their own environments.
 
 ---
 
-## Phase 4: Security Hardening ← CURRENT
-
-- [ ] Validate config file permissions on Unix (warn if world-readable)
-- [ ] Validate SSH key file exists and has correct permissions at startup
-- [ ] Validate working directory exists before executing git commands
-- [ ] Improve Unix PAT credential injection (current approach exposes token in process args)
-- [ ] Handle mutex poisoning gracefully in rate limiter
-- [ ] Replace remaining `unwrap()` calls in production code with proper error handling
-
----
-
-## Phase 5: SSH & Remote Improvements
+## Phase 5: SSH & Remote Improvements ← CURRENT
 
 - [ ] SSH key passphrase support (currently returns "not yet supported" error)
 - [ ] Named remote resolution (e.g., "origin" → actual URL from .git/config)

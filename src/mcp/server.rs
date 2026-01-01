@@ -464,10 +464,20 @@ impl McpServer {
             _ => ToolCallResult::error(format!("Unknown tool: {}", params.name)),
         };
 
-        Ok(JsonRpcResponse::success(
-            req.id.clone(),
-            serde_json::to_value(result).unwrap(),
-        ))
+        // Serialise the result. This should never fail for our types (String, bool, Vec)
+        // but we handle it gracefully to avoid panicking in production.
+        let result_value = serde_json::to_value(&result).map_err(|e| {
+            tracing::error!(error = %e, "Failed to serialise tool call result");
+            JsonRpcError::new(
+                Some(req.id.clone()),
+                JsonRpcErrorData::with_message(
+                    ErrorCode::InternalError,
+                    "Internal error: failed to serialise result",
+                ),
+            )
+        })?;
+
+        Ok(JsonRpcResponse::success(req.id.clone(), result_value))
     }
 
     /// Handles the ping request.

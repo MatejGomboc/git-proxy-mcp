@@ -10,9 +10,16 @@
 //! - Each operation consumes one token
 //! - Tokens are replenished at `refill_rate` per second
 //! - If no tokens available, operation is blocked
+//!
+//! # Mutex Poisoning
+//!
+//! This module handles mutex poisoning gracefully. If a thread panics while
+//! holding a lock, subsequent operations will recover by extracting the inner
+//! value from the poisoned mutex. For a rate limiter, having potentially stale
+//! state is preferable to crashing the entire application.
 
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 /// Rate limiter using token bucket algorithm.
@@ -80,18 +87,43 @@ impl RateLimiter {
         Self::new(u64::MAX, f64::MAX)
     }
 
+    /// Locks the tokens mutex, recovering from poison if necessary.
+    ///
+    /// If the mutex is poisoned (a thread panicked while holding the lock),
+    /// this method recovers by extracting the inner value. A warning is logged
+    /// when recovery occurs.
+    fn lock_tokens(&self) -> MutexGuard<'_, f64> {
+        self.tokens.lock().unwrap_or_else(|poisoned| {
+            tracing::warn!(
+                "Rate limiter tokens mutex was poisoned; recovering with potentially stale state"
+            );
+            poisoned.into_inner()
+        })
+    }
+
+    /// Locks the `last_refill` mutex, recovering from poison if necessary.
+    fn lock_last_refill(&self) -> MutexGuard<'_, Instant> {
+        self.last_refill.lock().unwrap_or_else(|poisoned| {
+            tracing::warn!(
+                "Rate limiter last_refill mutex was poisoned; recovering with potentially stale state"
+            );
+            poisoned.into_inner()
+        })
+    }
+
     /// Attempts to acquire a token for an operation.
     ///
     /// Returns `true` if the operation is allowed, `false` if rate limited.
     ///
-    /// # Panics
+    /// # Mutex Poisoning
     ///
-    /// Panics if the internal mutex is poisoned.
+    /// If a mutex is poisoned, this method recovers gracefully by extracting
+    /// the inner value and continuing operation. A warning is logged.
     #[allow(clippy::significant_drop_tightening)] // Lock must be held during update
     pub fn try_acquire(&self) -> bool {
         self.refill();
 
-        let mut tokens = self.tokens.lock().unwrap();
+        let mut tokens = self.lock_tokens();
 
         if *tokens >= 1.0 {
             *tokens -= 1.0;
@@ -107,25 +139,25 @@ impl RateLimiter {
 
     /// Checks if an operation would be allowed without consuming a token.
     ///
-    /// # Panics
+    /// # Mutex Poisoning
     ///
-    /// Panics if the internal mutex is poisoned.
+    /// If a mutex is poisoned, this method recovers gracefully.
     #[must_use]
     pub fn would_allow(&self) -> bool {
         self.refill();
-        let tokens = self.tokens.lock().unwrap();
+        let tokens = self.lock_tokens();
         *tokens >= 1.0
     }
 
     /// Returns the current number of available tokens.
     ///
-    /// # Panics
+    /// # Mutex Poisoning
     ///
-    /// Panics if the internal mutex is poisoned.
+    /// If a mutex is poisoned, this method recovers gracefully.
     #[must_use]
     pub fn available_tokens(&self) -> f64 {
         self.refill();
-        let tokens = self.tokens.lock().unwrap();
+        let tokens = self.lock_tokens();
         *tokens
     }
 
@@ -133,14 +165,14 @@ impl RateLimiter {
     ///
     /// Returns `Duration::ZERO` if tokens are currently available.
     ///
-    /// # Panics
+    /// # Mutex Poisoning
     ///
-    /// Panics if the internal mutex is poisoned.
+    /// If a mutex is poisoned, this method recovers gracefully.
     #[must_use]
     pub fn time_until_available(&self) -> Duration {
         self.refill();
 
-        let tokens = self.tokens.lock().unwrap();
+        let tokens = self.lock_tokens();
         let current_tokens = *tokens;
         drop(tokens);
 
@@ -159,11 +191,11 @@ impl RateLimiter {
     fn refill(&self) {
         let now = Instant::now();
 
-        let mut last_refill = self.last_refill.lock().unwrap();
+        let mut last_refill = self.lock_last_refill();
         let elapsed = now.duration_since(*last_refill);
 
         if elapsed.as_secs_f64() > 0.0 {
-            let mut tokens = self.tokens.lock().unwrap();
+            let mut tokens = self.lock_tokens();
 
             let new_tokens = elapsed.as_secs_f64() * self.refill_rate;
             *tokens = (*tokens + new_tokens).min(self.max_burst as f64);
@@ -174,9 +206,9 @@ impl RateLimiter {
 
     /// Returns statistics about rate limiting.
     ///
-    /// # Panics
+    /// # Mutex Poisoning
     ///
-    /// Panics if the internal mutex is poisoned.
+    /// If a mutex is poisoned, this method recovers gracefully.
     #[must_use]
     pub fn stats(&self) -> RateLimiterStats {
         RateLimiterStats {
@@ -190,17 +222,17 @@ impl RateLimiter {
 
     /// Resets the rate limiter to its initial state.
     ///
-    /// # Panics
+    /// # Mutex Poisoning
     ///
-    /// Panics if the internal mutex is poisoned.
+    /// If a mutex is poisoned, this method recovers gracefully.
     #[allow(clippy::significant_drop_tightening)] // Locks are independent
     #[allow(clippy::cast_precision_loss)] // max_burst as f64 is acceptable
     pub fn reset(&self) {
-        let mut tokens = self.tokens.lock().unwrap();
+        let mut tokens = self.lock_tokens();
         *tokens = self.max_burst as f64;
         drop(tokens);
 
-        let mut last_refill = self.last_refill.lock().unwrap();
+        let mut last_refill = self.lock_last_refill();
         *last_refill = Instant::now();
         drop(last_refill);
 
