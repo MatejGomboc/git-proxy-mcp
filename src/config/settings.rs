@@ -103,7 +103,7 @@ mod tests {
 
     #[test]
     fn parse_minimal_config() {
-        let json = r#"{}"#;
+        let json = r"{}";
 
         let config: Config = serde_json::from_str(json).unwrap();
         assert!(config.validate().is_ok());
