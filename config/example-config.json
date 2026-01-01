@@ -6,8 +6,7 @@
         "allow_force_push": false,
         "protected_branches": [
             "main",
-            "master",
-            "develop"
+            "master"
         ],
         "repo_allowlist": null,
         "repo_blocklist": null
