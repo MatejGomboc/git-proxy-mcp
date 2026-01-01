@@ -26,9 +26,21 @@ jobs:
                   components: rustfmt
 
             - name: Setup Node.js
+              id: setup-node
               uses: actions/setup-node@v6
               with:
                   node-version: "lts/*"
+
+            - name: Get markdownlint-cli2 version
+              id: mdlint-version
+              run: echo "version=$(npm view markdownlint-cli2 version)" >> "$GITHUB_OUTPUT"
+
+            # Restore cache from main branch (read-only)
+            - name: Restore npm cache
+              uses: actions/cache/restore@v5
+              with:
+                  path: ~/.npm
+                  key: npm-markdownlint-${{ runner.os }}-node-${{ steps.setup-node.outputs.node-version }}-mdlint-${{ steps.mdlint-version.outputs.version }}
 
             - name: Install markdownlint-cli2
               run: npm install -g markdownlint-cli2

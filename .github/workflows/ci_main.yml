@@ -29,9 +29,21 @@ jobs:
                   components: rustfmt
 
             - name: Setup Node.js
+              id: setup-node
               uses: actions/setup-node@v6
               with:
                   node-version: "lts/*"
+
+            - name: Get markdownlint-cli2 version
+              id: mdlint-version
+              run: echo "version=$(npm view markdownlint-cli2 version)" >> "$GITHUB_OUTPUT"
+
+            - name: Restore npm cache
+              id: npm-cache-restore
+              uses: actions/cache/restore@v5
+              with:
+                  path: ~/.npm
+                  key: npm-markdownlint-${{ runner.os }}-node-${{ steps.setup-node.outputs.node-version }}-mdlint-${{ steps.mdlint-version.outputs.version }}
 
             - name: Install markdownlint-cli2
               run: npm install -g markdownlint-cli2
@@ -41,6 +53,13 @@ jobs:
 
             - name: Lint markdown
               run: markdownlint-cli2 "**/*.md"
+
+            - name: Save npm cache
+              if: steps.npm-cache-restore.outputs.cache-hit != 'true'
+              uses: actions/cache/save@v5
+              with:
+                  path: ~/.npm
+                  key: npm-markdownlint-${{ runner.os }}-node-${{ steps.setup-node.outputs.node-version }}-mdlint-${{ steps.mdlint-version.outputs.version }}
 
             - name: Check documentation
               run: cargo doc --no-deps --document-private-items
