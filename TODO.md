@@ -94,7 +94,6 @@ Instead, it relies on the user's existing Git configuration (credential helpers,
 
 ## Phase 7: Testing & Documentation <- CURRENT
 
-- [ ] Integration tests for full MCP -> git pipeline
 - [ ] Tests for large git output handling
 - [ ] Documentation for error messages and error codes
 
