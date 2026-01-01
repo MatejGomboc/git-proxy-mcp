@@ -237,6 +237,9 @@ Or specify a custom path with `--config /path/to/config.json`.
     },
     "logging": {
         "level": "warn"
+    },
+    "timeouts": {
+        "request_timeout_secs": 300
     }
 }
 ```
@@ -251,6 +254,7 @@ Or specify a custom path with `--config /path/to/config.json`.
 | `security.repo_blocklist` | Block these repository patterns (glob) | `null` (none blocked) |
 | `logging.level` | Log level: trace, debug, info, warn, error | `warn` |
 | `logging.audit_log_path` | Path to audit log file | `null` (disabled) |
+| `timeouts.request_timeout_secs` | Timeout for git command execution in seconds | `300` (5 minutes) |
 
 See [config/example-config.json](config/example-config.json) for a complete example.
 
