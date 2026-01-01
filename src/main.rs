@@ -5,10 +5,7 @@
 //! Credentials are never transmitted through MCP responses.
 
 use clap::Parser;
-
-pub mod auth;
-pub mod config;
-pub mod error;
+use git_proxy_mcp::config;
 
 /// Secure Git proxy MCP server for AI assistants.
 ///

@@ -96,52 +96,7 @@ while allowing AI assistants to work with repos in their own environments.
 
 ---
 
-## Phase 2: MCP Server Implementation ← CURRENT
-
-- [ ] Create `src/mcp/mod.rs`
-- [ ] Create `src/mcp/transport.rs` (stdio transport)
-- [ ] Create `src/mcp/server.rs`
-- [ ] Implement JSON-RPC message parsing and serialization
-- [ ] Implement MCP lifecycle (initialize, list tools, call tool, shutdown)
-- [ ] Implement error responses per MCP specification
-- [ ] Implement request ID correlation
-- [ ] Define MCP tool schema for `git` command proxy
-- [ ] Implement capability negotiation
-
----
-
-## Phase 3: Git Command Proxy
-
-- [ ] Parse and validate incoming Git commands
-- [ ] Match remote URL to configured credentials
-- [ ] Inject credentials via Git credential helper or environment
-- [ ] Execute Git command as subprocess
-- [ ] Capture and return stdout, stderr, exit code
-- [ ] Sanitize output to prevent credential leakage
-- [ ] LFS detection and warning
-
----
-
-## Phase 4: Security & Safety
-
-- [ ] Audit logging to file
-- [ ] Protected branch enforcement
-- [ ] Force push blocking
-- [ ] Repository allowlist/blocklist enforcement
-- [ ] Operation rate limiting (prevent runaway AI operations)
-
----
-
-## Phase 5: Integration Testing
-
-- [ ] Integration tests with mock git server
-- [ ] End-to-end tests for Git command proxy
-- [ ] Security tests (credential leak detection in output)
-- [ ] Manual testing with MCP clients (Claude Desktop)
-
----
-
-## Phase 6: Cross-Platform Release
+## Phase 6: Cross-Platform Release ← CURRENT
 
 - [ ] GitHub Actions release workflow
 - [ ] Build targets (Windows, macOS, Linux)
@@ -149,6 +104,37 @@ while allowing AI assistants to work with repos in their own environments.
 - [ ] Semantic versioning and CHANGELOG maintenance
 - [ ] User documentation (installation guide, configuration reference)
 - [ ] Example MCP client configurations (Claude Desktop, etc.)
+
+---
+
+## Future Considerations
+
+### Restrict Allowed Commands to Remote-Only Operations
+
+**Current state:** The server allows 23 Git commands including local operations like `status`, `log`, `diff`, `add`, `commit`, `branch`, etc.
+
+**Consideration:** Restrict the allowlist to only **remote-oriented commands** that actually require credential injection:
+
+```rust
+const ALLOWED_COMMANDS: &[&str] = &[
+    "clone",
+    "fetch",
+    "pull",
+    "push",
+    "ls-remote",
+];
+```
+
+**Rationale:**
+
+- The core value of this MCP server is **secure credential injection** for remote operations
+- Local commands (`status`, `log`, `diff`, `add`, `commit`, `branch`, `checkout`, `merge`, `rebase`, `reset`, `stash`, `tag`, `init`,
+  `ls-files`, `rev-parse`, `show`, `revert`) don't require authentication
+- AI assistants can execute local Git commands directly on their workstation without needing a proxy
+- Smaller attack surface = better security
+- Clearer separation of concerns
+
+This would make the server's purpose more focused: a **credential-injecting proxy for remote Git operations**, not a general Git command wrapper.
 
 ---
 
