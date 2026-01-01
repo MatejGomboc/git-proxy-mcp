@@ -98,7 +98,16 @@ jobs:
                       ~/.cargo/registry/index/
                       ~/.cargo/registry/cache/
                       ~/.cargo/git/db/
-                      target/
+                      target/.rustc_info.json
+                      target/.cargo-lock
+                      target/debug/deps/
+                      target/debug/build/
+                      target/debug/.fingerprint/
+                      target/debug/incremental/
+                      target/release/deps/
+                      target/release/build/
+                      target/release/.fingerprint/
+                      target/release/incremental/
                   key: rust-${{ runner.os }}-${{ steps.rust-version.outputs.version }}-${{ hashFiles('**/Cargo.lock') }}
                   restore-keys: |
                       rust-${{ runner.os }}-${{ steps.rust-version.outputs.version }}-
