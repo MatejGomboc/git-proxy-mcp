@@ -5,6 +5,7 @@
 //! existing Git configuration.
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use serde::Deserialize;
 
@@ -27,6 +28,10 @@ pub struct Config {
     #[serde(rename = "_comment", default)]
     _comment: Option<String>,
 
+    /// Optional additional comment field (ignored during parsing).
+    #[serde(rename = "_note", default)]
+    _note: Option<String>,
+
     /// Security settings.
     #[serde(default)]
     pub security: SecurityConfig,
@@ -34,6 +39,10 @@ pub struct Config {
     /// Logging settings.
     #[serde(default)]
     pub logging: LoggingConfig,
+
+    /// Timeout settings.
+    #[serde(default)]
+    pub timeouts: TimeoutConfig,
 }
 
 impl Config {
@@ -95,6 +104,41 @@ impl Default for LoggingConfig {
 /// Default log level.
 fn default_log_level() -> String {
     "warn".to_string()
+}
+
+/// Default request timeout in seconds.
+const fn default_request_timeout_secs() -> u64 {
+    300 // 5 minutes
+}
+
+/// Timeout configuration.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TimeoutConfig {
+    /// Timeout for git command execution in seconds.
+    ///
+    /// If a git command takes longer than this, it will be terminated.
+    /// This prevents hung git processes from blocking the server indefinitely.
+    ///
+    /// Default: 300 seconds (5 minutes).
+    #[serde(default = "default_request_timeout_secs")]
+    pub request_timeout_secs: u64,
+}
+
+impl Default for TimeoutConfig {
+    fn default() -> Self {
+        Self {
+            request_timeout_secs: default_request_timeout_secs(),
+        }
+    }
+}
+
+impl TimeoutConfig {
+    /// Returns the request timeout as a `Duration`.
+    #[must_use]
+    pub const fn request_timeout(&self) -> Duration {
+        Duration::from_secs(self.request_timeout_secs)
+    }
 }
 
 #[cfg(test)]
@@ -186,5 +230,48 @@ mod tests {
 
         let result: Result<Config, _> = serde_json::from_str(json);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn timeout_config_defaults() {
+        let config = TimeoutConfig::default();
+        assert_eq!(config.request_timeout_secs, 300);
+        assert_eq!(config.request_timeout(), Duration::from_secs(300));
+    }
+
+    #[test]
+    fn parse_timeout_config() {
+        let json = r#"{
+            "timeouts": {
+                "request_timeout_secs": 60
+            }
+        }"#;
+
+        let config: Config = serde_json::from_str(json).unwrap();
+        assert_eq!(config.timeouts.request_timeout_secs, 60);
+        assert_eq!(config.timeouts.request_timeout(), Duration::from_secs(60));
+    }
+
+    #[test]
+    fn parse_full_config_with_timeouts() {
+        let json = r#"{
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "_comment": "Test config",
+            "_note": "Additional note",
+            "security": {
+                "allow_force_push": false,
+                "protected_branches": ["main"]
+            },
+            "logging": {
+                "level": "debug"
+            },
+            "timeouts": {
+                "request_timeout_secs": 120
+            }
+        }"#;
+
+        let config: Config = serde_json::from_str(json).unwrap();
+        assert!(config.validate().is_ok());
+        assert_eq!(config.timeouts.request_timeout_secs, 120);
     }
 }

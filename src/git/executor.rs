@@ -5,6 +5,7 @@
 //! 1. Executing Git as a subprocess
 //! 2. Capturing and sanitising output
 //! 3. Detecting Git LFS usage
+//! 4. Enforcing execution timeouts
 //!
 //! # Credential Handling
 //!
@@ -16,8 +17,10 @@
 //! - `GIT_TERMINAL_PROMPT=0` prevents interactive credential prompts
 
 use std::process::Stdio;
+use std::time::Duration;
 
 use tokio::process::Command;
+use tokio::time::timeout;
 
 use crate::git::command::GitCommand;
 use crate::git::sanitiser::OutputSanitiser;
@@ -59,6 +62,9 @@ impl CommandOutput {
     }
 }
 
+/// Default timeout for git command execution (5 minutes).
+const DEFAULT_TIMEOUT_SECS: u64 = 300;
+
 /// Executes Git commands as subprocesses.
 ///
 /// This executor spawns git commands using the user's existing Git
@@ -67,6 +73,9 @@ impl CommandOutput {
 pub struct GitExecutor {
     /// Output sanitiser for removing credentials from output.
     sanitiser: OutputSanitiser,
+
+    /// Timeout for git command execution.
+    timeout: Duration,
 }
 
 impl Default for GitExecutor {
@@ -76,12 +85,28 @@ impl Default for GitExecutor {
 }
 
 impl GitExecutor {
-    /// Creates a new Git executor.
+    /// Creates a new Git executor with the default timeout.
     #[must_use]
     pub fn new() -> Self {
         Self {
             sanitiser: OutputSanitiser::new(),
+            timeout: Duration::from_secs(DEFAULT_TIMEOUT_SECS),
         }
+    }
+
+    /// Creates a new Git executor with a custom timeout.
+    #[must_use]
+    pub fn with_timeout(timeout: Duration) -> Self {
+        Self {
+            sanitiser: OutputSanitiser::new(),
+            timeout,
+        }
+    }
+
+    /// Returns the configured timeout duration.
+    #[must_use]
+    pub const fn timeout(&self) -> Duration {
+        self.timeout
     }
 
     /// Executes a Git command.
@@ -100,6 +125,7 @@ impl GitExecutor {
     /// Returns an error if:
     /// - The working directory does not exist or is not accessible
     /// - The Git process fails to start
+    /// - The command execution times out
     pub async fn execute(&self, command: &GitCommand) -> Result<CommandOutput, ExecutorError> {
         // Validate working directory exists before executing
         if let Some(dir) = command.working_dir() {
@@ -127,10 +153,12 @@ impl GitExecutor {
         // git will fail with an error rather than hanging.
         cmd.env("GIT_TERMINAL_PROMPT", "0");
 
-        // Execute the command
-        let output = cmd
-            .output()
+        // Execute the command with timeout
+        let output = timeout(self.timeout, cmd.output())
             .await
+            .map_err(|_| ExecutorError::Timeout {
+                timeout_secs: self.timeout.as_secs(),
+            })?
             .map_err(|e| ExecutorError::ProcessError {
                 message: format!("Failed to execute git: {e}"),
             })?;
@@ -226,6 +254,13 @@ pub enum ExecutorError {
         /// Description of the error.
         message: String,
     },
+
+    /// Command execution timed out.
+    #[error("command timed out after {timeout_secs} seconds")]
+    Timeout {
+        /// Timeout duration in seconds.
+        timeout_secs: u64,
+    },
 }
 
 #[cfg(test)]
@@ -303,7 +338,24 @@ mod tests {
     #[test]
     fn executor_default() {
         let executor = GitExecutor::default();
-        // Just verify it doesn't panic
-        drop(executor);
+        assert_eq!(
+            executor.timeout(),
+            Duration::from_secs(DEFAULT_TIMEOUT_SECS)
+        );
+    }
+
+    #[test]
+    fn executor_with_custom_timeout() {
+        let timeout = Duration::from_secs(60);
+        let executor = GitExecutor::with_timeout(timeout);
+        assert_eq!(executor.timeout(), timeout);
+    }
+
+    #[test]
+    fn timeout_error_display() {
+        let error = ExecutorError::Timeout { timeout_secs: 300 };
+        let msg = error.to_string();
+        assert!(msg.contains("timed out"));
+        assert!(msg.contains("300 seconds"));
     }
 }

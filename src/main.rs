@@ -129,11 +129,12 @@ fn main() -> ExitCode {
     info!(
         force_push = security_config.allow_force_push,
         protected_branches = ?security_config.protected_branches,
+        request_timeout_secs = cfg.timeouts.request_timeout_secs,
         "Configuration loaded"
     );
 
-    // Create git executor (no credentials stored — uses system git config)
-    let executor = GitExecutor::new();
+    // Create git executor with configured timeout
+    let executor = GitExecutor::with_timeout(cfg.timeouts.request_timeout());
 
     // Create MCP server
     let mut server = McpServer::new(executor, security_config, audit_logger);

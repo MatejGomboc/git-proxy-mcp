@@ -14,5 +14,8 @@
     "logging": {
         "level": "warn",
         "audit_log_path": null
+    },
+    "timeouts": {
+        "request_timeout_secs": 300
     }
 }

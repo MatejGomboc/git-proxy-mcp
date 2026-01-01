@@ -26,7 +26,8 @@ path = "src/main.rs"
 # - io-std: stdin(), stdout()
 # - process: async Command for spawning git
 # - macros: #[tokio::test] attribute
-tokio = { version = "1", features = ["rt", "io-util", "io-std", "process", "macros"] }
+# - time: timeout for git process execution
+tokio = { version = "1", features = ["rt", "io-util", "io-std", "process", "macros", "time"] }
 
 # Serialisation
 serde = { version = "1", features = ["derive"] }
