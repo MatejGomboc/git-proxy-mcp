@@ -128,15 +128,14 @@ pub enum AuthConfig {
         token: SecretString,
     },
 
-    /// SSH key file authentication.
+    /// SSH key file authentication (passphrase-less keys only).
+    ///
+    /// For passphrase-protected keys, use `ssh_agent` instead.
+    /// Add the key to ssh-agent with `ssh-add` first.
     #[serde(rename = "ssh_key")]
     SshKey {
         /// Path to the private key file.
         key_path: String,
-
-        /// Optional passphrase for encrypted keys.
-        #[serde(default, deserialize_with = "deserialize_option_secret")]
-        passphrase: Option<SecretString>,
     },
 
     /// SSH agent authentication.
@@ -177,12 +176,9 @@ impl AuthConfig {
     fn into_auth_method(self) -> AuthMethod {
         match self {
             Self::Pat { token } => AuthMethod::Pat(PatCredential::new(token)),
-            Self::SshKey {
-                key_path,
-                passphrase,
-            } => {
+            Self::SshKey { key_path } => {
                 let expanded_path = expand_tilde(&key_path);
-                AuthMethod::SshKey(SshKeyCredential::new(expanded_path, passphrase))
+                AuthMethod::SshKey(SshKeyCredential::new(expanded_path))
             }
             Self::SshAgent { identity_file } => {
                 let expanded_path = identity_file.map(|p| expand_tilde(&p));
@@ -197,13 +193,9 @@ impl std::fmt::Debug for AuthConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Pat { .. } => f.debug_struct("Pat").field("token", &"[REDACTED]").finish(),
-            Self::SshKey {
-                key_path,
-                passphrase,
-            } => f
+            Self::SshKey { key_path } => f
                 .debug_struct("SshKey")
                 .field("key_path", key_path)
-                .field("passphrase", &passphrase.as_ref().map(|_| "[REDACTED]"))
                 .finish(),
             Self::SshAgent { identity_file } => f
                 .debug_struct("SshAgent")
@@ -281,15 +273,6 @@ where
     Ok(SecretString::from(s))
 }
 
-/// Deserialises an optional string into an `Option<SecretString>`.
-fn deserialize_option_secret<'de, D>(deserializer: D) -> Result<Option<SecretString>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let opt: Option<String> = Option::deserialize(deserializer)?;
-    Ok(opt.map(SecretString::from))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -333,8 +316,7 @@ mod tests {
                     "url_pattern": "https://git.company.com/*",
                     "auth": {
                         "type": "ssh_key",
-                        "key_path": "~/.ssh/id_ed25519",
-                        "passphrase": "secret"
+                        "key_path": "~/.ssh/id_ed25519"
                     }
                 },
                 {

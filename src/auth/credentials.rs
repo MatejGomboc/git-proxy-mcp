@@ -112,61 +112,33 @@ impl std::fmt::Debug for PatCredential {
     }
 }
 
-/// SSH key file credential.
+/// SSH key file credential (passphrase-less keys only).
 ///
-/// Points to a private key file on disk, optionally with a passphrase.
+/// Points to a private key file on disk. For passphrase-protected keys,
+/// use [`SshAgentCredential`] instead — add the key to ssh-agent with `ssh-add`.
 ///
 /// # Security
 ///
-/// The passphrase (if any) is stored as a [`SecretString`].
-/// The key file itself is read only when needed by git2.
+/// This type intentionally does not support passphrases. Storing passphrases
+/// in config files is a security anti-pattern. Use ssh-agent for secure
+/// passphrase handling.
+#[derive(Debug)]
 pub struct SshKeyCredential {
     /// Path to the private key file.
     key_path: PathBuf,
-
-    /// Optional passphrase for encrypted keys.
-    passphrase: Option<SecretString>,
 }
 
 impl SshKeyCredential {
     /// Creates a new SSH key credential.
     #[must_use]
-    pub const fn new(key_path: PathBuf, passphrase: Option<SecretString>) -> Self {
-        Self {
-            key_path,
-            passphrase,
-        }
+    pub const fn new(key_path: PathBuf) -> Self {
+        Self { key_path }
     }
 
     /// Returns the path to the SSH key file.
     #[must_use]
     pub const fn key_path(&self) -> &PathBuf {
         &self.key_path
-    }
-
-    /// Exposes the passphrase for use with git2.
-    ///
-    /// Returns `None` if no passphrase was configured.
-    ///
-    /// # Security
-    ///
-    /// Only call this when passing to git2's credential callbacks.
-    #[must_use]
-    pub fn expose_passphrase(&self) -> Option<&str> {
-        self.passphrase.as_ref().map(ExposeSecret::expose_secret)
-    }
-}
-
-// Custom Debug that never reveals the passphrase
-impl std::fmt::Debug for SshKeyCredential {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SshKeyCredential")
-            .field("key_path", &self.key_path)
-            .field(
-                "passphrase",
-                &self.passphrase.as_ref().map(|_| "[REDACTED]"),
-            )
-            .finish()
     }
 }
 
@@ -216,16 +188,12 @@ mod tests {
     }
 
     #[test]
-    fn ssh_key_debug_does_not_leak_passphrase() {
-        let cred = SshKeyCredential::new(
-            PathBuf::from("/home/user/.ssh/id_ed25519"),
-            Some(SecretString::from("mysuperpassphrase")),
-        );
+    fn ssh_key_debug_shows_path() {
+        let cred = SshKeyCredential::new(PathBuf::from("/home/user/.ssh/id_ed25519"));
         let debug_output = format!("{cred:?}");
 
-        assert!(!debug_output.contains("mysuperpassphrase"));
-        assert!(debug_output.contains("REDACTED"));
-        assert!(debug_output.contains("id_ed25519")); // path is OK to show
+        // Path is safe to show in debug output
+        assert!(debug_output.contains("id_ed25519"));
     }
 
     #[test]
@@ -237,21 +205,11 @@ mod tests {
     }
 
     #[test]
-    fn ssh_key_expose_passphrase_works() {
-        let passphrase = "secret123";
-        let cred = SshKeyCredential::new(
-            PathBuf::from("/path/to/key"),
-            Some(SecretString::from(passphrase)),
-        );
+    fn ssh_key_stores_path() {
+        let path = PathBuf::from("/path/to/key");
+        let cred = SshKeyCredential::new(path.clone());
 
-        assert_eq!(cred.expose_passphrase(), Some(passphrase));
-    }
-
-    #[test]
-    fn ssh_key_no_passphrase() {
-        let cred = SshKeyCredential::new(PathBuf::from("/path/to/key"), None);
-
-        assert_eq!(cred.expose_passphrase(), None);
+        assert_eq!(cred.key_path(), &path);
     }
 
     #[test]

@@ -128,7 +128,7 @@ impl GitExecutor {
 
         // Set up credential injection
         if let Some(cred) = credential {
-            Self::setup_credentials(&mut cmd, cred)?;
+            Self::setup_credentials(&mut cmd, cred);
         }
 
         // Configure stdio
@@ -175,7 +175,7 @@ impl GitExecutor {
     ///
     /// Credentials are passed via environment variables, never via command-line
     /// arguments, to prevent exposure in process listings (`ps`, `/proc`, etc.).
-    fn setup_credentials(cmd: &mut Command, credential: &Credential) -> Result<(), ExecutorError> {
+    fn setup_credentials(cmd: &mut Command, credential: &Credential) {
         match credential.auth() {
             AuthMethod::Pat(pat) => {
                 // For HTTPS, we use GIT_ASKPASS with an inline script that reads
@@ -240,24 +240,15 @@ impl GitExecutor {
                 }
             }
             AuthMethod::SshKey(ssh_key) => {
-                // For SSH, set GIT_SSH_COMMAND to use the specific key
+                // For SSH, set GIT_SSH_COMMAND to use the specific key.
+                // Note: This only works for passphrase-less keys. For passphrase-
+                // protected keys, users must use ssh_agent auth type instead.
                 let key_path = ssh_key.key_path();
 
                 let ssh_cmd = format!(
                     "ssh -i {} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new",
                     key_path.display()
                 );
-
-                // Add passphrase handling if needed (requires ssh-add or sshpass)
-                if ssh_key.expose_passphrase().is_some() {
-                    // For keys with passphrases, we'd need to use ssh-add or sshpass
-                    // This is complex and platform-specific, so we'll defer for now
-                    return Err(ExecutorError::UnsupportedAuth {
-                        reason: "SSH keys with passphrases are not yet supported. \
-                                 Please use ssh-agent or a key without a passphrase."
-                            .to_string(),
-                    });
-                }
 
                 cmd.env("GIT_SSH_COMMAND", ssh_cmd);
             }
@@ -266,8 +257,6 @@ impl GitExecutor {
                 // Just ensure we're not overriding GIT_SSH_COMMAND
             }
         }
-
-        Ok(())
     }
 
     /// Detects if the output indicates Git LFS usage.
@@ -335,13 +324,6 @@ pub enum ExecutorError {
     ProcessError {
         /// Error message.
         message: String,
-    },
-
-    /// Authentication method is not supported.
-    #[error("unsupported authentication: {reason}")]
-    UnsupportedAuth {
-        /// Reason for the lack of support.
-        reason: String,
     },
 
     /// Working directory does not exist or is not accessible.
