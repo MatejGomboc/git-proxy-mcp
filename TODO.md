@@ -129,7 +129,9 @@ Instead, it relies on the user's existing Git configuration (credential helpers,
 
 ### AI Commit Author Identity
 
-Allow AI commits to show a separate contributor identity on GitHub while still using the human's credentials for push authentication. This provides clear audit trail of human vs AI contributions.
+Allow AI commits to show a separate contributor identity on GitHub while still using the
+human's credentials for push authentication. This provides clear audit trail of human vs
+AI contributions.
 
 **How it works:**
 
