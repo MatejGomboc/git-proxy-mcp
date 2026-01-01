@@ -35,53 +35,39 @@ git-proxy-mcp acts as a local proxy between your AI assistant and Git hosting se
 - **Enables native Git workflow** — Clone, edit, commit, push. AI assistants work with full repo copies, not API calls
 - **Runs locally** — stdio transport means no network exposure between the MCP server and client
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                              User's PC                                      │
-│                                                                             │
-│   ┌────────────────────────────────────────────────────────────────────┐   │
-│   │                    Your Git Configuration                           │   │
-│   │                                                                     │   │
-│   │   ~/.gitconfig ──────────────────────────────────────────────────┐  │   │
-│   │   (credential helpers)                                           │  │   │
-│   │                                                                  │  │   │
-│   │   ~/.ssh/config + ssh-agent ─────────────────────────────────────┤  │   │
-│   │   (SSH keys, already loaded)                                     │  │   │
-│   │                                                                  │  │   │
-│   │   OS Credential Store ───────────────────────────────────────────┤  │   │
-│   │   (macOS Keychain, Windows Credential Manager, libsecret)        │  │   │
-│   └──────────────────────────────────────────────────────────────────┼──┘   │
-│                                                                      │      │
-│                            Git uses these automatically              │      │
-│                                       │                              │      │
-│   ┌───────────────────────────────────▼──────────────────────────────┴──┐   │
-│   │                     git-proxy-mcp                                    │   │
-│   │                                                                      │   │
-│   │   1. Validate command (security guards)                              │   │
-│   │   2. Spawn: git clone/fetch/pull/push/ls-remote                      │   │
-│   │   3. Set GIT_TERMINAL_PROMPT=0 (no interactive prompts)              │   │
-│   │   4. Sanitise output (remove any leaked credentials)                 │   │
-│   │   5. Return result to AI via MCP                                     │   │
-│   │                                                                      │   │
-│   │   NO credentials stored ─────── Git handles auth natively            │   │
-│   │                                                                      │   │
-│   └──────────────────────────────────┬───────────────────────────────────┘   │
-│                                      │ stdio (local process, no network)     │
-│                                      ▼                                       │
-│                               ┌─────────────┐                                │
-│                               │Claude Desktop│                               │
-│                               │ / MCP Client │                               │
-│                               └──────┬──────┘                                │
-│                                      │                                       │
-└──────────────────────────────────────┼───────────────────────────────────────┘
-                                       │
-                                       │ TLS (handled by Anthropic/vendor)
-                                       ▼
-                                ┌─────────────┐
-                                │   AI VM     │
-                                │ (Claude,    │
-                                │  GPT, etc.) │
-                                └─────────────┘
+```mermaid
+flowchart TB
+    subgraph PC["User's PC"]
+        subgraph GitConfig["Your Git Configuration"]
+            gitconfig["~/.gitconfig<br/>(credential helpers)"]
+            sshconfig["~/.ssh/config + ssh-agent<br/>(SSH keys, already loaded)"]
+            oscreds["OS Credential Store<br/>(macOS Keychain, Windows Credential Manager, libsecret)"]
+        end
+
+        subgraph Proxy["git-proxy-mcp"]
+            step1["1. Validate command (security guards)"]
+            step2["2. Spawn: git clone/fetch/pull/push/ls-remote"]
+            step3["3. Set GIT_TERMINAL_PROMPT=0 (no interactive prompts)"]
+            step4["4. Sanitise output (remove any leaked credentials)"]
+            step5["5. Return result to AI via MCP"]
+            nocreds["NO credentials stored — Git handles auth natively"]
+        end
+
+        client["Claude Desktop / MCP Client"]
+    end
+
+    ai["AI VM<br/>(Claude, GPT, etc.)"]
+
+    gitconfig --> Proxy
+    sshconfig --> Proxy
+    oscreds --> Proxy
+    Proxy -->|"stdio (local process, no network)"| client
+    client -->|"TLS (handled by Anthropic/vendor)"| ai
+
+    style PC fill:#f9f9f9,stroke:#333
+    style GitConfig fill:#e6f3ff,stroke:#0066cc
+    style Proxy fill:#e6ffe6,stroke:#006600
+    style nocreds fill:#ffffcc,stroke:#666600
 ```
 
 ---
