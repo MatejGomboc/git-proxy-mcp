@@ -2,7 +2,8 @@
 
 ## Overview
 
-**Goal:** Build a secure, AI-agnostic Git proxy MCP server in Rust that spawns git commands on behalf of AI assistants, using the user's existing git credential configuration.
+**Goal:** Build a secure, AI-agnostic Git proxy MCP server in Rust that spawns git commands on behalf of AI
+assistants, using the user's existing git credential configuration.
 
 **Guiding Principles:**
 
