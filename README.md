@@ -89,13 +89,30 @@ git-proxy-mcp acts as a local proxy between your AI assistant and Git hosting se
 
 ---
 
+## Supported Commands
+
+Only remote Git operations that require credential injection are proxied:
+
+| Command | Description |
+|---------|-------------|
+| `clone` | Clone a repository |
+| `fetch` | Download objects and refs from a remote |
+| `pull` | Fetch and integrate with a remote |
+| `push` | Update remote refs |
+| `ls-remote` | List references in a remote repository |
+
+**Local commands** (`status`, `log`, `diff`, `add`, `commit`, `branch`, etc.) are intentionally **not supported**.
+AI assistants can run these directly — they don't need credential injection.
+
+---
+
 ## Features
 
 | Feature | Status |
 |---------|--------|
 | Credential isolation | Planned |
 | GitHub/GitLab support | Planned |
-| Clone, Pull, Push, Fetch | Planned |
+| Remote-only command proxy | ✅ Implemented |
 | SSH key support | Planned |
 | Audit logging | Planned |
 | Protected branch guardrails | Planned |

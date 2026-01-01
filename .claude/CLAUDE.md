@@ -23,6 +23,15 @@ Credentials NEVER in logs, errors, MCP responses, or debug output. See `CONTRIBU
 
 **NEVER push directly to main.** Always create a feature branch and open a pull request. Do not bypass repository branch protection rules under any circumstances.
 
+**Before committing**, always clean up stale branches:
+
+```bash
+git fetch --prune origin
+git branch -vv | grep ': gone]' | awk '{print $1}' | xargs -r git branch -d
+```
+
+This removes local branches whose remote tracking branch has been deleted.
+
 ### Task Management
 
 **Remove completed items from `TODO.md`** after finishing a task. Keep the roadmap current by deleting done items.

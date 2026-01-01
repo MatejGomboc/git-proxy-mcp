@@ -93,6 +93,7 @@ while allowing AI assistants to work with repos in their own environments.
 | Feature tracking | `TODO.md` | Single source of truth for roadmap and progress |
 | Proxy approach | Pass-through | Proxy Git CLI commands, inject credentials, return output |
 | Scope | Git CLI only | Web UI features (PRs, issues, etc.) are out of scope |
+| Command scope | Remote-only | Only clone/fetch/pull/push/ls-remote; local commands run directly |
 
 ---
 
@@ -107,37 +108,6 @@ while allowing AI assistants to work with repos in their own environments.
 
 ---
 
-## Future Considerations
-
-### Restrict Allowed Commands to Remote-Only Operations
-
-**Current state:** The server allows 23 Git commands including local operations like `status`, `log`, `diff`, `add`, `commit`, `branch`, etc.
-
-**Consideration:** Restrict the allowlist to only **remote-oriented commands** that actually require credential injection:
-
-```rust
-const ALLOWED_COMMANDS: &[&str] = &[
-    "clone",
-    "fetch",
-    "pull",
-    "push",
-    "ls-remote",
-];
-```
-
-**Rationale:**
-
-- The core value of this MCP server is **secure credential injection** for remote operations
-- Local commands (`status`, `log`, `diff`, `add`, `commit`, `branch`, `checkout`, `merge`, `rebase`, `reset`, `stash`, `tag`, `init`,
-  `ls-files`, `rev-parse`, `show`, `revert`) don't require authentication
-- AI assistants can execute local Git commands directly on their workstation without needing a proxy
-- Smaller attack surface = better security
-- Clearer separation of concerns
-
-This would make the server's purpose more focused: a **credential-injecting proxy for remote Git operations**, not a general Git command wrapper.
-
----
-
 ## References
 
 - **MCP Specification:** <https://modelcontextprotocol.io/>
@@ -149,4 +119,4 @@ This would make the server's purpose more focused: a **credential-injecting prox
 
 ---
 
-*Last updated: 2025-12-31*
+*Last updated: 2026-01-01*

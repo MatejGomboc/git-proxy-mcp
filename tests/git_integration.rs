@@ -58,21 +58,28 @@ fn create_file(temp_dir: &TempDir, name: &str, content: &str) -> std::io::Result
 
 #[test]
 fn test_allowed_commands_accepted() {
-    let allowed = [
+    // Only remote commands that require credential injection are allowed
+    let allowed = ["clone", "fetch", "ls-remote", "pull", "push"];
+
+    for cmd in allowed {
+        let result = GitCommand::new(cmd, vec![], None);
+        assert!(result.is_ok(), "Command '{cmd}' should be allowed");
+    }
+}
+
+#[test]
+fn test_local_commands_rejected() {
+    // Local commands don't need credential injection - AI can run them directly
+    let local = [
         "add",
         "branch",
         "checkout",
-        "clone",
         "commit",
         "diff",
-        "fetch",
         "init",
         "log",
         "ls-files",
-        "ls-remote",
         "merge",
-        "pull",
-        "push",
         "rebase",
         "remote",
         "reset",
@@ -84,9 +91,9 @@ fn test_allowed_commands_accepted() {
         "tag",
     ];
 
-    for cmd in allowed {
+    for cmd in local {
         let result = GitCommand::new(cmd, vec![], None);
-        assert!(result.is_ok(), "Command '{cmd}' should be allowed");
+        assert!(result.is_err(), "Local command '{cmd}' should be rejected");
     }
 }
 
@@ -117,14 +124,15 @@ fn test_dangerous_flags_rejected() {
     ];
 
     for flag in dangerous_flags {
-        let result = GitCommand::new("status", vec![flag.to_string()], None);
+        // Use a remote command since local commands are now rejected
+        let result = GitCommand::new("clone", vec![flag.to_string()], None);
         assert!(result.is_err(), "Flag '{flag}' should be rejected");
     }
 }
 
 #[test]
 fn test_relative_working_dir_rejected() {
-    let result = GitCommand::new("status", vec![], Some(PathBuf::from("./relative")));
+    let result = GitCommand::new("fetch", vec![], Some(PathBuf::from("./relative")));
     assert!(
         result.is_err(),
         "Relative working directory should be rejected"
@@ -138,7 +146,7 @@ fn test_absolute_working_dir_accepted() {
     #[cfg(not(windows))]
     let path = PathBuf::from("/home/test");
 
-    let result = GitCommand::new("status", vec![], Some(path));
+    let result = GitCommand::new("fetch", vec![], Some(path));
     assert!(
         result.is_ok(),
         "Absolute working directory should be accepted"
@@ -358,31 +366,22 @@ fn test_git_diff() {
 
 #[test]
 fn test_build_args_includes_command() {
-    let cmd = GitCommand::new(
-        "commit",
-        vec!["-m".to_string(), "message".to_string()],
-        None,
-    )
-    .expect("commit command should be valid");
+    let cmd = GitCommand::new("push", vec!["origin".to_string(), "main".to_string()], None)
+        .expect("push command should be valid");
 
     let args = cmd.build_args();
-    assert_eq!(args[0], "commit");
-    assert_eq!(args[1], "-m");
-    assert_eq!(args[2], "message");
+    assert_eq!(args[0], "push");
+    assert_eq!(args[1], "origin");
+    assert_eq!(args[2], "main");
 }
 
 #[test]
 fn test_requires_auth_detection() {
+    // All allowed commands require auth (that's why they're proxied)
     let auth_commands = ["clone", "push", "pull", "fetch", "ls-remote"];
     for cmd_name in auth_commands {
         let cmd = GitCommand::new(cmd_name, vec![], None).expect("command should be valid");
         assert!(cmd.requires_auth(), "{cmd_name} should require auth");
-    }
-
-    let no_auth_commands = ["status", "log", "diff", "branch", "add", "commit"];
-    for cmd_name in no_auth_commands {
-        let cmd = GitCommand::new(cmd_name, vec![], None).expect("command should be valid");
-        assert!(!cmd.requires_auth(), "{cmd_name} should not require auth");
     }
 }
 
@@ -405,8 +404,20 @@ fn test_extract_remote_url() {
         .expect("push command should be valid");
     assert_eq!(push_cmd.extract_remote_url(), Some("origin"));
 
-    // Status command (no remote)
-    let status_cmd =
-        GitCommand::new("status", vec![], None).expect("status command should be valid");
-    assert!(status_cmd.extract_remote_url().is_none());
+    // Fetch command with remote
+    let fetch_cmd = GitCommand::new("fetch", vec!["upstream".to_string()], None)
+        .expect("fetch command should be valid");
+    assert_eq!(fetch_cmd.extract_remote_url(), Some("upstream"));
+
+    // ls-remote command
+    let ls_remote_cmd = GitCommand::new(
+        "ls-remote",
+        vec!["https://github.com/user/repo.git".to_string()],
+        None,
+    )
+    .expect("ls-remote command should be valid");
+    assert_eq!(
+        ls_remote_cmd.extract_remote_url(),
+        Some("https://github.com/user/repo.git")
+    );
 }

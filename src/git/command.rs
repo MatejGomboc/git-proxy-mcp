@@ -38,32 +38,10 @@ pub enum GitCommandError {
 
 /// Allowlist of Git commands that can be executed.
 ///
-/// This list is intentionally conservative to prevent misuse.
-const ALLOWED_COMMANDS: &[&str] = &[
-    "add",
-    "branch",
-    "checkout",
-    "clone",
-    "commit",
-    "diff",
-    "fetch",
-    "init",
-    "log",
-    "ls-files",
-    "ls-remote",
-    "merge",
-    "pull",
-    "push",
-    "rebase",
-    "remote",
-    "reset",
-    "rev-parse",
-    "revert",
-    "show",
-    "stash",
-    "status",
-    "tag",
-];
+/// Only remote-oriented commands that require credential injection are allowed.
+/// Local commands (status, log, diff, add, commit, etc.) don't need a proxy —
+/// AI assistants can execute them directly on their workstation.
+const ALLOWED_COMMANDS: &[&str] = &["clone", "fetch", "ls-remote", "pull", "push"];
 
 /// Flags that are never allowed for security reasons.
 const DANGEROUS_FLAGS: &[&str] = &[
@@ -255,15 +233,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_status_command() {
-        let cmd = GitCommand::new("status", vec![], None).unwrap();
-
-        assert_eq!(cmd.command(), "status");
-        assert!(!cmd.requires_auth());
-        assert!(cmd.extract_remote_url().is_none());
-    }
-
-    #[test]
     fn reject_empty_command() {
         let result = GitCommand::new("", vec![], None);
         assert!(matches!(result, Err(GitCommandError::EmptyCommand)));
@@ -286,7 +255,7 @@ mod tests {
 
     #[test]
     fn reject_no_verify_flag() {
-        let result = GitCommand::new("commit", vec!["--no-verify".to_string()], None);
+        let result = GitCommand::new("push", vec!["--no-verify".to_string()], None);
         assert!(matches!(result, Err(GitCommandError::DangerousFlag { .. })));
     }
 
@@ -302,7 +271,7 @@ mod tests {
 
     #[test]
     fn reject_relative_working_dir() {
-        let result = GitCommand::new("status", vec![], Some(PathBuf::from("./relative/path")));
+        let result = GitCommand::new("clone", vec![], Some(PathBuf::from("./relative/path")));
         assert!(matches!(
             result,
             Err(GitCommandError::InvalidWorkingDirectory { .. })
@@ -316,21 +285,17 @@ mod tests {
         #[cfg(not(windows))]
         let dir = PathBuf::from("/home/user/repo");
 
-        let cmd = GitCommand::new("status", vec![], Some(dir.clone())).unwrap();
+        let cmd = GitCommand::new("fetch", vec![], Some(dir.clone())).unwrap();
         assert_eq!(cmd.working_dir(), Some(&dir));
     }
 
     #[test]
     fn build_args_includes_command_and_args() {
-        let cmd = GitCommand::new(
-            "commit",
-            vec!["-m".to_string(), "Initial commit".to_string()],
-            None,
-        )
-        .unwrap();
+        let cmd =
+            GitCommand::new("push", vec!["origin".to_string(), "main".to_string()], None).unwrap();
 
         let args = cmd.build_args();
-        assert_eq!(args, vec!["commit", "-m", "Initial commit"]);
+        assert_eq!(args, vec!["push", "origin", "main"]);
     }
 
     #[test]
@@ -338,6 +303,51 @@ mod tests {
         for &command in ALLOWED_COMMANDS {
             let result = GitCommand::new(command, vec![], None);
             assert!(result.is_ok(), "Command '{command}' should be allowed");
+        }
+    }
+
+    #[test]
+    fn all_allowed_commands_require_auth() {
+        for &command in ALLOWED_COMMANDS {
+            let cmd = GitCommand::new(command, vec![], None).unwrap();
+            assert!(
+                cmd.requires_auth(),
+                "Command '{command}' should require auth"
+            );
+        }
+    }
+
+    #[test]
+    fn reject_local_commands() {
+        // These local commands don't require credential injection
+        // and should be rejected by the proxy
+        let local_commands = [
+            "add",
+            "branch",
+            "checkout",
+            "commit",
+            "diff",
+            "init",
+            "log",
+            "ls-files",
+            "merge",
+            "rebase",
+            "remote",
+            "reset",
+            "rev-parse",
+            "revert",
+            "show",
+            "stash",
+            "status",
+            "tag",
+        ];
+
+        for command in local_commands {
+            let result = GitCommand::new(command, vec![], None);
+            assert!(
+                matches!(result, Err(GitCommandError::CommandNotAllowed { .. })),
+                "Local command '{command}' should be rejected"
+            );
         }
     }
 }
