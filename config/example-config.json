@@ -1,44 +1,7 @@
 {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "_comment": "Example configuration for git-proxy-mcp. Copy to your config directory and customise.",
-    "_note_ssh": "For passphrase-protected SSH keys, use ssh_agent (add key with ssh-add first).",
-    "remotes": [
-        {
-            "name": "github",
-            "url_pattern": "https://github.com/*",
-            "auth": {
-                "type": "pat",
-                "token": "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-            }
-        },
-        {
-            "name": "gitlab",
-            "url_pattern": "https://gitlab.com/*",
-            "auth": {
-                "type": "pat",
-                "token": "glpat-xxxxxxxxxxxxxxxxxxxx"
-            }
-        },
-        {
-            "name": "company-gitlab",
-            "url_pattern": "https://git.company.com/*",
-            "auth": {
-                "type": "ssh_key",
-                "key_path": "~/.ssh/id_ed25519"
-            }
-        },
-        {
-            "name": "bitbucket-ssh",
-            "url_pattern": "git@bitbucket.org:*",
-            "auth": {
-                "type": "ssh_agent"
-            }
-        }
-    ],
-    "ai_identity": {
-        "name": "AI Assistant",
-        "email": "ai-assistant@noreply.local"
-    },
+    "_comment": "Example configuration for git-proxy-mcp. Copy to ~/.git-proxy-mcp/config.json and customise.",
+    "_note": "This MCP server does NOT store credentials. Configure Git directly using credential helpers and SSH agent.",
     "security": {
         "allow_force_push": false,
         "protected_branches": [

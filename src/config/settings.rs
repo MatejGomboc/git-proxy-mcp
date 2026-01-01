@@ -1,20 +1,21 @@
 //! Configuration structures for deserialisation.
 //!
 //! These structures map directly to the JSON configuration file format.
-//! Sensitive fields are deserialised directly into `SecretString` types.
+//! The MCP server no longer stores credentials — it relies on the user's
+//! existing Git configuration.
 
 use std::path::PathBuf;
 
-use secrecy::SecretString;
 use serde::Deserialize;
 
-use crate::auth::{AuthMethod, Credential, PatCredential, SshAgentCredential, SshKeyCredential};
-use crate::config::expand_tilde;
 use crate::error::ConfigError;
 
 /// Root configuration structure.
 ///
 /// This is the top-level structure that matches the JSON config file.
+/// Note: Credentials are NOT stored in the config file. The MCP server
+/// relies on the user's existing Git configuration (credential helpers,
+/// SSH agent, etc.).
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
@@ -25,13 +26,6 @@ pub struct Config {
     /// Optional comment field (ignored during parsing).
     #[serde(rename = "_comment", default)]
     _comment: Option<String>,
-
-    /// List of remote configurations with authentication.
-    pub remotes: Vec<RemoteConfig>,
-
-    /// Identity to use for AI-generated commits.
-    #[serde(default)]
-    pub ai_identity: Option<AiIdentity>,
 
     /// Security settings.
     #[serde(default)]
@@ -48,172 +42,11 @@ impl Config {
     /// # Errors
     ///
     /// Returns an error if any validation checks fail.
-    pub fn validate(&self) -> Result<(), ConfigError> {
-        if self.remotes.is_empty() {
-            return Err(ConfigError::ValidationError {
-                message: "at least one remote must be configured".to_string(),
-            });
-        }
-
-        for remote in &self.remotes {
-            remote.validate()?;
-        }
-
+    pub const fn validate(&self) -> Result<(), ConfigError> {
+        // Currently no validation required for security/logging settings
+        // as they all have sensible defaults
         Ok(())
     }
-
-    /// Converts the configuration into a list of credentials.
-    ///
-    /// This transforms the parsed configuration into the secure credential
-    /// types that will be used at runtime.
-    #[must_use]
-    pub fn into_credentials(self) -> Vec<Credential> {
-        self.remotes
-            .into_iter()
-            .map(|remote| {
-                let auth = remote.auth.into_auth_method();
-                Credential::new(remote.name, remote.url_pattern, auth)
-            })
-            .collect()
-    }
-}
-
-/// Configuration for a single remote.
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RemoteConfig {
-    /// Human-readable name for this remote.
-    pub name: String,
-
-    /// URL pattern to match (supports glob patterns).
-    pub url_pattern: String,
-
-    /// Authentication configuration.
-    pub auth: AuthConfig,
-}
-
-impl RemoteConfig {
-    /// Validates the remote configuration.
-    fn validate(&self) -> Result<(), ConfigError> {
-        if self.name.is_empty() {
-            return Err(ConfigError::ValidationError {
-                message: "remote name cannot be empty".to_string(),
-            });
-        }
-
-        if self.url_pattern.is_empty() {
-            return Err(ConfigError::ValidationError {
-                message: format!("url_pattern cannot be empty for remote '{}'", self.name),
-            });
-        }
-
-        self.auth.validate(&self.name)?;
-
-        Ok(())
-    }
-}
-
-/// Authentication configuration.
-///
-/// Uses serde's tag feature to deserialise the correct variant based on
-/// the `type` field in the JSON.
-#[derive(Deserialize)]
-#[serde(tag = "type", deny_unknown_fields)]
-pub enum AuthConfig {
-    /// Personal Access Token authentication.
-    #[serde(rename = "pat")]
-    Pat {
-        /// The token value (stored securely).
-        #[serde(deserialize_with = "deserialize_secret")]
-        token: SecretString,
-    },
-
-    /// SSH key file authentication (passphrase-less keys only).
-    ///
-    /// For passphrase-protected keys, use `ssh_agent` instead.
-    /// Add the key to ssh-agent with `ssh-add` first.
-    #[serde(rename = "ssh_key")]
-    SshKey {
-        /// Path to the private key file.
-        key_path: String,
-    },
-
-    /// SSH agent authentication.
-    #[serde(rename = "ssh_agent")]
-    SshAgent {
-        /// Optional specific identity file to use.
-        #[serde(default)]
-        identity_file: Option<String>,
-    },
-}
-
-impl AuthConfig {
-    /// Validates the authentication configuration.
-    fn validate(&self, remote_name: &str) -> Result<(), ConfigError> {
-        match self {
-            Self::Pat { .. } => {
-                // Token presence is enforced by serde (not Option)
-                Ok(())
-            }
-            Self::SshKey { key_path, .. } => {
-                if key_path.is_empty() {
-                    return Err(ConfigError::ValidationError {
-                        message: format!(
-                            "key_path cannot be empty for SSH key auth on remote '{remote_name}'"
-                        ),
-                    });
-                }
-                Ok(())
-            }
-            Self::SshAgent { .. } => {
-                // SSH agent has no required fields
-                Ok(())
-            }
-        }
-    }
-
-    /// Converts into the secure `AuthMethod` type.
-    fn into_auth_method(self) -> AuthMethod {
-        match self {
-            Self::Pat { token } => AuthMethod::Pat(PatCredential::new(token)),
-            Self::SshKey { key_path } => {
-                let expanded_path = expand_tilde(&key_path);
-                AuthMethod::SshKey(SshKeyCredential::new(expanded_path))
-            }
-            Self::SshAgent { identity_file } => {
-                let expanded_path = identity_file.map(|p| expand_tilde(&p));
-                AuthMethod::SshAgent(SshAgentCredential::new(expanded_path))
-            }
-        }
-    }
-}
-
-// Custom Debug that never reveals secrets
-impl std::fmt::Debug for AuthConfig {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Pat { .. } => f.debug_struct("Pat").field("token", &"[REDACTED]").finish(),
-            Self::SshKey { key_path } => f
-                .debug_struct("SshKey")
-                .field("key_path", key_path)
-                .finish(),
-            Self::SshAgent { identity_file } => f
-                .debug_struct("SshAgent")
-                .field("identity_file", identity_file)
-                .finish(),
-        }
-    }
-}
-
-/// Identity configuration for AI-generated commits.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct AiIdentity {
-    /// Name to use in commit author field.
-    pub name: String,
-
-    /// Email to use in commit author field.
-    pub email: String,
 }
 
 /// Security configuration.
@@ -264,37 +97,16 @@ fn default_log_level() -> String {
     "warn".to_string()
 }
 
-/// Deserialises a string into a `SecretString`.
-fn deserialize_secret<'de, D>(deserializer: D) -> Result<SecretString, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let s = String::deserialize(deserializer)?;
-    Ok(SecretString::from(s))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn parse_minimal_config() {
-        let json = r#"{
-            "remotes": [
-                {
-                    "name": "github",
-                    "url_pattern": "https://github.com/*",
-                    "auth": {
-                        "type": "pat",
-                        "token": "ghp_test123"
-                    }
-                }
-            ]
-        }"#;
+        let json = r#"{}"#;
 
         let config: Config = serde_json::from_str(json).unwrap();
-        assert_eq!(config.remotes.len(), 1);
-        assert_eq!(config.remotes[0].name, "github");
+        assert!(config.validate().is_ok());
     }
 
     #[test]
@@ -302,136 +114,77 @@ mod tests {
         let json = r#"{
             "$schema": "https://json-schema.org/draft/2020-12/schema",
             "_comment": "Test config",
-            "remotes": [
-                {
-                    "name": "github",
-                    "url_pattern": "https://github.com/*",
-                    "auth": {
-                        "type": "pat",
-                        "token": "ghp_test123"
-                    }
-                },
-                {
-                    "name": "company",
-                    "url_pattern": "https://git.company.com/*",
-                    "auth": {
-                        "type": "ssh_key",
-                        "key_path": "~/.ssh/id_ed25519"
-                    }
-                },
-                {
-                    "name": "bitbucket",
-                    "url_pattern": "git@bitbucket.org:*",
-                    "auth": {
-                        "type": "ssh_agent"
-                    }
-                }
-            ],
-            "ai_identity": {
-                "name": "AI Assistant",
-                "email": "ai@example.com"
-            },
             "security": {
                 "allow_force_push": false,
-                "protected_branches": ["main", "master"]
+                "protected_branches": ["main", "master"],
+                "repo_allowlist": ["https://github.com/myorg/*"],
+                "repo_blocklist": ["https://github.com/public/*"]
             },
             "logging": {
-                "level": "debug"
+                "level": "debug",
+                "audit_log_path": "/var/log/git-proxy-mcp.log"
             }
         }"#;
 
         let config: Config = serde_json::from_str(json).unwrap();
         assert!(config.validate().is_ok());
-        assert_eq!(config.remotes.len(), 3);
-        assert!(config.ai_identity.is_some());
         assert!(!config.security.allow_force_push);
+        assert_eq!(config.security.protected_branches.len(), 2);
+        assert!(config.security.repo_allowlist.is_some());
+        assert!(config.security.repo_blocklist.is_some());
         assert_eq!(config.logging.level, "debug");
+        assert!(config.logging.audit_log_path.is_some());
     }
 
     #[test]
-    fn parse_ssh_key_without_passphrase() {
+    fn security_config_defaults() {
+        let config = SecurityConfig::default();
+        assert!(!config.allow_force_push);
+        assert!(config.protected_branches.is_empty());
+        assert!(config.repo_allowlist.is_none());
+        assert!(config.repo_blocklist.is_none());
+    }
+
+    #[test]
+    fn logging_config_defaults() {
+        let config = LoggingConfig::default();
+        assert_eq!(config.level, "warn");
+        assert!(config.audit_log_path.is_none());
+    }
+
+    #[test]
+    fn parse_security_only() {
         let json = r#"{
-            "remotes": [
-                {
-                    "name": "test",
-                    "url_pattern": "https://example.com/*",
-                    "auth": {
-                        "type": "ssh_key",
-                        "key_path": "~/.ssh/id_rsa"
-                    }
-                }
-            ]
+            "security": {
+                "allow_force_push": true,
+                "protected_branches": ["release/*"]
+            }
         }"#;
 
         let config: Config = serde_json::from_str(json).unwrap();
-        assert!(config.validate().is_ok());
+        assert!(config.security.allow_force_push);
+        assert_eq!(config.security.protected_branches, vec!["release/*"]);
     }
 
     #[test]
-    fn validate_empty_remotes_fails() {
-        let json = r#"{ "remotes": [] }"#;
+    fn parse_logging_only() {
+        let json = r#"{
+            "logging": {
+                "level": "trace"
+            }
+        }"#;
 
         let config: Config = serde_json::from_str(json).unwrap();
-        let result = config.validate();
+        assert_eq!(config.logging.level, "trace");
+    }
+
+    #[test]
+    fn reject_unknown_fields() {
+        let json = r#"{
+            "unknown_field": "value"
+        }"#;
+
+        let result: Result<Config, _> = serde_json::from_str(json);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("at least one remote"));
-    }
-
-    #[test]
-    fn validate_empty_name_fails() {
-        let json = r#"{
-            "remotes": [
-                {
-                    "name": "",
-                    "url_pattern": "https://github.com/*",
-                    "auth": { "type": "ssh_agent" }
-                }
-            ]
-        }"#;
-
-        let config: Config = serde_json::from_str(json).unwrap();
-        let result = config.validate();
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn auth_debug_does_not_leak_token() {
-        let json = r#"{
-            "type": "pat",
-            "token": "ghp_supersecrettoken"
-        }"#;
-
-        let auth: AuthConfig = serde_json::from_str(json).unwrap();
-        let debug_output = format!("{auth:?}");
-
-        assert!(!debug_output.contains("ghp_"));
-        assert!(!debug_output.contains("supersecret"));
-        assert!(debug_output.contains("REDACTED"));
-    }
-
-    #[test]
-    fn into_credentials_converts_correctly() {
-        let json = r#"{
-            "remotes": [
-                {
-                    "name": "github",
-                    "url_pattern": "https://github.com/*",
-                    "auth": {
-                        "type": "pat",
-                        "token": "ghp_test"
-                    }
-                }
-            ]
-        }"#;
-
-        let config: Config = serde_json::from_str(json).unwrap();
-        let credentials = config.into_credentials();
-
-        assert_eq!(credentials.len(), 1);
-        assert_eq!(credentials[0].name(), "github");
-        assert_eq!(credentials[0].url_pattern(), "https://github.com/*");
     }
 }

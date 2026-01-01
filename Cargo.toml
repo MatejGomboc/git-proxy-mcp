@@ -37,9 +37,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Error handling
 thiserror = "2.0.17"
 
-# Security - secure string handling with zeroize on drop
-secrecy = { version = "0.10", features = ["serde"] }
-
 # Glob pattern matching for repo allowlists
 glob = "0.3"
 
