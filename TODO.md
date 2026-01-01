@@ -61,7 +61,7 @@ while allowing AI assistants to work with repos in their own environments.
 │                     │                                                       │
 └─────────────────────┼───────────────────────────────────────────────────────┘
                       │
-                      │ 🔒 TLS (handled by Anthropic/vendor)
+                      │ TLS (handled by Anthropic/vendor)
                       ▼
                ┌─────────────┐
                │   AI VM     │
@@ -83,8 +83,8 @@ while allowing AI assistants to work with repos in their own environments.
 
 | Decision | Choice | Rationale |
 |----------|--------|----------|
-| Config hot-reload | ❌ No | Security: config changes require restart to prevent runtime injection |
-| Concurrent operations | ✅ Yes | Allow multiple repos to be accessed simultaneously |
+| Config hot-reload | No | Security: config changes require restart to prevent runtime injection |
+| Concurrent operations | Yes | Allow multiple repos to be accessed simultaneously |
 | Timeline priority | Security first | Take time to do it right, no rushing |
 | Transport | stdio only (v1) | Simplest, most secure for local MCP clients |
 | SSH keys | User manages | User sets up keys on PC, we reference path or use ssh-agent |
@@ -97,24 +97,40 @@ while allowing AI assistants to work with repos in their own environments.
 
 ---
 
-## Phase 5: SSH & Remote Improvements ← CURRENT
+## Phase 5: SSH & Remote Improvements <- CURRENT
 
-- [ ] Named remote resolution (e.g., "origin" → actual URL from .git/config)
+- [ ] Named remote resolution (e.g., "origin" -> actual URL from .git/config)
 
 ---
 
-## Phase 6: Testing & Documentation
+## Phase 6: Code Quality & Cleanup
 
-- [ ] Integration tests for full MCP → git pipeline
-- [ ] Documentation for error messages
-- [ ] Convert ASCII diagrams to Mermaid (TODO.md, README.md)
 - [ ] Remove unused dependencies from Cargo.toml (git2, anyhow, url)
-- [ ] Add LICENSE file (GPL-3.0-or-later as specified in Cargo.toml)
-- [ ] Audit codebase for British spelling consistency (see CONTRIBUTING.md § British Spelling)
+- [ ] Optimise tokio features (currently using "full", only need subset)
+- [ ] Audit codebase for British spelling consistency (see CONTRIBUTING.md)
+- [ ] Convert ASCII diagrams to Mermaid (TODO.md, README.md)
 
 ---
 
-## Phase 7: Cross-Platform Release
+## Phase 7: Testing & Documentation
+
+- [ ] Integration tests for credential injection (currently only unit tests)
+- [ ] Integration tests for full MCP -> git pipeline
+- [ ] Tests for large git output handling
+- [ ] Documentation for error messages and error codes
+
+---
+
+## Phase 8: Robustness & Production Readiness
+
+- [ ] Request timeout configuration (prevent hung git processes)
+- [ ] Graceful shutdown handling (SIGTERM/SIGINT)
+- [ ] Output size limits (prevent protocol buffer overflow)
+- [ ] Configurable rate limiting (currently hardcoded: 20 burst, 5/sec)
+
+---
+
+## Phase 9: Cross-Platform Release
 
 - [x] GitHub Actions release workflow
 - [x] Build targets (Windows x64, macOS x64/ARM64, Linux x64)
@@ -125,10 +141,19 @@ while allowing AI assistants to work with repos in their own environments.
 
 ---
 
+## Future Considerations (v1.1+)
+
+- Git LFS support (currently detect & warn only)
+- Structured logging with JSON output option
+- Metrics/telemetry endpoint
+- Per-operation audit trail with session tracking
+- Health check endpoint for monitoring
+
+---
+
 ## References
 
 - **MCP Specification:** <https://modelcontextprotocol.io/>
-- **git2-rs Documentation:** <https://docs.rs/git2>
 - **Open Source Guides:** <https://opensource.guide/>
 - **Claude Code Docs:** <https://docs.anthropic.com/en/docs/claude-code>
 - **Swatinem/rust-cache:** <https://github.com/Swatinem/rust-cache>
