@@ -18,29 +18,29 @@
 
 ### Credential-Free Proxy Design
 
-```
-User's PC (existing git setup)
-├── ~/.gitconfig (credential helpers)
-├── ~/.ssh/config (SSH host configs)
-├── ssh-agent (keys loaded)
-└── OS credential store
+```mermaid
+flowchart TB
+    subgraph PC["User's PC (existing git setup)"]
+        gitconfig["~/.gitconfig (credential helpers)"]
+        sshconfig["~/.ssh/config (SSH host configs)"]
+        sshagent["ssh-agent (keys loaded)"]
+        oscreds["OS credential store"]
+    end
 
-          ↓ git uses these automatically
+    subgraph Proxy["git-proxy-mcp"]
+        validate["Validate command (security guards)"]
+        spawn["Spawn: git clone/fetch/pull/push/ls-remote"]
+        prompt["GIT_TERMINAL_PROMPT=0 (no interactive prompts)"]
+        sanitise["Sanitise output (remove any leaked credentials)"]
+        result["Return result to AI via MCP"]
+    end
 
-git-proxy-mcp:
-├── Validate command (security guards)
-├── Spawn: git clone/fetch/pull/push/ls-remote
-├── GIT_TERMINAL_PROMPT=0 (no interactive prompts)
-├── Sanitise output (remove any leaked credentials)
-└── Return result to AI via MCP
+    client["Claude Desktop / MCP Client"]
+    ai["AI VM (Claude, GPT, etc.)"]
 
-          ↓ stdio (local process)
-
-Claude Desktop / MCP Client
-
-          ↓ TLS (handled by vendor)
-
-AI VM (Claude, GPT, etc.)
+    PC -->|"git uses these automatically"| Proxy
+    Proxy -->|"stdio (local process)"| client
+    client -->|"TLS (handled by vendor)"| ai
 ```
 
 **Key Security Properties:**
@@ -84,15 +84,15 @@ Instead, it relies on the user's existing Git configuration (credential helpers,
 
 ---
 
-## Phase 6: Code Quality & Cleanup <- CURRENT
+## Completed: Phase 6 — Code Quality & Cleanup
 
 - [x] Optimise tokio features (currently using "full", only need subset)
-- [ ] Audit codebase for British spelling consistency (see CONTRIBUTING.md)
-- [ ] Convert ASCII diagrams to Mermaid (TODO.md, README.md)
+- [x] Audit codebase for British spelling consistency (see CONTRIBUTING.md)
+- [x] Convert ASCII diagrams to Mermaid (TODO.md, README.md)
 
 ---
 
-## Phase 7: Testing & Documentation
+## Phase 7: Testing & Documentation <- CURRENT
 
 - [ ] Integration tests for full MCP -> git pipeline
 - [ ] Tests for large git output handling
@@ -117,6 +117,9 @@ Instead, it relies on the user's existing Git configuration (credential helpers,
 - [x] Semantic versioning and CHANGELOG maintenance
 - [x] User documentation (installation guide, configuration reference)
 - [x] Example MCP client configurations (Claude Desktop, etc.)
+
+> **Note:** The repository owner decides when to move from pre-release (v0.x) to stable release (v1.0).
+> This decision should be based on real-world usage, security audits, and feature completeness.
 
 ---
 
