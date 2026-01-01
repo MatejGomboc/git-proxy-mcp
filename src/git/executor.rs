@@ -1,18 +1,24 @@
-//! Git command execution with credential injection.
+//! Git command execution.
 //!
 //! This module handles:
 //!
-//! 1. Setting up credential helpers via environment variables
-//! 2. Executing Git as a subprocess
-//! 3. Capturing and sanitising output
-//! 4. Detecting Git LFS usage
+//! 1. Executing Git as a subprocess
+//! 2. Capturing and sanitising output
+//! 3. Detecting Git LFS usage
+//!
+//! # Credential Handling
+//!
+//! This executor does NOT handle credentials directly. Instead, it relies
+//! on the user's existing Git configuration:
+//!
+//! - Credential helpers (macOS Keychain, Windows Credential Manager, libsecret)
+//! - SSH agent for SSH key authentication
+//! - `GIT_TERMINAL_PROMPT=0` prevents interactive credential prompts
 
 use std::process::Stdio;
 
 use tokio::process::Command;
 
-use crate::auth::{AuthMethod, Credential, CredentialStore};
-use crate::error::AuthError;
 use crate::git::command::GitCommand;
 use crate::git::sanitiser::OutputSanitiser;
 
@@ -53,21 +59,27 @@ impl CommandOutput {
     }
 }
 
-/// Executes Git commands with credential injection.
+/// Executes Git commands as subprocesses.
+///
+/// This executor spawns git commands using the user's existing Git
+/// configuration. It does not store or inject credentials — authentication
+/// is handled by the user's credential helpers and SSH agent.
 pub struct GitExecutor {
-    /// Credential store for finding matching credentials.
-    credential_store: CredentialStore,
-
     /// Output sanitiser for removing credentials from output.
     sanitiser: OutputSanitiser,
+}
+
+impl Default for GitExecutor {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl GitExecutor {
     /// Creates a new Git executor.
     #[must_use]
-    pub fn new(credential_store: CredentialStore) -> Self {
+    pub fn new() -> Self {
         Self {
-            credential_store,
             sanitiser: OutputSanitiser::new(),
         }
     }
@@ -87,33 +99,12 @@ impl GitExecutor {
     ///
     /// Returns an error if:
     /// - The working directory does not exist or is not accessible
-    /// - No matching credential is found for commands requiring auth
     /// - The Git process fails to start
     pub async fn execute(&self, command: &GitCommand) -> Result<CommandOutput, ExecutorError> {
         // Validate working directory exists before executing
         if let Some(dir) = command.working_dir() {
             Self::validate_working_directory(dir)?;
         }
-
-        // Find credentials if needed
-        let credential = if command.requires_auth() {
-            if let Some(url) = command.extract_remote_url() {
-                // Try to find a matching credential
-                match self.credential_store.find_credential(url) {
-                    Ok(cred) => Some(cred),
-                    Err(AuthError::NoMatchingCredential { .. }) => {
-                        // For some remotes (like "origin"), we need to resolve the actual URL
-                        // This will be handled in a future phase
-                        None
-                    }
-                    Err(e) => return Err(ExecutorError::CredentialError(e)),
-                }
-            } else {
-                None
-            }
-        } else {
-            None
-        };
 
         // Build the command
         let mut cmd = Command::new("git");
@@ -126,17 +117,14 @@ impl GitExecutor {
         // Add command and arguments
         cmd.args(command.build_args());
 
-        // Set up credential injection
-        if let Some(cred) = credential {
-            Self::setup_credentials(&mut cmd, cred);
-        }
-
         // Configure stdio
         cmd.stdin(Stdio::null());
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
 
-        // Prevent Git from prompting for credentials
+        // Prevent Git from prompting for credentials interactively.
+        // If credentials are not available via credential helpers or SSH agent,
+        // git will fail with an error rather than hanging.
         cmd.env("GIT_TERMINAL_PROMPT", "0");
 
         // Execute the command
@@ -167,96 +155,6 @@ impl GitExecutor {
         }
 
         Ok(result)
-    }
-
-    /// Sets up credential injection for a command.
-    ///
-    /// # Security
-    ///
-    /// Credentials are passed via environment variables, never via command-line
-    /// arguments, to prevent exposure in process listings (`ps`, `/proc`, etc.).
-    fn setup_credentials(cmd: &mut Command, credential: &Credential) {
-        match credential.auth() {
-            AuthMethod::Pat(pat) => {
-                // For HTTPS, we use GIT_ASKPASS with an inline script that reads
-                // the password from an environment variable. This approach:
-                //
-                // 1. Never exposes the token in command-line arguments
-                // 2. Works on both Windows and Unix
-                // 3. Uses environment variables which are not visible in `ps` output
-                //
-                // Git calls GIT_ASKPASS with a prompt like "Password for 'https://...': "
-                // The script ignores the prompt and just prints the password.
-
-                let token = pat.expose_token();
-
-                #[cfg(windows)]
-                {
-                    // On Windows, use cmd.exe to echo the environment variable
-                    // The /c flag runs the command and exits
-                    cmd.env("GIT_ASKPASS", "cmd.exe");
-                    cmd.env("GIT_ASKPASS_CMD", "/c echo %GIT_PROXY_TOKEN%");
-                    cmd.env("GIT_PROXY_TOKEN", token);
-
-                    // Set up credential helper config via environment
-                    // This tells git to use x-access-token as username
-                    cmd.env("GIT_CONFIG_COUNT", "2");
-                    cmd.env("GIT_CONFIG_KEY_0", "credential.username");
-                    cmd.env("GIT_CONFIG_VALUE_0", "x-access-token");
-                    cmd.env("GIT_CONFIG_KEY_1", "credential.helper");
-                    cmd.env(
-                        "GIT_CONFIG_VALUE_1",
-                        "!cmd.exe /c echo password=%GIT_PROXY_TOKEN%",
-                    );
-                }
-
-                #[cfg(not(windows))]
-                {
-                    // On Unix, we use a simple shell script via GIT_ASKPASS
-                    // The script prints the token from the environment variable
-                    //
-                    // We use /bin/sh -c with printf to avoid echo's newline behaviour
-                    // differences across platforms. The token is in an env var, not
-                    // in the script text, so it won't appear in `ps` output.
-                    //
-                    // Note: GIT_ASKPASS is called as: $GIT_ASKPASS "prompt text"
-                    // We create a script that ignores the prompt and prints the token.
-
-                    // Store the token in an environment variable (not visible in ps)
-                    cmd.env("GIT_PROXY_TOKEN", token);
-
-                    // Use a credential helper that reads from environment
-                    // This is more reliable than GIT_ASKPASS for complex scenarios
-                    cmd.env("GIT_CONFIG_COUNT", "2");
-                    cmd.env("GIT_CONFIG_KEY_0", "credential.username");
-                    cmd.env("GIT_CONFIG_VALUE_0", "x-access-token");
-                    cmd.env("GIT_CONFIG_KEY_1", "credential.helper");
-                    // The credential helper outputs in git-credential format
-                    // The ! prefix tells git to run it as a shell command
-                    cmd.env(
-                        "GIT_CONFIG_VALUE_1",
-                        "!f() { echo \"password=$GIT_PROXY_TOKEN\"; }; f",
-                    );
-                }
-            }
-            AuthMethod::SshKey(ssh_key) => {
-                // For SSH, set GIT_SSH_COMMAND to use the specific key.
-                // Note: This only works for passphrase-less keys. For passphrase-
-                // protected keys, users must use ssh_agent auth type instead.
-                let key_path = ssh_key.key_path();
-
-                let ssh_cmd = format!(
-                    "ssh -i {} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new",
-                    key_path.display()
-                );
-
-                cmd.env("GIT_SSH_COMMAND", ssh_cmd);
-            }
-            AuthMethod::SshAgent(_) => {
-                // SSH agent is the default behaviour, nothing to configure
-                // Just ensure we're not overriding GIT_SSH_COMMAND
-            }
-        }
     }
 
     /// Detects if the output indicates Git LFS usage.
@@ -315,10 +213,6 @@ impl GitExecutor {
 /// Errors that can occur during Git command execution.
 #[derive(Debug, thiserror::Error)]
 pub enum ExecutorError {
-    /// Failed to find matching credentials.
-    #[error("credential error: {0}")]
-    CredentialError(#[from] AuthError),
-
     /// Failed to execute the Git process.
     #[error("process error: {message}")]
     ProcessError {
@@ -404,5 +298,12 @@ mod tests {
 
         // Clean up
         let _ = std::fs::remove_file(&temp_file);
+    }
+
+    #[test]
+    fn executor_default() {
+        let executor = GitExecutor::default();
+        // Just verify it doesn't panic
+        drop(executor);
     }
 }

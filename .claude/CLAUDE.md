@@ -1,16 +1,33 @@
 # git-proxy-mcp
 
-Secure Git proxy MCP server in Rust. Credentials stay on user's PC, never transmitted to AI.
+Secure Git proxy MCP server in Rust. Uses your existing Git credential configuration — no credentials stored.
 
-## Before You Start
+## Quick Reference
 
-Read these documents (as a human developer would):
+| What | Where |
+|------|-------|
+| Build commands | `CONTRIBUTING.md` § Development Setup |
+| Coding standards | `CONTRIBUTING.md` § Coding Standards |
+| Style guide | `STYLE.md` |
+| Commit conventions | `CONTRIBUTING.md` § Commit Messages |
+| PR requirements | `CONTRIBUTING.md` § Pull Requests |
+| Development roadmap | `TODO.md` |
 
-| Document | Contains |
-|----------|----------|
-| `CONTRIBUTING.md` | Build commands, coding standards, commit conventions, PR requirements |
-| `STYLE.md` | Code style guide |
-| `TODO.md` | Development roadmap (current phase marked with `← CURRENT`) |
+## Architecture
+
+The MCP server is a **credential-free proxy** that spawns git commands:
+
+```
+User's Git Config (credential helpers, ssh-agent)
+          ↓ git uses these automatically
+git-proxy-mcp (validates command, spawns git, sanitises output)
+          ↓ stdio
+MCP Client (Claude Desktop, etc.)
+          ↓ TLS
+AI (Claude, GPT, etc.)
+```
+
+**Key point:** No credentials in config.json — just security settings.
 
 ## Critical Rules
 
@@ -24,7 +41,9 @@ Read these documents (as a human developer would):
 
 ### Security
 
-Credentials NEVER in logs, errors, MCP responses, or debug output. See `CONTRIBUTING.md` § Security-Conscious Coding.
+- The MCP server does NOT store credentials
+- All git output is sanitised for credential leaks
+- See `CONTRIBUTING.md` § Security-Conscious Coding
 
 ### Before Committing
 
@@ -42,3 +61,14 @@ git branch -vv | grep ': gone]' | awk '{print $1}' | xargs -r git branch -d
 ## Off Limits
 
 **`CODE_OF_CONDUCT.md`** — Do not modify. Owned by repository owner.
+
+## Project Structure
+
+```
+src/
+├── config/      # Configuration loading (security settings only)
+├── error.rs     # Error types
+├── git/         # Git command parsing, execution, output sanitisation
+├── mcp/         # MCP protocol, transport, server
+└── security/    # Guards (branch, push, repo filter), audit, rate limiting
+```

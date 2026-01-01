@@ -2,8 +2,11 @@
 
 ## Our Commitment
 
-**git-proxy-mcp** is a security-focused project designed to keep your Git credentials safe
-while enabling AI assistants to work with private repositories. We take security vulnerabilities extremely seriously.
+**git-proxy-mcp** is a security-focused project designed to let AI assistants work with private
+Git repositories while keeping your credentials safe on your machine. We take security vulnerabilities extremely seriously.
+
+**Key security property:** The MCP server does NOT store credentials. It spawns git as a subprocess
+and relies on your existing Git configuration (credential helpers, SSH agent).
 
 ## Supported Versions
 
@@ -67,13 +70,32 @@ Given our focus on credential security, we consider these especially critical:
 
 ## Security Best Practices for Users
 
-### Configuration File Security
+### Git Configuration
 
-Your `config.json` contains sensitive credentials. Please ensure:
+The MCP server uses your existing Git setup. Ensure your credentials are stored securely:
 
-- **File permissions:** Restrict access to your config file (e.g., `chmod 600 config.json` on Unix)
-- **Never commit:** Add your config file to `.gitignore`
-- **Use environment-specific configs:** Don't share config files between environments
+**For HTTPS (PATs):**
+
+```bash
+# macOS - use Keychain
+git config --global credential.helper osxkeychain
+
+# Windows - use Credential Manager
+git config --global credential.helper manager
+
+# Linux - use libsecret or cache
+git config --global credential.helper libsecret
+```
+
+**For SSH:**
+
+```bash
+# Add key to ssh-agent (prompted for passphrase once)
+ssh-add ~/.ssh/id_ed25519
+
+# macOS: store passphrase in Keychain
+ssh-add --apple-use-keychain ~/.ssh/id_ed25519
+```
 
 ### Credential Recommendations
 
@@ -81,20 +103,38 @@ Your `config.json` contains sensitive credentials. Please ensure:
 - **Rotate regularly:** Rotate your Personal Access Tokens periodically
 - **Use SSH keys:** Where possible, prefer SSH keys over PATs
 - **Enable 2FA:** Always enable two-factor authentication on your Git hosting accounts
+- **Use credential helpers:** Never store tokens in plain text files
+
+### MCP Server Configuration
+
+The `config.json` file only contains security settings (protected branches, repo filters) — no credentials.
+It can safely be committed to version control if desired.
 
 ### Audit Logging
 
-When enabled, audit logs are written to `~/.config/git-proxy-mcp/audit.log`. Review these logs periodically for unexpected activity.
+When enabled, audit logs record all git operations. Configure via:
+
+```json
+{
+    "logging": {
+        "audit_log_path": "/path/to/audit.log"
+    }
+}
+```
+
+Review these logs periodically for unexpected activity.
 
 ## Security Design Principles
 
 This project follows these security principles:
 
-1. **Credential isolation:** Credentials never leave the user's machine and are never included in MCP responses
-2. **Minimal permissions:** Request only the permissions needed for Git operations
-3. **Defence in depth:** Multiple layers of protection (config validation, policy enforcement, audit logging)
-4. **Secure defaults:** Safe defaults for all security-related settings
-5. **Transparency:** Open source code for community review
+1. **No credential storage:** The MCP server never stores credentials — it uses git's native credential system
+2. **Credential isolation:** Credentials never leave the user's machine and are never included in MCP responses
+3. **Output sanitisation:** All git output is sanitised to remove accidentally leaked credentials
+4. **Defence in depth:** Multiple layers of protection (command validation, security guards, audit logging)
+5. **Secure defaults:** Force push disabled, protected branches enforced by default
+6. **Transparency:** Open source code for community review
+7. **Industry standard:** Uses the same credential approach as VS Code, TortoiseGit, and other Git tools
 
 ## Acknowledgements
 
@@ -102,4 +142,4 @@ We thank the security researchers and community members who help keep this proje
 
 ---
 
-*This security policy was last updated on 2025-12-31.*
+*This security policy was last updated on 2026-01-01.*

@@ -27,7 +27,12 @@ By participating, you are expected to uphold this code. Please see [CODE_OF_COND
 
 ## Security Considerations
 
-**This is a credential-handling project.** Security is paramount.
+**This is a security-focused project.** The MCP server proxies Git commands for AI assistants.
+
+### Architecture Note
+
+The MCP server does **NOT** store credentials. It relies on the user's existing Git configuration
+(credential helpers, SSH agent). This is the same approach used by VS Code, TortoiseGit, and other Git tools.
 
 ### For All Contributors
 
@@ -115,9 +120,8 @@ When submitting:
 
 ### Prerequisites
 
-- Rust stable (see `rust-toolchain.toml` for exact version)
-- Git
-- OpenSSL development libraries (for git2)
+- Rust 1.75+ (see `rust-toolchain.toml` for exact version)
+- Git 2.x (must be in PATH)
 
 ### Setup
 
@@ -174,10 +178,11 @@ Use British spelling in all documentation and user-facing text:
 
 ### Security-Conscious Coding
 
-- Use `secrecy::SecretString` for credential storage
-- Never implement `Debug` or `Display` for types containing secrets
+- The MCP server does NOT store credentials — it spawns git as a subprocess
+- All git output is sanitised to remove accidentally leaked credentials
 - Never log, print, or include credentials in error messages
 - Review all error paths for potential credential leakage
+- Use `GIT_TERMINAL_PROMPT=0` to prevent interactive prompts
 
 ---
 

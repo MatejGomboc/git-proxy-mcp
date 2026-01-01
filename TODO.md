@@ -2,8 +2,7 @@
 
 ## Overview
 
-**Goal:** Build a secure, AI-agnostic Git proxy MCP server in Rust that keeps credentials on the user's machine
-while allowing AI assistants to work with repos in their own environments.
+**Goal:** Build a secure, AI-agnostic Git proxy MCP server in Rust that spawns git commands on behalf of AI assistants, using the user's existing git credential configuration.
 
 **Guiding Principles:**
 
@@ -17,65 +16,39 @@ while allowing AI assistants to work with repos in their own environments.
 
 ## Security Architecture
 
-### Credential Isolation — CRITICAL
+### Credential-Free Proxy Design
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                              User's PC                                      │
-│                                                                             │
-│   ┌─────────────────────────────────────────────────────────────────────┐  │
-│   │                     git-proxy-mcp                                    │  │
-│   │                                                                      │  │
-│   │   config.json ──┐                                                    │  │
-│   │   (PAT, keys)   │  NEVER                                             │  │
-│   │                 │  LEAVES ──────────────────────┐                    │  │
-│   │                 ▼  HERE                         │                    │  │
-│   │          ┌─────────────┐                        │                    │  │
-│   │          │ Auth Module │                        │                    │  │
-│   │          │ (internal)  │                        │                    │  │
-│   │          └──────┬──────┘                        │                    │  │
-│   │                 │                               │                    │  │
-│   │                 │ HTTPS + PAT                   │                    │  │
-│   │                 ▼                               │                    │  │
-│   │          ┌─────────────┐                        │                    │  │
-│   │          │   GitHub    │                        │                    │  │
-│   │          │   GitLab    │                        │                    │  │
-│   │          └──────┬──────┘                        │                    │  │
-│   │                 │                               │                    │  │
-│   │                 │ Git pack data                 │                    │  │
-│   │                 │ (files, commits)              │                    │  │
-│   │                 │ NO CREDENTIALS                │                    │  │
-│   │                 ▼                               │                    │  │
-│   │          ┌─────────────┐                        │                    │  │
-│   │          │ MCP Response│ ◄──────────────────────┘                    │  │
-│   │          │ (data only) │                                             │  │
-│   │          └──────┬──────┘                                             │  │
-│   │                 │                                                    │  │
-│   └─────────────────┼────────────────────────────────────────────────────┘  │
-│                     │ stdio (local process, no network)                     │
-│                     ▼                                                       │
-│              ┌─────────────┐                                                │
-│              │Claude Desktop│                                               │
-│              │ / MCP Client │                                               │
-│              └──────┬──────┘                                                │
-│                     │                                                       │
-└─────────────────────┼───────────────────────────────────────────────────────┘
-                      │
-                      │ TLS (handled by Anthropic/vendor)
-                      ▼
-               ┌─────────────┐
-               │   AI VM     │
-               │ (Claude,    │
-               │  GPT, etc.) │
-               └─────────────┘
+User's PC (existing git setup)
+├── ~/.gitconfig (credential helpers)
+├── ~/.ssh/config (SSH host configs)
+├── ssh-agent (keys loaded)
+└── OS credential store
+
+          ↓ git uses these automatically
+
+git-proxy-mcp:
+├── Validate command (security guards)
+├── Spawn: git clone/fetch/pull/push/ls-remote
+├── GIT_TERMINAL_PROMPT=0 (no interactive prompts)
+├── Sanitise output (remove any leaked credentials)
+└── Return result to AI via MCP
+
+          ↓ stdio (local process)
+
+Claude Desktop / MCP Client
+
+          ↓ TLS (handled by vendor)
+
+AI VM (Claude, GPT, etc.)
 ```
 
 **Key Security Properties:**
 
-1. Credentials are loaded from config, used internally, and NEVER serialised to MCP responses
-2. stdio transport = local process communication, no network between MCP server and client
-3. Only git pack data (file contents, commits, branches) flows through MCP
-4. Anthropic/vendor handles encryption between their client and AI VM
+1. MCP server stores NO credentials — uses git's native credential system
+2. User configures git once, same as they would for manual use
+3. stdio transport = local process communication, no network exposure
+4. Only git output flows through MCP, sanitised for safety
 
 ---
 
@@ -83,29 +56,36 @@ while allowing AI assistants to work with repos in their own environments.
 
 | Decision | Choice | Rationale |
 |----------|--------|----------|
-| Config hot-reload | No | Security: config changes require restart to prevent runtime injection |
+| Credential storage | None | Use git's native credential helpers; no duplication |
+| Config hot-reload | No | Security: config changes require restart |
 | Concurrent operations | Yes | Allow multiple repos to be accessed simultaneously |
-| Timeline priority | Security first | Take time to do it right, no rushing |
 | Transport | stdio only (v1) | Simplest, most secure for local MCP clients |
-| SSH keys | User manages | User sets up keys on PC, we reference path or use ssh-agent |
-| Large repos | Stream output | Forward Git's stdout/stderr in real-time to MCP client |
+| SSH keys | User manages via ssh-agent | Standard tooling, no MCP involvement |
 | Git LFS | Defer to v1.1 | v1.0: detect & warn; v1.1+: implement support |
-| Feature tracking | `TODO.md` | Single source of truth for roadmap and progress |
-| Proxy approach | Pass-through | Proxy Git CLI commands, inject credentials, return output |
+| Proxy approach | Pass-through | Spawn git subprocess, return output |
 | Scope | Git CLI only | Web UI features (PRs, issues, etc.) are out of scope |
-| Command scope | Remote-only | Only clone/fetch/pull/push/ls-remote; local commands run directly |
+| Command scope | Remote-only | Only clone/fetch/pull/push/ls-remote |
 
 ---
 
-## Phase 5: SSH & Remote Improvements <- CURRENT
+## Completed: Phase 5 — Remove Credential Storage
 
-- [ ] Named remote resolution (e.g., "origin" -> actual URL from .git/config)
+Major architectural simplification completed. The MCP server no longer stores credentials.
+Instead, it relies on the user's existing Git configuration (credential helpers, SSH agent).
+
+- [x] Remove `src/auth/` module entirely
+- [x] Remove `remotes` section from config
+- [x] Simplify `GitExecutor` to just spawn git
+- [x] Remove `secrecy` crate dependency
+- [x] Update config to security/logging settings only
+- [x] Update README with credential-free approach
+- [x] Update example config
+- [x] Fix all tests
 
 ---
 
-## Phase 6: Code Quality & Cleanup
+## Phase 6: Code Quality & Cleanup <- CURRENT
 
-- [ ] Remove unused dependencies from Cargo.toml (git2, anyhow, url)
 - [ ] Optimise tokio features (currently using "full", only need subset)
 - [ ] Audit codebase for British spelling consistency (see CONTRIBUTING.md)
 - [ ] Convert ASCII diagrams to Mermaid (TODO.md, README.md)
@@ -114,7 +94,6 @@ while allowing AI assistants to work with repos in their own environments.
 
 ## Phase 7: Testing & Documentation
 
-- [ ] Integration tests for credential injection (currently only unit tests)
 - [ ] Integration tests for full MCP -> git pipeline
 - [ ] Tests for large git output handling
 - [ ] Documentation for error messages and error codes

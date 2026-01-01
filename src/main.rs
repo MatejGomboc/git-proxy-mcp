@@ -1,8 +1,9 @@
 //! git-proxy-mcp: Secure Git proxy MCP server for AI assistants
 //!
 //! This tool allows AI assistants to clone, pull, and push to private Git
-//! repositories while keeping credentials secure on the user's machine.
-//! Credentials are never transmitted through MCP responses.
+//! repositories using the user's existing Git credential configuration.
+//! The MCP server does not store credentials — it relies on credential
+//! helpers and SSH agent already configured on the user's machine.
 
 use std::process::ExitCode;
 
@@ -10,7 +11,6 @@ use clap::Parser;
 use tracing::{error, info, Level};
 use tracing_subscriber::EnvFilter;
 
-use git_proxy_mcp::auth::CredentialStore;
 use git_proxy_mcp::config;
 use git_proxy_mcp::git::executor::GitExecutor;
 use git_proxy_mcp::mcp::server::{McpServer, SecurityConfig};
@@ -18,9 +18,9 @@ use git_proxy_mcp::security::{AuditEvent, AuditLogger};
 
 /// Secure Git proxy MCP server for AI assistants.
 ///
-/// Allows AI assistants to work with private Git repositories while keeping
-/// credentials secure on your machine. Credentials are never transmitted
-/// through MCP responses.
+/// Allows AI assistants to work with private Git repositories using your
+/// existing Git credential configuration. Credentials are managed by your
+/// system's credential helpers and SSH agent, not by this server.
 #[derive(Parser, Debug)]
 #[command(name = "git-proxy-mcp")]
 #[command(author, version, about, long_about = None)]
@@ -121,38 +121,25 @@ fn main() -> ExitCode {
     // Build security config
     let security_config = SecurityConfig {
         allow_force_push: cfg.security.allow_force_push,
-        protected_branches: cfg.security.protected_branches.clone(),
-        repo_allowlist: cfg.security.repo_allowlist.clone(),
-        repo_blocklist: cfg.security.repo_blocklist.clone(),
+        protected_branches: cfg.security.protected_branches,
+        repo_allowlist: cfg.security.repo_allowlist,
+        repo_blocklist: cfg.security.repo_blocklist,
     };
 
     info!(
-        remotes = cfg.remotes.len(),
         force_push = security_config.allow_force_push,
         protected_branches = ?security_config.protected_branches,
         "Configuration loaded"
     );
 
-    // Convert config to credentials and create credential store
-    let credentials = cfg.into_credentials();
-    let credential_store = match CredentialStore::new(credentials) {
-        Ok(store) => {
-            info!(count = store.len(), "Credentials loaded");
-            store
-        }
-        Err(e) => {
-            error!(error = %e, "Failed to create credential store");
-            return ExitCode::FAILURE;
-        }
-    };
-
-    // Create git executor
-    let executor = GitExecutor::new(credential_store);
+    // Create git executor (no credentials stored — uses system git config)
+    let executor = GitExecutor::new();
 
     // Create MCP server
     let mut server = McpServer::new(executor, security_config, audit_logger);
 
     info!("MCP server ready, waiting for client connection...");
+    info!("Note: Authentication uses your existing Git credential configuration");
 
     // Run the server
     let runtime = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");

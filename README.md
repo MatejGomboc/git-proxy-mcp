@@ -2,7 +2,7 @@
 
 **Your Git credentials stay on your machine. Always.**
 
-A secure MCP server that lets AI assistants work with Git repositories without ever seeing your credentials.
+A secure MCP server that lets AI assistants work with Git repositories using your existing Git configuration.
 
 ---
 
@@ -30,9 +30,8 @@ manipulation.
 
 git-proxy-mcp acts as a local proxy between your AI assistant and Git hosting services. It:
 
-- **Keeps credentials local** — Your PATs and SSH keys never leave your machine
-- **Exposes only data** — AI assistants receive repository content (files, commits, branches) but never authentication
-  secrets
+- **Uses your existing Git setup** — No separate credential configuration; works with your credential helpers and SSH agent
+- **Keeps credentials local** — Credentials never flow through MCP responses
 - **Enables native Git workflow** — Clone, edit, commit, push. AI assistants work with full repo copies, not API calls
 - **Runs locally** — stdio transport means no network exposure between the MCP server and client
 
@@ -40,58 +39,56 @@ git-proxy-mcp acts as a local proxy between your AI assistant and Git hosting se
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                              User's PC                                      │
 │                                                                             │
-│   ┌─────────────────────────────────────────────────────────────────────┐  │
-│   │                     git-proxy-mcp                                    │  │
-│   │                                                                      │  │
-│   │   config.json ──┐                                                    │  │
-│   │   (PAT, keys)   │  NEVER                                             │  │
-│   │                 │  LEAVES ──────────────────────┐                    │  │
-│   │                 ▼  HERE                         │                    │  │
-│   │          ┌─────────────┐                        │                    │  │
-│   │          │ Auth Module │                        │                    │  │
-│   │          │ (internal)  │                        │                    │  │
-│   │          └──────┬──────┘                        │                    │  │
-│   │                 │                               │                    │  │
-│   │                 │ HTTPS + PAT                   │                    │  │
-│   │                 ▼                               │                    │  │
-│   │          ┌─────────────┐                        │                    │  │
-│   │          │   GitHub    │                        │                    │  │
-│   │          │   GitLab    │                        │                    │  │
-│   │          └──────┬──────┘                        │                    │  │
-│   │                 │                               │                    │  │
-│   │                 │ Git pack data                 │                    │  │
-│   │                 │ (files, commits)              │                    │  │
-│   │                 │ NO CREDENTIALS                │                    │  │
-│   │                 ▼                               │                    │  │
-│   │          ┌─────────────┐                        │                    │  │
-│   │          │ MCP Response│ ◄──────────────────────┘                    │  │
-│   │          │ (data only) │                                             │  │
-│   │          └──────┬──────┘                                             │  │
-│   │                 │                                                    │  │
-│   └─────────────────┼────────────────────────────────────────────────────┘  │
-│                     │ stdio (local process, no network)                     │
-│                     ▼                                                       │
-│              ┌─────────────┐                                                │
-│              │Claude Desktop│                                               │
-│              │ / MCP Client │                                               │
-│              └──────┬──────┘                                                │
-│                     │                                                       │
-└─────────────────────┼───────────────────────────────────────────────────────┘
-                      │
-                      │ TLS (handled by Anthropic/vendor)
-                      ▼
-               ┌─────────────┐
-               │   AI VM     │
-               │ (Claude,    │
-               │  GPT, etc.) │
-               └─────────────┘
+│   ┌────────────────────────────────────────────────────────────────────┐   │
+│   │                    Your Git Configuration                           │   │
+│   │                                                                     │   │
+│   │   ~/.gitconfig ──────────────────────────────────────────────────┐  │   │
+│   │   (credential helpers)                                           │  │   │
+│   │                                                                  │  │   │
+│   │   ~/.ssh/config + ssh-agent ─────────────────────────────────────┤  │   │
+│   │   (SSH keys, already loaded)                                     │  │   │
+│   │                                                                  │  │   │
+│   │   OS Credential Store ───────────────────────────────────────────┤  │   │
+│   │   (macOS Keychain, Windows Credential Manager, libsecret)        │  │   │
+│   └──────────────────────────────────────────────────────────────────┼──┘   │
+│                                                                      │      │
+│                            Git uses these automatically              │      │
+│                                       │                              │      │
+│   ┌───────────────────────────────────▼──────────────────────────────┴──┐   │
+│   │                     git-proxy-mcp                                    │   │
+│   │                                                                      │   │
+│   │   1. Validate command (security guards)                              │   │
+│   │   2. Spawn: git clone/fetch/pull/push/ls-remote                      │   │
+│   │   3. Set GIT_TERMINAL_PROMPT=0 (no interactive prompts)              │   │
+│   │   4. Sanitise output (remove any leaked credentials)                 │   │
+│   │   5. Return result to AI via MCP                                     │   │
+│   │                                                                      │   │
+│   │   NO credentials stored ─────── Git handles auth natively            │   │
+│   │                                                                      │   │
+│   └──────────────────────────────────┬───────────────────────────────────┘   │
+│                                      │ stdio (local process, no network)     │
+│                                      ▼                                       │
+│                               ┌─────────────┐                                │
+│                               │Claude Desktop│                               │
+│                               │ / MCP Client │                               │
+│                               └──────┬──────┘                                │
+│                                      │                                       │
+└──────────────────────────────────────┼───────────────────────────────────────┘
+                                       │
+                                       │ TLS (handled by Anthropic/vendor)
+                                       ▼
+                                ┌─────────────┐
+                                │   AI VM     │
+                                │ (Claude,    │
+                                │  GPT, etc.) │
+                                └─────────────┘
 ```
 
 ---
 
 ## Supported Commands
 
-Only remote Git operations that require credential injection are proxied:
+Only remote Git operations are proxied:
 
 | Command | Description |
 |---------|-------------|
@@ -102,7 +99,7 @@ Only remote Git operations that require credential injection are proxied:
 | `ls-remote` | List references in a remote repository |
 
 **Local commands** (`status`, `log`, `diff`, `add`, `commit`, `branch`, etc.) are intentionally **not supported**.
-AI assistants can run these directly — they don't need credential injection.
+AI assistants can run these directly — they don't need to be proxied.
 
 ---
 
@@ -110,16 +107,15 @@ AI assistants can run these directly — they don't need credential injection.
 
 | Feature | Status |
 |---------|--------|
-| Credential isolation | 🔧 In Progress |
-| GitHub/GitLab support | 🔧 In Progress |
-| Remote-only command proxy | 🔧 In Progress |
-| SSH key support | 🔧 In Progress |
-| Audit logging | 🔧 In Progress |
-| Protected branch guardrails | 🔧 In Progress |
-| Rate limiting | 🔧 In Progress |
+| Credential-free proxy | Complete |
+| GitHub/GitLab support | Complete |
+| Remote-only command proxy | Complete |
+| SSH key support (via ssh-agent) | Complete |
+| Audit logging | Complete |
+| Protected branch guardrails | Complete |
+| Rate limiting | Complete |
 | Git LFS support | Future |
 
-> **Note:** Core modules are implemented and tested, but MCP server integration is in progress.
 > See [TODO.md](TODO.md) for the full roadmap.
 
 ---
@@ -189,9 +185,66 @@ Get-FileHash git-proxy-mcp-windows-x86_64.zip -Algorithm SHA256
 
 ---
 
+## Prerequisites: Configure Git
+
+**git-proxy-mcp does not store credentials.** It uses your existing Git configuration.
+
+Before using git-proxy-mcp, ensure Git is configured to authenticate without prompting:
+
+### For HTTPS (GitHub, GitLab, etc.)
+
+Configure a credential helper to cache your tokens:
+
+```bash
+# macOS - use Keychain
+git config --global credential.helper osxkeychain
+
+# Windows - use Credential Manager
+git config --global credential.helper manager
+
+# Linux - use libsecret (GNOME) or cache
+git config --global credential.helper libsecret
+# or: git config --global credential.helper cache --timeout=3600
+```
+
+Then authenticate once (e.g., `git clone` a private repo). Your token will be stored securely.
+
+### For SSH
+
+Add your SSH key to the ssh-agent:
+
+```bash
+# Start ssh-agent (if not already running)
+eval "$(ssh-agent -s)"
+
+# Add your key (you'll be prompted for passphrase once)
+ssh-add ~/.ssh/id_ed25519
+
+# macOS: store passphrase in Keychain
+ssh-add --apple-use-keychain ~/.ssh/id_ed25519
+```
+
+On Windows with OpenSSH, the ssh-agent service handles key caching automatically.
+
+### Verify Setup
+
+Test that Git can authenticate without prompting:
+
+```bash
+# Should work without password prompt
+git ls-remote https://github.com/your-private-repo.git
+
+# Or for SSH
+git ls-remote git@github.com:your-private-repo.git
+```
+
+If prompted for credentials, the MCP server will fail (it sets `GIT_TERMINAL_PROMPT=0` to prevent hanging).
+
+---
+
 ## Configuration
 
-Create a configuration file with your repository credentials. The default location is:
+The MCP server uses a minimal configuration file for security settings. The default location is:
 
 - **Linux/macOS:** `~/.git-proxy-mcp/config.json`
 - **Windows:** `%USERPROFILE%\.git-proxy-mcp\config.json`
@@ -202,28 +255,6 @@ Or specify a custom path with `--config /path/to/config.json`.
 
 ```json
 {
-    "remotes": [
-        {
-            "name": "github",
-            "url_pattern": "https://github.com/*",
-            "auth": {
-                "type": "pat",
-                "token": "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-            }
-        },
-        {
-            "name": "company-gitlab",
-            "url_pattern": "https://git.company.com/*",
-            "auth": {
-                "type": "ssh_key",
-                "key_path": "~/.ssh/id_ed25519"
-            }
-        }
-    ],
-    "ai_identity": {
-        "name": "AI Assistant",
-        "email": "ai-assistant@noreply.local"
-    },
     "security": {
         "allow_force_push": false,
         "protected_branches": ["main", "master", "develop"]
@@ -234,49 +265,18 @@ Or specify a custom path with `--config /path/to/config.json`.
 }
 ```
 
-### Authentication Types
+### Configuration Options
 
-| Type | Description |
-|------|-------------|
-| `pat` | Personal Access Token (GitHub, GitLab, etc.) |
-| `ssh_key` | SSH private key file (without passphrase) |
-| `ssh_agent` | Use system SSH agent (recommended for passphrase-protected keys) |
+| Option | Description | Default |
+|--------|-------------|---------|
+| `security.allow_force_push` | Allow force push operations | `false` |
+| `security.protected_branches` | Branches that cannot be force-pushed or deleted | `[]` |
+| `security.repo_allowlist` | Only allow these repository patterns (glob) | `null` (all allowed) |
+| `security.repo_blocklist` | Block these repository patterns (glob) | `null` (none blocked) |
+| `logging.level` | Log level: trace, debug, info, warn, error | `warn` |
+| `logging.audit_log_path` | Path to audit log file | `null` (disabled) |
 
-See [config/example-config.json](config/example-config.json) for a complete example with all options.
-
-### SSH Keys with Passphrases
-
-For passphrase-protected SSH keys, use `ssh_agent` instead of `ssh_key`. This is the secure approach — your passphrase is never stored in the config file.
-
-**Setup:**
-
-```bash
-# Start ssh-agent (if not already running)
-eval "$(ssh-agent -s)"
-
-# Add your key (you'll be prompted for the passphrase once)
-ssh-add ~/.ssh/id_ed25519
-```
-
-**Config:**
-
-```json
-{
-    "name": "github-ssh",
-    "url_pattern": "git@github.com:*",
-    "auth": {
-        "type": "ssh_agent"
-    }
-}
-```
-
-On macOS, add `--apple-use-keychain` to store the passphrase in Keychain:
-
-```bash
-ssh-add --apple-use-keychain ~/.ssh/id_ed25519
-```
-
-On Windows with OpenSSH, the ssh-agent service handles key caching automatically.
+See [config/example-config.json](config/example-config.json) for a complete example.
 
 ---
 
@@ -294,7 +294,7 @@ Add to your Claude Desktop MCP configuration file:
     "mcpServers": {
         "git-proxy": {
             "command": "git-proxy-mcp",
-            "args": ["--config", "/path/to/config.json"]
+            "args": []
         }
     }
 }
@@ -348,7 +348,8 @@ The server exposes a `git` tool that accepts Git commands as arguments. Example 
 
 ## Security Model
 
-**Core guarantee:** Credentials are loaded from config, used internally for Git operations, and **never** serialised to MCP responses.
+**Core guarantee:** The MCP server spawns git as a subprocess using your existing configuration. Credentials are
+never stored in the MCP server or transmitted through MCP responses.
 
 ### What flows to the AI
 
@@ -359,10 +360,10 @@ The server exposes a `git` tool that accepts Git commands as arguments. Example 
 
 ### What stays local
 
-- Personal Access Tokens
-- SSH private keys
+- Personal Access Tokens (in your OS credential store)
+- SSH private keys (in ssh-agent)
 - Any authentication secrets
-- Credential configuration
+- Output is sanitised to remove any accidentally leaked credentials
 
 ### Audit it yourself
 

@@ -502,10 +502,10 @@ impl McpServer {
         vec![ToolDefinition {
             name: "git".to_string(),
             description: Some(
-                "Execute remote Git commands with automatic credential injection. \
+                "Execute remote Git commands using your existing Git credential configuration. \
                  Only remote operations are supported: clone, fetch, pull, push, ls-remote. \
                  Local commands (status, log, diff, commit, etc.) should be run directly. \
-                 Credentials are securely managed and never exposed in responses."
+                 Authentication is handled by your system's credential helpers and SSH agent."
                     .to_string(),
             ),
             input_schema: json!({
@@ -697,12 +697,10 @@ impl McpServer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::auth::CredentialStore;
 
     /// Creates a test server with minimal configuration.
     fn create_test_server() -> McpServer {
-        let credential_store = CredentialStore::new(vec![]).unwrap();
-        let executor = GitExecutor::new(credential_store);
+        let executor = GitExecutor::new();
         let security_config = SecurityConfig::default();
         let audit_logger = AuditLogger::disabled();
 
