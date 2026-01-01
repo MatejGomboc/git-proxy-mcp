@@ -110,12 +110,13 @@ AI assistants can run these directly — they don't need credential injection.
 
 | Feature | Status |
 |---------|--------|
-| Credential isolation | Planned |
-| GitHub/GitLab support | Planned |
+| Credential isolation | ✅ Implemented |
+| GitHub/GitLab support | ✅ Implemented |
 | Remote-only command proxy | ✅ Implemented |
-| SSH key support | Planned |
-| Audit logging | Planned |
-| Protected branch guardrails | Planned |
+| SSH key support | ✅ Implemented |
+| Audit logging | ✅ Implemented |
+| Protected branch guardrails | ✅ Implemented |
+| Rate limiting | ✅ Implemented |
 | Git LFS support | Future |
 
 See [TODO.md](TODO.md) for the full roadmap.
@@ -124,9 +125,42 @@ See [TODO.md](TODO.md) for the full roadmap.
 
 ## Installation
 
-> **Note:** git-proxy-mcp is in early development. Installation instructions will be added when the first release is available.
+### Download Pre-built Binaries
 
-### From Source (Development)
+Download the latest release for your platform from the
+[Releases page](https://github.com/MatejGomboc/git-proxy-mcp/releases):
+
+| Platform | Download |
+|----------|----------|
+| Linux (x64) | `git-proxy-mcp-linux-x86_64.tar.gz` |
+| macOS (Intel) | `git-proxy-mcp-macos-x86_64.tar.gz` |
+| macOS (Apple Silicon) | `git-proxy-mcp-macos-aarch64.tar.gz` |
+| Windows (x64) | `git-proxy-mcp-windows-x86_64.zip` |
+
+#### Linux / macOS
+
+```bash
+# Download and extract (example for Linux x64)
+curl -LO https://github.com/MatejGomboc/git-proxy-mcp/releases/latest/download/git-proxy-mcp-linux-x86_64.tar.gz
+tar -xzf git-proxy-mcp-linux-x86_64.tar.gz
+
+# Move to a directory in your PATH
+sudo mv git-proxy-mcp /usr/local/bin/
+
+# Verify installation
+git-proxy-mcp --version
+```
+
+#### Windows
+
+1. Download `git-proxy-mcp-windows-x86_64.zip`
+2. Extract to a folder (e.g., `C:\Program Files\git-proxy-mcp\`)
+3. Add the folder to your PATH environment variable
+4. Open a new terminal and run `git-proxy-mcp --version`
+
+### Build from Source
+
+Requires Rust 1.75+ and Git 2.x.
 
 ```bash
 # Clone the repository
@@ -136,44 +170,78 @@ cd git-proxy-mcp
 # Build
 cargo build --release
 
-# Run
-./target/release/git-proxy-mcp
+# The binary is at target/release/git-proxy-mcp (or .exe on Windows)
+./target/release/git-proxy-mcp --version
 ```
 
-### Requirements
+### Verify Checksums
 
-- Rust 1.70+ (for building from source)
-- Git 2.x
-- Supported platforms: Windows, macOS, Linux
+Each release includes a `SHA256SUMS.txt` file. Verify your download:
+
+```bash
+# Linux/macOS
+sha256sum -c SHA256SUMS.txt --ignore-missing
+
+# Windows (PowerShell)
+Get-FileHash git-proxy-mcp-windows-x86_64.zip -Algorithm SHA256
+```
 
 ---
 
 ## Configuration
 
-Create a `config.json` file with your repository credentials:
+Create a configuration file with your repository credentials. The default location is:
+
+- **Linux/macOS:** `~/.git-proxy-mcp/config.json`
+- **Windows:** `%USERPROFILE%\.git-proxy-mcp\config.json`
+
+Or specify a custom path with `--config /path/to/config.json`.
+
+### Example Configuration
 
 ```json
 {
-    "credentials": [
+    "remotes": [
         {
-            "url_pattern": "github.com/*",
+            "name": "github",
+            "url_pattern": "https://github.com/*",
             "auth": {
                 "type": "pat",
-                "token": "ghp_xxxxxxxxxxxx"
+                "token": "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
             }
         },
         {
-            "url_pattern": "gitlab.company.com/*",
+            "name": "company-gitlab",
+            "url_pattern": "https://git.company.com/*",
             "auth": {
-                "type": "ssh",
+                "type": "ssh_key",
                 "key_path": "~/.ssh/id_ed25519"
             }
         }
-    ]
+    ],
+    "ai_identity": {
+        "name": "AI Assistant",
+        "email": "ai-assistant@noreply.local"
+    },
+    "security": {
+        "allow_force_push": false,
+        "protected_branches": ["main", "master", "develop"]
+    },
+    "logging": {
+        "level": "warn"
+    }
 }
 ```
 
-See [config/example-config.json](config/example-config.json) for a complete example.
+### Authentication Types
+
+| Type | Description |
+|------|-------------|
+| `pat` | Personal Access Token (GitHub, GitLab, etc.) |
+| `ssh_key` | SSH private key file |
+| `ssh_agent` | Use system SSH agent |
+
+See [config/example-config.json](config/example-config.json) for a complete example with all options.
 
 ---
 
@@ -181,7 +249,10 @@ See [config/example-config.json](config/example-config.json) for a complete exam
 
 ### Claude Desktop
 
-Add to your Claude Desktop MCP configuration:
+Add to your Claude Desktop MCP configuration file:
+
+- **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
 
 ```json
 {
@@ -194,9 +265,49 @@ Add to your Claude Desktop MCP configuration:
 }
 ```
 
+#### Platform-Specific Examples
+
+**macOS / Linux:**
+
+```json
+{
+    "mcpServers": {
+        "git-proxy": {
+            "command": "/usr/local/bin/git-proxy-mcp",
+            "args": []
+        }
+    }
+}
+```
+
+**Windows:**
+
+```json
+{
+    "mcpServers": {
+        "git-proxy": {
+            "command": "C:\\Program Files\\git-proxy-mcp\\git-proxy-mcp.exe",
+            "args": []
+        }
+    }
+}
+```
+
 ### Other MCP Clients
 
 git-proxy-mcp uses stdio transport, compatible with any MCP client that supports local server processes.
+
+The server exposes a `git` tool that accepts Git commands as arguments. Example tool call:
+
+```json
+{
+    "name": "git",
+    "arguments": {
+        "command": "clone",
+        "args": ["https://github.com/user/repo.git", "/tmp/repo"]
+    }
+}
+```
 
 ---
 

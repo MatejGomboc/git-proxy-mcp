@@ -9,9 +9,9 @@
 //! The configuration file is searched in the following order:
 //!
 //! 1. Path specified via `--config` CLI flag
-//! 2. Platform-specific default locations:
-//!    - **Linux/macOS:** `~/.config/git-proxy-mcp/config.json`
-//!    - **Windows:** `%APPDATA%\git-proxy-mcp\config.json`
+//! 2. Default location:
+//!    - **Linux/macOS:** `~/.git-proxy-mcp/config.json`
+//!    - **Windows:** `%USERPROFILE%\.git-proxy-mcp\config.json`
 //!
 //! # Example Configuration
 //!
@@ -25,13 +25,13 @@ use std::path::{Path, PathBuf};
 
 use crate::error::ConfigError;
 
-/// Returns the platform-specific default configuration directory.
+/// Returns the default configuration directory.
 ///
-/// - **Linux/macOS:** `~/.config/git-proxy-mcp/`
-/// - **Windows:** `%APPDATA%\git-proxy-mcp\`
+/// - **Linux/macOS:** `~/.git-proxy-mcp/`
+/// - **Windows:** `%USERPROFILE%\.git-proxy-mcp\`
 #[must_use]
 pub fn default_config_dir() -> Option<PathBuf> {
-    dirs::config_dir().map(|p| p.join("git-proxy-mcp"))
+    dirs::home_dir().map(|p| p.join(".git-proxy-mcp"))
 }
 
 /// Returns the platform-specific default configuration file path.
