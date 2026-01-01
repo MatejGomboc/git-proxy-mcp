@@ -20,8 +20,13 @@ name = "git-proxy-mcp"
 path = "src/main.rs"
 
 [dependencies]
-# Async runtime
-tokio = { version = "1", features = ["full"] }
+# Async runtime (minimal features for MCP server)
+# - rt: basic runtime for block_on
+# - io-util: AsyncBufReadExt, AsyncWriteExt, BufReader
+# - io-std: stdin(), stdout()
+# - process: async Command for spawning git
+# - macros: #[tokio::test] attribute
+tokio = { version = "1", features = ["rt", "io-util", "io-std", "process", "macros"] }
 
 # Serialisation
 serde = { version = "1", features = ["derive"] }
