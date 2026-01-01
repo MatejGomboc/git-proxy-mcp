@@ -71,7 +71,6 @@ flowchart TB
 
 ## Phase 8: Robustness & Production Readiness <- CURRENT
 
-- [ ] Configurable rate limiting (currently hardcoded: 20 burst, 5/sec)
 - [ ] Documentation: mention per-repo git config (without `--global`) as alternative
 - [ ] Rust code: add explicit type annotations where types aren't obvious
 - [ ] Crash diagnostics: collect crash logs/traces on end-user machines for easier debugging
