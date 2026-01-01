@@ -104,6 +104,21 @@ jobs:
               run: cargo build
 ```
 
+### Multi-line Scripts (`run: |`)
+
+Use **4 spaces from the `-` column** for shell script content inside `run: |` blocks. This provides clear visual separation between YAML structure and shell commands.
+
+```yaml
+            - name: Example step
+              shell: bash
+              run: |
+                if [[ -n "$VAR" ]]; then
+                    echo "Variable is set"
+                else
+                    echo "Variable is not set"
+                fi
+```
+
 ### Structure
 
 - Blank line between top-level keys (`on`, `env`, `jobs`)
