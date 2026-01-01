@@ -1,6 +1,7 @@
 {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "_comment": "Example configuration for git-proxy-mcp. Copy to your config directory and customise.",
+    "_note_ssh": "For passphrase-protected SSH keys, use ssh_agent (add key with ssh-add first).",
     "remotes": [
         {
             "name": "github",

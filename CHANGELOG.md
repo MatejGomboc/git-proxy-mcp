@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Output sanitisation to remove credentials from git output
 - Cross-platform CI/CD pipeline (Windows, macOS, Linux)
 - GitHub Actions release workflow with automated binary builds
+- Documentation for SSH key passphrase handling via ssh-agent
 
 ### In Progress
 

@@ -239,10 +239,44 @@ Or specify a custom path with `--config /path/to/config.json`.
 | Type | Description |
 |------|-------------|
 | `pat` | Personal Access Token (GitHub, GitLab, etc.) |
-| `ssh_key` | SSH private key file |
-| `ssh_agent` | Use system SSH agent |
+| `ssh_key` | SSH private key file (without passphrase) |
+| `ssh_agent` | Use system SSH agent (recommended for passphrase-protected keys) |
 
 See [config/example-config.json](config/example-config.json) for a complete example with all options.
+
+### SSH Keys with Passphrases
+
+For passphrase-protected SSH keys, use `ssh_agent` instead of `ssh_key`. This is the secure approach — your passphrase is never stored in the config file.
+
+**Setup:**
+
+```bash
+# Start ssh-agent (if not already running)
+eval "$(ssh-agent -s)"
+
+# Add your key (you'll be prompted for the passphrase once)
+ssh-add ~/.ssh/id_ed25519
+```
+
+**Config:**
+
+```json
+{
+    "name": "github-ssh",
+    "url_pattern": "git@github.com:*",
+    "auth": {
+        "type": "ssh_agent"
+    }
+}
+```
+
+On macOS, add `--apple-use-keychain` to store the passphrase in Keychain:
+
+```bash
+ssh-add --apple-use-keychain ~/.ssh/id_ed25519
+```
+
+On Windows with OpenSSH, the ssh-agent service handles key caching automatically.
 
 ---
 

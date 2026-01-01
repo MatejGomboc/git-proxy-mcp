@@ -99,7 +99,6 @@ while allowing AI assistants to work with repos in their own environments.
 
 ## Phase 5: SSH & Remote Improvements ← CURRENT
 
-- [ ] SSH key passphrase support (currently returns "not yet supported" error)
 - [ ] Named remote resolution (e.g., "origin" → actual URL from .git/config)
 
 ---
