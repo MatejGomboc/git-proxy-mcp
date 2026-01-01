@@ -410,7 +410,9 @@ impl McpServer {
         vec![ToolDefinition {
             name: "git".to_string(),
             description: Some(
-                "Execute Git commands with automatic credential injection. \
+                "Execute remote Git commands with automatic credential injection. \
+                 Only remote operations are supported: clone, fetch, pull, push, ls-remote. \
+                 Local commands (status, log, diff, commit, etc.) should be run directly. \
                  Credentials are securely managed and never exposed in responses."
                     .to_string(),
             ),
@@ -419,7 +421,8 @@ impl McpServer {
                 "properties": {
                     "command": {
                         "type": "string",
-                        "description": "The Git command to execute (e.g., 'clone', 'pull', 'push', 'fetch')"
+                        "enum": ["clone", "fetch", "ls-remote", "pull", "push"],
+                        "description": "The remote Git command to execute"
                     },
                     "args": {
                         "type": "array",
