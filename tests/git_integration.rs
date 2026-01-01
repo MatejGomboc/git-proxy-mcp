@@ -156,12 +156,9 @@ fn test_git_init_creates_repo() {
         return;
     }
 
-    let temp_dir = match TempDir::new() {
-        Ok(dir) => dir,
-        Err(_) => {
-            eprintln!("Skipping test: failed to create temp dir");
-            return;
-        }
+    let Ok(temp_dir) = TempDir::new() else {
+        eprintln!("Skipping test: failed to create temp dir");
+        return;
     };
 
     let output = Command::new("git")
@@ -181,12 +178,9 @@ fn test_git_status_in_repo() {
         return;
     }
 
-    let temp_dir = match create_temp_repo() {
-        Some(dir) => dir,
-        None => {
-            eprintln!("Skipping test: failed to create temp repo");
-            return;
-        }
+    let Some(temp_dir) = create_temp_repo() else {
+        eprintln!("Skipping test: failed to create temp repo");
+        return;
     };
 
     let output = Command::new("git")
@@ -207,12 +201,9 @@ fn test_git_add_and_commit() {
         return;
     }
 
-    let temp_dir = match create_temp_repo() {
-        Some(dir) => dir,
-        None => {
-            eprintln!("Skipping test: failed to create temp repo");
-            return;
-        }
+    let Some(temp_dir) = create_temp_repo() else {
+        eprintln!("Skipping test: failed to create temp repo");
+        return;
     };
 
     // Create a test file
@@ -242,12 +233,9 @@ fn test_git_log() {
         return;
     }
 
-    let temp_dir = match create_temp_repo() {
-        Some(dir) => dir,
-        None => {
-            eprintln!("Skipping test: failed to create temp repo");
-            return;
-        }
+    let Some(temp_dir) = create_temp_repo() else {
+        eprintln!("Skipping test: failed to create temp repo");
+        return;
     };
 
     // Create and commit a file
@@ -283,12 +271,9 @@ fn test_git_branch_operations() {
         return;
     }
 
-    let temp_dir = match create_temp_repo() {
-        Some(dir) => dir,
-        None => {
-            eprintln!("Skipping test: failed to create temp repo");
-            return;
-        }
+    let Some(temp_dir) = create_temp_repo() else {
+        eprintln!("Skipping test: failed to create temp repo");
+        return;
     };
 
     // Need at least one commit to create branches
@@ -333,12 +318,9 @@ fn test_git_diff() {
         return;
     }
 
-    let temp_dir = match create_temp_repo() {
-        Some(dir) => dir,
-        None => {
-            eprintln!("Skipping test: failed to create temp repo");
-            return;
-        }
+    let Some(temp_dir) = create_temp_repo() else {
+        eprintln!("Skipping test: failed to create temp repo");
+        return;
     };
 
     // Create and commit a file

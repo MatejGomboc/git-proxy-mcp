@@ -382,6 +382,6 @@ mod tests {
         let limiter = RateLimiter::new(10, 1.0);
         let stats = limiter.stats();
 
-        assert_eq!(stats.block_rate(), 0.0);
+        assert!((stats.block_rate() - 0.0).abs() < f64::EPSILON);
     }
 }

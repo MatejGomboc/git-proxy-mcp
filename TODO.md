@@ -128,7 +128,8 @@ const ALLOWED_COMMANDS: &[&str] = &[
 **Rationale:**
 
 - The core value of this MCP server is **secure credential injection** for remote operations
-- Local commands (`status`, `log`, `diff`, `add`, `commit`, `branch`, `checkout`, `merge`, `rebase`, `reset`, `stash`, `tag`, `init`, `ls-files`, `rev-parse`, `show`, `revert`) don't require authentication
+- Local commands (`status`, `log`, `diff`, `add`, `commit`, `branch`, `checkout`, `merge`, `rebase`, `reset`, `stash`, `tag`, `init`,
+  `ls-files`, `rev-parse`, `show`, `revert`) don't require authentication
 - AI assistants can execute local Git commands directly on their workstation without needing a proxy
 - Smaller attack surface = better security
 - Clearer separation of concerns
