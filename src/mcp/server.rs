@@ -48,6 +48,7 @@ use crate::mcp::protocol::{
 use crate::mcp::transport::StdioTransport;
 use crate::security::{
     AuditEvent, AuditLogger, BranchGuard, PushGuard, RateLimiter, RepoFilter, SecurityGuard,
+    ShutdownReason,
 };
 
 /// Server state in the MCP lifecycle.
@@ -296,38 +297,104 @@ impl McpServer {
         self.state
     }
 
-    /// Runs the MCP server main loop.
+    /// Runs the MCP server main loop with graceful shutdown handling.
     ///
-    /// This method blocks until the client closes the connection or an
-    /// unrecoverable error occurs.
+    /// This method blocks until:
+    /// - The client closes the connection (stdin closed)
+    /// - A shutdown signal is received (SIGINT/SIGTERM on Unix, Ctrl+C on Windows)
+    /// - An unrecoverable error occurs
     ///
     /// # Errors
     ///
     /// Returns an error if transport I/O fails.
     pub async fn run(&mut self) -> std::io::Result<()> {
+        let shutdown_reason = self.run_with_shutdown().await?;
+        self.audit_logger
+            .log_silent(&AuditEvent::server_stopped(shutdown_reason));
+        Ok(())
+    }
+
+    /// Runs the main loop and returns the shutdown reason.
+    #[cfg(unix)]
+    async fn run_with_shutdown(&mut self) -> std::io::Result<ShutdownReason> {
+        use tokio::signal::unix::{signal, SignalKind};
+
+        let mut sigint = signal(SignalKind::interrupt()).map_err(std::io::Error::other)?;
+        let mut sigterm = signal(SignalKind::terminate()).map_err(std::io::Error::other)?;
+
         loop {
-            // Read next message
-            let Some(line) = self.transport.read_line().await? else {
-                // EOF - client closed connection
-                self.state = ServerState::ShuttingDown;
-                break;
-            };
+            tokio::select! {
+                _ = sigint.recv() => {
+                    tracing::info!("Received SIGINT, initiating graceful shutdown");
+                    self.state = ServerState::ShuttingDown;
+                    return Ok(ShutdownReason::SigInt);
+                }
 
-            // Skip empty lines
-            if line.trim().is_empty() {
-                continue;
-            }
+                _ = sigterm.recv() => {
+                    tracing::info!("Received SIGTERM, initiating graceful shutdown");
+                    self.state = ServerState::ShuttingDown;
+                    return Ok(ShutdownReason::SigTerm);
+                }
 
-            // Parse and handle the message
-            self.handle_line(&line).await?;
-
-            // Check if we should exit
-            if self.state == ServerState::ShuttingDown {
-                break;
+                line_result = self.transport.read_line() => {
+                    if let Some(reason) = self.handle_transport_result(line_result).await? {
+                        return Ok(reason);
+                    }
+                }
             }
         }
+    }
 
-        Ok(())
+    /// Runs the main loop and returns the shutdown reason.
+    #[cfg(windows)]
+    async fn run_with_shutdown(&mut self) -> std::io::Result<ShutdownReason> {
+        let ctrl_c = tokio::signal::ctrl_c();
+        tokio::pin!(ctrl_c);
+
+        loop {
+            tokio::select! {
+                _ = &mut ctrl_c => {
+                    tracing::info!("Received Ctrl+C, initiating graceful shutdown");
+                    self.state = ServerState::ShuttingDown;
+                    return Ok(ShutdownReason::SigInt);
+                }
+
+                line_result = self.transport.read_line() => {
+                    if let Some(reason) = self.handle_transport_result(line_result).await? {
+                        return Ok(reason);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Handles the result from transport read and message processing.
+    ///
+    /// Returns `Some(reason)` if the server should shut down, `None` to continue.
+    async fn handle_transport_result(
+        &mut self,
+        line_result: std::io::Result<Option<String>>,
+    ) -> std::io::Result<Option<ShutdownReason>> {
+        let Some(line) = line_result? else {
+            // EOF - client closed connection
+            self.state = ServerState::ShuttingDown;
+            return Ok(Some(ShutdownReason::ClientDisconnected));
+        };
+
+        // Skip empty lines
+        if line.trim().is_empty() {
+            return Ok(None);
+        }
+
+        // Parse and handle the message
+        self.handle_line(&line).await?;
+
+        // Check if we should exit (e.g., from a shutdown notification)
+        if self.state == ServerState::ShuttingDown {
+            return Ok(Some(ShutdownReason::ClientDisconnected));
+        }
+
+        Ok(None)
     }
 
     /// Handles a single line of input.
