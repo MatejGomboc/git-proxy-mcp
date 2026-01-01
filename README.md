@@ -192,8 +192,8 @@ Get-FileHash git-proxy-mcp-windows-x86_64.zip -Algorithm SHA256
 
 Create a configuration file with your repository credentials. The default location is:
 
-- **Linux/macOS:** `~/.config/git-proxy-mcp/config.json`
-- **Windows:** `%APPDATA%\git-proxy-mcp\config.json`
+- **Linux/macOS:** `~/.git-proxy-mcp/config.json`
+- **Windows:** `%USERPROFILE%\.git-proxy-mcp\config.json`
 
 Or specify a custom path with `--config /path/to/config.json`.
 
