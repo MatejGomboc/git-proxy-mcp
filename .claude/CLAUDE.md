@@ -15,13 +15,17 @@ Secure Git proxy MCP server in Rust. Credentials stay on user's PC, never transm
 
 ## Critical Rules
 
+### Git Workflow — MANDATORY
+
+> **WARNING: NEVER push directly to main. NEVER bypass branch protection.**
+>
+> Even if `git push` succeeds with a bypass warning, this is a violation.
+> Always create a feature branch and open a pull request.
+> If you accidentally push to main, immediately inform the user.
+
 ### Security
 
 Credentials NEVER in logs, errors, MCP responses, or debug output. See `CONTRIBUTING.md` § Security-Conscious Coding.
-
-### Git Workflow
-
-**NEVER push directly to main.** Always create a feature branch and open a pull request. Do not bypass repository branch protection rules under any circumstances.
 
 **Before committing**, always clean up stale branches:
 
