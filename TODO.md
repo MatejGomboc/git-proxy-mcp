@@ -97,21 +97,7 @@ while allowing AI assistants to work with repos in their own environments.
 
 ---
 
-## Phase 3: Git Tool Integration ← CURRENT
-
-The MCP server infrastructure exists but the git tool is not wired up.
-
-- [ ] Wire up MCP server in main.rs (currently just prints "Coming soon!")
-- [ ] Integrate git executor with MCP tool handler (`call_git_tool` is a stub)
-- [ ] Load credentials from config and pass to executor
-- [ ] Apply security guards (rate limiting, branch protection, repo filtering) to tool calls
-- [ ] Write audit log entries for git operations
-- [ ] Initialise tracing/logging based on verbosity flags (TODO in main.rs:36)
-- [ ] End-to-end integration test (MCP client → server → git command → response)
-
----
-
-## Phase 4: Security Hardening
+## Phase 4: Security Hardening ← CURRENT
 
 - [ ] Validate config file permissions on Unix (warn if world-readable)
 - [ ] Validate SSH key file exists and has correct permissions at startup

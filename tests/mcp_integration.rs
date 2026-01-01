@@ -3,10 +3,23 @@
 //! These tests verify the MCP server's JSON-RPC 2.0 protocol implementation,
 //! including request/response handling, error responses, and lifecycle management.
 
+use git_proxy_mcp::auth::CredentialStore;
+use git_proxy_mcp::git::executor::GitExecutor;
 use git_proxy_mcp::mcp::protocol::{
     parse_message, IncomingMessage, JsonRpcError, JsonRpcResponse, RequestId,
 };
-use git_proxy_mcp::mcp::server::{McpServer, ServerState};
+use git_proxy_mcp::mcp::server::{McpServer, SecurityConfig, ServerState};
+use git_proxy_mcp::security::AuditLogger;
+
+/// Creates a test server with minimal configuration.
+fn create_test_server() -> McpServer {
+    let credential_store = CredentialStore::new(vec![]).unwrap();
+    let executor = GitExecutor::new(credential_store);
+    let security_config = SecurityConfig::default();
+    let audit_logger = AuditLogger::disabled();
+
+    McpServer::new(executor, security_config, audit_logger)
+}
 
 // =============================================================================
 // Protocol Parsing Tests
@@ -214,17 +227,8 @@ fn test_response_no_credentials_leak() {
 
 #[test]
 fn test_server_initial_state() {
-    let server = McpServer::new();
+    let server = create_test_server();
     assert_eq!(server.state(), ServerState::AwaitingInit);
-}
-
-#[test]
-fn test_server_default_creates_same_as_new() {
-    let server1 = McpServer::new();
-    let server2 = McpServer::default();
-
-    assert_eq!(server1.state(), server2.state());
-    assert_eq!(server1.state(), ServerState::AwaitingInit);
 }
 
 // =============================================================================
