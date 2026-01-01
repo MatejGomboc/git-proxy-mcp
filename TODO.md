@@ -69,56 +69,46 @@ flowchart TB
 
 ---
 
-## Completed: Phase 5 — Remove Credential Storage
-
-Major architectural simplification completed. The MCP server no longer stores credentials.
-Instead, it relies on the user's existing Git configuration (credential helpers, SSH agent).
-
-- [x] Remove `src/auth/` module entirely
-- [x] Remove `remotes` section from config
-- [x] Simplify `GitExecutor` to just spawn git
-- [x] Remove `secrecy` crate dependency
-- [x] Update config to security/logging settings only
-- [x] Update README with credential-free approach
-- [x] Update example config
-- [x] Fix all tests
-
----
-
-## Completed: Phase 6 — Code Quality & Cleanup
-
-- [x] Optimise tokio features (currently using "full", only need subset)
-- [x] Audit codebase for British spelling consistency (see CONTRIBUTING.md)
-- [x] Convert ASCII diagrams to Mermaid (TODO.md, README.md)
-
----
-
-## Completed: Phase 7 — Testing & Documentation
-
-- [x] Tests for large git output handling
-- [x] Documentation for error messages and error codes
-
----
-
 ## Phase 8: Robustness & Production Readiness <- CURRENT
 
-- [x] Request timeout configuration (prevent hung git processes)
 - [ ] Graceful shutdown handling (SIGTERM/SIGINT)
 - [ ] Output size limits (prevent protocol buffer overflow)
 - [ ] Configurable rate limiting (currently hardcoded: 20 burst, 5/sec)
 - [ ] Documentation: mention per-repo git config (without `--global`) as alternative
 - [ ] Rust code: add explicit type annotations where types aren't obvious
+- [ ] Crash diagnostics: collect crash logs/traces on end-user machines for easier debugging
+- [ ] Single instance enforcement: prevent running multiple instances of the MCP server
+- [ ] Fix audit logging bug: execution errors log `command_success` instead of failure event
+- [ ] Secure audit log file permissions (0600 on Unix)
+- [ ] Distinguish exit codes: normal exit vs signal termination vs timeout
+- [ ] Validate client protocol version during MCP initialisation (currently ignored)
+- [ ] Add integration tests for full MCP command pipeline
+- [ ] Add tests for concurrent tool calls and thread safety
+- [ ] Document audit log JSON schema with examples of each event type
+- [ ] Add debugging/troubleshooting guide to documentation
+- [ ] Add more credential patterns to sanitiser (AWS keys, generic API keys)
+- [ ] Handle URL edge cases in sanitiser (IPv6 addresses, @ in passwords, ports with auth)
+- [ ] Make default protected branches configurable (currently hardcoded: main, master, develop)
+- [ ] Add config validation (e.g., warn if repo_allowlist and repo_blocklist both set)
+- [ ] Support wildcard patterns in dangerous flags detection
+- [ ] Add structured error codes for all failure modes (for programmatic handling)
+- [ ] Consider pre-compiling wildcard patterns for better performance in guards
+- [ ] Add request ID tracking for correlating audit logs with MCP requests
+- [ ] AI commit author identity: set `GIT_AUTHOR_NAME`/`GIT_AUTHOR_EMAIL` for AI commits (see v1.1+ section for details)
+- [ ] Add `--dry-run` CLI flag to validate config without starting server
+- [ ] Support environment variable overrides for config options (e.g., `GIT_PROXY_TIMEOUT`)
+- [ ] Add version compatibility check between server and MCP protocol
+- [ ] Improve error messages with actionable suggestions (e.g., "Run `git config --global credential.helper ...`")
+- [ ] Add command execution statistics to audit log (commands per session, error rate)
+- [ ] Support custom sanitiser patterns via config file
+- [ ] Add optional JSON output format for logs (structured logging)
+- [ ] Health check endpoint for monitoring
 
 ---
 
 ## Phase 9: Cross-Platform Release
 
-- [x] GitHub Actions release workflow
-- [x] Build targets (Windows x64, macOS x64/ARM64, Linux x64)
 - [ ] Binary signing (if applicable)
-- [x] Semantic versioning and CHANGELOG maintenance
-- [x] User documentation (installation guide, configuration reference)
-- [x] Example MCP client configurations (Claude Desktop, etc.)
 
 > **Note:** The repository owner decides when to move from pre-release (v0.x) to stable release (v1.0).
 > This decision should be based on real-world usage, security audits, and feature completeness.
@@ -177,10 +167,6 @@ AI contributions.
 ### Other Future Features
 
 - Git LFS support (currently detect & warn only)
-- Structured logging with JSON output option
-- Metrics/telemetry endpoint
-- Per-operation audit trail with session tracking
-- Health check endpoint for monitoring
 
 ---
 
