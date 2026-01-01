@@ -16,7 +16,7 @@ env:
 
 jobs:
     quick-checks:
-        name: Quick Checks (fmt, docs)
+        name: Quick Checks (fmt, docs, markdown)
         runs-on: ubuntu-latest
 
         steps:
@@ -28,8 +28,38 @@ jobs:
               with:
                   components: rustfmt
 
+            - name: Setup Node.js
+              id: setup-node
+              uses: actions/setup-node@v6
+              with:
+                  node-version: "lts/*"
+
+            - name: Get markdownlint-cli2 version
+              id: mdlint-version
+              run: echo "version=$(npm view markdownlint-cli2 version)" >> "$GITHUB_OUTPUT"
+
+            - name: Restore npm cache
+              id: npm-cache-restore
+              uses: actions/cache/restore@v5
+              with:
+                  path: ~/.npm
+                  key: npm-markdownlint-${{ runner.os }}-node-${{ steps.setup-node.outputs.node-version }}-mdlint-${{ steps.mdlint-version.outputs.version }}
+
+            - name: Install markdownlint-cli2
+              run: npm install -g markdownlint-cli2
+
             - name: Check formatting
               run: cargo fmt --all --check
+
+            - name: Lint markdown
+              run: markdownlint-cli2 "**/*.md"
+
+            - name: Save npm cache
+              if: steps.npm-cache-restore.outputs.cache-hit != 'true'
+              uses: actions/cache/save@v5
+              with:
+                  path: ~/.npm
+                  key: npm-markdownlint-${{ runner.os }}-node-${{ steps.setup-node.outputs.node-version }}-mdlint-${{ steps.mdlint-version.outputs.version }}
 
             - name: Check documentation
               run: cargo doc --no-deps --document-private-items
@@ -155,12 +185,24 @@ jobs:
                           return;
                       }
 
-                      // Group caches by prefix (rust-Windows, rust-Linux, rust-macOS, npm-markdownlint)
+                      // Group caches by type and OS
+                      // Rust caches: rust-{OS}-{rustc-hash}-{cargo-lock-hash}
+                      // npm caches: npm-markdownlint-{OS}-node-{version}-mdlint-{version}
                       const cacheGroups = {};
                       for (const cache of caches) {
-                          // Extract prefix: everything before the hash
-                          const match = cache.key.match(/^(.+?-[a-f0-9]{40})/);
-                          const prefix = match ? cache.key.substring(0, cache.key.lastIndexOf('-')) : cache.key;
+                          let prefix;
+                          if (cache.key.startsWith('rust-')) {
+                              // Group by rust-{OS} (e.g., rust-Linux, rust-Windows, rust-macOS)
+                              const parts = cache.key.split('-');
+                              prefix = `${parts[0]}-${parts[1]}`;
+                          } else if (cache.key.startsWith('npm-markdownlint-')) {
+                              // Group by npm-markdownlint-{OS} (e.g., npm-markdownlint-Linux)
+                              const parts = cache.key.split('-');
+                              prefix = `${parts[0]}-${parts[1]}-${parts[2]}`;
+                          } else {
+                              // Unknown cache type, use full key as prefix (won't group)
+                              prefix = cache.key;
+                          }
 
                           if (!cacheGroups[prefix]) {
                               cacheGroups[prefix] = [];
