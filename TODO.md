@@ -97,7 +97,50 @@ while allowing AI assistants to work with repos in their own environments.
 
 ---
 
-## Phase 6: Cross-Platform Release ← CURRENT
+## Phase 3: Git Tool Integration ← CURRENT
+
+The MCP server infrastructure exists but the git tool is not wired up.
+
+- [ ] Wire up MCP server in main.rs (currently just prints "Coming soon!")
+- [ ] Integrate git executor with MCP tool handler (`call_git_tool` is a stub)
+- [ ] Load credentials from config and pass to executor
+- [ ] Apply security guards (rate limiting, branch protection, repo filtering) to tool calls
+- [ ] Write audit log entries for git operations
+- [ ] Initialise tracing/logging based on verbosity flags (TODO in main.rs:36)
+- [ ] End-to-end integration test (MCP client → server → git command → response)
+
+---
+
+## Phase 4: Security Hardening
+
+- [ ] Validate config file permissions on Unix (warn if world-readable)
+- [ ] Validate SSH key file exists and has correct permissions at startup
+- [ ] Validate working directory exists before executing git commands
+- [ ] Improve Unix PAT credential injection (current approach exposes token in process args)
+- [ ] Handle mutex poisoning gracefully in rate limiter
+- [ ] Replace remaining `unwrap()` calls in production code with proper error handling
+
+---
+
+## Phase 5: SSH & Remote Improvements
+
+- [ ] SSH key passphrase support (currently returns "not yet supported" error)
+- [ ] Named remote resolution (e.g., "origin" → actual URL from .git/config)
+
+---
+
+## Phase 6: Testing & Documentation
+
+- [ ] Integration tests for full MCP → git pipeline
+- [ ] Documentation for error messages
+- [ ] Convert ASCII diagrams to Mermaid (TODO.md, README.md)
+- [ ] Remove unused dependencies from Cargo.toml (git2, anyhow, url)
+- [ ] Add LICENSE file (GPL-3.0-or-later as specified in Cargo.toml)
+- [ ] Audit codebase for British spelling consistency (see CONTRIBUTING.md § British Spelling)
+
+---
+
+## Phase 7: Cross-Platform Release
 
 - [x] GitHub Actions release workflow
 - [x] Build targets (Windows x64, macOS x64/ARM64, Linux x64)
