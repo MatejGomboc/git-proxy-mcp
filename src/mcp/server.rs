@@ -32,14 +32,23 @@
 //!   │                          │ exit
 //! ```
 
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Instant;
+
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use crate::git::command::GitCommand;
+use crate::git::executor::GitExecutor;
 use crate::mcp::protocol::{
     ErrorCode, IncomingMessage, JsonRpcError, JsonRpcErrorData, JsonRpcNotification,
     JsonRpcRequest, JsonRpcResponse, RequestId, MCP_PROTOCOL_VERSION, SERVER_NAME,
 };
 use crate::mcp::transport::StdioTransport;
+use crate::security::{
+    AuditEvent, AuditLogger, BranchGuard, PushGuard, RateLimiter, RepoFilter, SecurityGuard,
+};
 
 /// Server state in the MCP lifecycle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -190,6 +199,19 @@ impl ToolCallResult {
     }
 }
 
+/// Configuration for security guards.
+#[derive(Debug, Clone, Default)]
+pub struct SecurityConfig {
+    /// Whether force push is allowed.
+    pub allow_force_push: bool,
+    /// Protected branch names.
+    pub protected_branches: Vec<String>,
+    /// Repository allowlist (if set, only these repos are allowed).
+    pub repo_allowlist: Option<Vec<String>>,
+    /// Repository blocklist.
+    pub repo_blocklist: Option<Vec<String>>,
+}
+
 /// The MCP server.
 pub struct McpServer {
     /// Current server state.
@@ -198,16 +220,73 @@ pub struct McpServer {
     transport: StdioTransport,
     /// Negotiated protocol version (set after initialisation).
     protocol_version: Option<String>,
+    /// Git command executor.
+    executor: Arc<GitExecutor>,
+    /// Branch protection guard.
+    branch_guard: BranchGuard,
+    /// Push protection guard.
+    push_guard: PushGuard,
+    /// Repository filter.
+    repo_filter: RepoFilter,
+    /// Rate limiter.
+    rate_limiter: RateLimiter,
+    /// Audit logger.
+    audit_logger: Arc<AuditLogger>,
 }
 
 impl McpServer {
-    /// Creates a new MCP server.
+    /// Creates a new MCP server with the given dependencies.
+    ///
+    /// # Arguments
+    ///
+    /// * `executor` — Git command executor with credentials
+    /// * `security_config` — Security settings from configuration
+    /// * `audit_logger` — Audit logger for recording operations
     #[must_use]
-    pub fn new() -> Self {
+    pub fn new(
+        executor: GitExecutor,
+        security_config: SecurityConfig,
+        audit_logger: AuditLogger,
+    ) -> Self {
+        // Build branch guard from protected branches
+        let branch_guard = if security_config.protected_branches.is_empty() {
+            BranchGuard::with_defaults()
+        } else {
+            BranchGuard::new(security_config.protected_branches)
+        };
+
+        // Build push guard
+        let push_guard = PushGuard::new(security_config.allow_force_push);
+
+        // Build repo filter
+        let mut repo_filter = if security_config.repo_allowlist.is_some() {
+            RepoFilter::allowlist_mode()
+        } else {
+            RepoFilter::blocklist_mode()
+        };
+
+        if let Some(allowlist) = security_config.repo_allowlist {
+            for pattern in allowlist {
+                repo_filter.allow(pattern);
+            }
+        }
+
+        if let Some(blocklist) = security_config.repo_blocklist {
+            for pattern in blocklist {
+                repo_filter.block(pattern);
+            }
+        }
+
         Self {
             state: ServerState::AwaitingInit,
             transport: StdioTransport::new(),
             protocol_version: None,
+            executor: Arc::new(executor),
+            branch_guard,
+            push_guard,
+            repo_filter,
+            rate_limiter: RateLimiter::default_for_ai(),
+            audit_logger: Arc::new(audit_logger),
         }
     }
 
@@ -280,7 +359,7 @@ impl McpServer {
         let response = match req.method.as_str() {
             "initialize" => self.handle_initialize(&req),
             "tools/list" => self.handle_tools_list(&req),
-            "tools/call" => self.handle_tools_call(&req),
+            "tools/call" => self.handle_tools_call(&req).await,
             "ping" => Ok(Self::handle_ping(&req)),
             _ => Err(JsonRpcError::method_not_found(req.id.clone(), &req.method)),
         };
@@ -359,7 +438,10 @@ impl McpServer {
     }
 
     /// Handles the tools/call request.
-    fn handle_tools_call(&self, req: &JsonRpcRequest) -> Result<JsonRpcResponse, JsonRpcError> {
+    async fn handle_tools_call(
+        &self,
+        req: &JsonRpcRequest,
+    ) -> Result<JsonRpcResponse, JsonRpcError> {
         self.require_running(&req.id)?;
 
         let params: ToolCallParams = req
@@ -378,7 +460,7 @@ impl McpServer {
             })?;
 
         let result = match params.name.as_str() {
-            "git" => Self::call_git_tool(&params.arguments),
+            "git" => self.call_git_tool(&params.arguments).await,
             _ => ToolCallResult::error(format!("Unknown tool: {}", params.name)),
         };
 
@@ -439,42 +521,187 @@ impl McpServer {
         }]
     }
 
-    /// Executes the git tool.
+    /// Applies all security guards to a command.
     ///
-    /// Note: This is a placeholder implementation. The actual git command
-    /// execution will be implemented in Phase 3.
-    fn call_git_tool(arguments: &Value) -> ToolCallResult {
-        // Extract command from arguments
-        let command = arguments
-            .get("command")
-            .and_then(Value::as_str)
-            .unwrap_or("");
-
-        if command.is_empty() {
-            return ToolCallResult::error("Missing required 'command' argument");
+    /// Returns `Some(reason)` if the command should be blocked.
+    fn check_security_guards(&self, command: &str, args: &[String]) -> Option<String> {
+        // Check branch guard
+        if let Some(reason) = self.branch_guard.check(command, args).reason() {
+            return Some(reason.to_string());
         }
 
-        // Placeholder - actual implementation in Phase 3
-        ToolCallResult::text(format!(
-            "Git command proxy not yet implemented. Received command: {command}\n\n\
-             This will execute 'git {command}' with automatic credential injection."
-        ))
-    }
-}
+        // Check push guard
+        if let Some(reason) = self.push_guard.check(command, args).reason() {
+            return Some(reason.to_string());
+        }
 
-impl Default for McpServer {
-    fn default() -> Self {
-        Self::new()
+        // Check repo filter
+        if let Some(reason) = self.repo_filter.check(command, args).reason() {
+            return Some(reason.to_string());
+        }
+
+        None
+    }
+
+    /// Formats command output into a response string.
+    fn format_output(output: &crate::git::executor::CommandOutput, command: &str) -> String {
+        let mut response_text = String::new();
+
+        if !output.stdout.is_empty() {
+            response_text.push_str(&output.stdout);
+        }
+
+        if !output.stderr.is_empty() {
+            if !response_text.is_empty() {
+                response_text.push_str("\n\n--- stderr ---\n");
+            }
+            response_text.push_str(&output.stderr);
+        }
+
+        // Add warnings
+        for warning in &output.warnings {
+            response_text.push_str("\n\n⚠️ ");
+            response_text.push_str(warning);
+        }
+
+        if response_text.is_empty() {
+            response_text = format!("Command 'git {command}' completed successfully.");
+        }
+
+        response_text
+    }
+
+    /// Executes the git tool.
+    ///
+    /// This method:
+    /// 1. Parses and validates the command
+    /// 2. Applies security guards (rate limiting, branch protection, repo filtering)
+    /// 3. Executes the command with credential injection
+    /// 4. Logs the operation to the audit log
+    /// 5. Returns sanitised output
+    async fn call_git_tool(&self, arguments: &Value) -> ToolCallResult {
+        let start_time = Instant::now();
+
+        // Extract command from arguments
+        let command_str = match arguments.get("command").and_then(Value::as_str) {
+            Some(cmd) if !cmd.is_empty() => cmd,
+            _ => return ToolCallResult::error("Missing required 'command' argument"),
+        };
+
+        // Extract args
+        let args: Vec<String> = arguments
+            .get("args")
+            .and_then(Value::as_array)
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(Value::as_str)
+                    .map(String::from)
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        // Extract working directory
+        let working_dir: Option<PathBuf> = arguments
+            .get("cwd")
+            .and_then(Value::as_str)
+            .map(PathBuf::from);
+
+        // Check rate limiter first
+        if !self.rate_limiter.try_acquire() {
+            self.audit_logger
+                .log_silent(&AuditEvent::rate_limit_exceeded(
+                    command_str,
+                    args.clone(),
+                    working_dir.clone(),
+                ));
+            return ToolCallResult::error(
+                "Rate limit exceeded. Please wait before sending more Git commands.",
+            );
+        }
+
+        // Parse and validate the command
+        let git_command = match GitCommand::new(command_str, args.clone(), working_dir.clone()) {
+            Ok(cmd) => cmd,
+            Err(e) => {
+                self.audit_logger.log_silent(&AuditEvent::command_blocked(
+                    command_str,
+                    args,
+                    working_dir,
+                    e.to_string(),
+                ));
+                return ToolCallResult::error(format!("Invalid command: {e}"));
+            }
+        };
+
+        // Apply security guards
+        let args_for_guard: Vec<String> = git_command.args().to_vec();
+        if let Some(reason) = self.check_security_guards(command_str, &args_for_guard) {
+            self.audit_logger.log_silent(&AuditEvent::command_blocked(
+                command_str,
+                args,
+                working_dir,
+                &reason,
+            ));
+            return ToolCallResult::error(reason);
+        }
+
+        // Execute the command
+        let output = match self.executor.execute(&git_command).await {
+            Ok(output) => output,
+            Err(e) => {
+                let duration = start_time.elapsed();
+                self.audit_logger.log_silent(&AuditEvent::command_success(
+                    command_str,
+                    args,
+                    working_dir,
+                    duration,
+                    -1,
+                ));
+                return ToolCallResult::error(format!("Execution failed: {e}"));
+            }
+        };
+
+        // Log the operation
+        let duration = start_time.elapsed();
+        self.audit_logger.log_silent(&AuditEvent::command_success(
+            command_str,
+            args,
+            working_dir,
+            duration,
+            output.exit_code,
+        ));
+
+        // Format and return the response
+        let response_text = Self::format_output(&output, command_str);
+        if output.success {
+            ToolCallResult::text(response_text)
+        } else {
+            ToolCallResult::error(format!(
+                "Command failed with exit code {}:\n{}",
+                output.exit_code, response_text
+            ))
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::auth::CredentialStore;
+
+    /// Creates a test server with minimal configuration.
+    fn create_test_server() -> McpServer {
+        let credential_store = CredentialStore::new(vec![]).unwrap();
+        let executor = GitExecutor::new(credential_store);
+        let security_config = SecurityConfig::default();
+        let audit_logger = AuditLogger::disabled();
+
+        McpServer::new(executor, security_config, audit_logger)
+    }
 
     #[test]
     fn server_initial_state() {
-        let server = McpServer::new();
+        let server = create_test_server();
         assert_eq!(server.state(), ServerState::AwaitingInit);
     }
 

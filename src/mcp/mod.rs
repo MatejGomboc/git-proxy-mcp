@@ -36,5 +36,5 @@ pub mod server;
 pub mod transport;
 
 pub use protocol::{JsonRpcError, JsonRpcRequest, JsonRpcResponse, MCP_PROTOCOL_VERSION};
-pub use server::McpServer;
+pub use server::{McpServer, SecurityConfig};
 pub use transport::StdioTransport;
