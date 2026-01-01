@@ -20,27 +20,27 @@
 
 ```mermaid
 flowchart TB
-    subgraph PC["User's PC (existing git setup)"]
-        gitconfig["~/.gitconfig (credential helpers)"]
-        sshconfig["~/.ssh/config (SSH host configs)"]
-        sshagent["ssh-agent (keys loaded)"]
-        oscreds["OS credential store"]
+    subgraph PC[User's PC]
+        subgraph GitConfig[Git Configuration]
+            gitconfig[~/.gitconfig]
+            sshconfig[~/.ssh/config + ssh-agent]
+            oscreds[OS credential store]
+        end
+
+        subgraph Proxy[git-proxy-mcp]
+            validate[Validate command]
+            spawn[Spawn git process]
+            sanitise[Sanitise output]
+        end
+
+        client[Claude Desktop / MCP Client]
     end
 
-    subgraph Proxy["git-proxy-mcp"]
-        validate["Validate command (security guards)"]
-        spawn["Spawn: git clone/fetch/pull/push/ls-remote"]
-        prompt["GIT_TERMINAL_PROMPT=0 (no interactive prompts)"]
-        sanitise["Sanitise output (remove any leaked credentials)"]
-        result["Return result to AI via MCP"]
-    end
+    ai[AI VM]
 
-    client["Claude Desktop / MCP Client"]
-    ai["AI VM (Claude, GPT, etc.)"]
-
-    PC -->|"git uses these automatically"| Proxy
-    Proxy -->|"stdio (local process)"| client
-    client -->|"TLS (handled by vendor)"| ai
+    GitConfig -->|git uses these| Proxy
+    Proxy -->|stdio| client
+    client -->|TLS| ai
 ```
 
 **Key Security Properties:**
