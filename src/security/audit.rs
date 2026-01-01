@@ -57,6 +57,20 @@ pub enum AuditEventType {
     ServerStopped,
 }
 
+/// Reason for server shutdown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ShutdownReason {
+    /// Client closed the connection (stdin closed).
+    ClientDisconnected,
+
+    /// Received SIGINT signal (Ctrl+C).
+    SigInt,
+
+    /// Received SIGTERM signal.
+    SigTerm,
+}
+
 /// An audit event to be logged.
 #[derive(Debug, Clone, Serialize)]
 pub struct AuditEvent {
@@ -92,6 +106,10 @@ pub struct AuditEvent {
     /// Exit code (if executed).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exit_code: Option<i32>,
+
+    /// Reason for server shutdown (if server stopped event).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shutdown_reason: Option<ShutdownReason>,
 }
 
 impl AuditEvent {
@@ -108,6 +126,7 @@ impl AuditEvent {
             reason: None,
             duration_ms: None,
             exit_code: None,
+            shutdown_reason: None,
         }
     }
 
@@ -137,6 +156,7 @@ impl AuditEvent {
             #[allow(clippy::cast_possible_truncation)] // Duration in ms fits in u64
             duration_ms: Some(duration.as_millis() as u64),
             exit_code: Some(exit_code),
+            shutdown_reason: None,
         }
     }
 
@@ -158,6 +178,7 @@ impl AuditEvent {
             reason: Some(reason.into()),
             duration_ms: None,
             exit_code: None,
+            shutdown_reason: None,
         }
     }
 
@@ -178,6 +199,7 @@ impl AuditEvent {
             reason: Some("Rate limit exceeded".to_string()),
             duration_ms: None,
             exit_code: None,
+            shutdown_reason: None,
         }
     }
 
@@ -187,10 +209,12 @@ impl AuditEvent {
         Self::new(AuditEventType::ServerStarted, AuditOutcome::Success)
     }
 
-    /// Creates an event for server stop.
+    /// Creates an event for server stop with the shutdown reason.
     #[must_use]
-    pub fn server_stopped() -> Self {
-        Self::new(AuditEventType::ServerStopped, AuditOutcome::Success)
+    pub fn server_stopped(reason: ShutdownReason) -> Self {
+        let mut event = Self::new(AuditEventType::ServerStopped, AuditOutcome::Success);
+        event.shutdown_reason = Some(reason);
+        event
     }
 
     /// Gets the current timestamp in ISO 8601 format.
@@ -511,5 +535,29 @@ mod tests {
         assert!(!is_leap_year(1900)); // Divisible by 100 but not 400
         assert!(is_leap_year(2024)); // Divisible by 4 but not 100
         assert!(!is_leap_year(2023)); // Not divisible by 4
+    }
+
+    #[test]
+    fn audit_event_server_stopped_with_reason() {
+        let event = AuditEvent::server_stopped(ShutdownReason::SigInt);
+
+        assert_eq!(event.event_type, AuditEventType::ServerStopped);
+        assert_eq!(event.outcome, AuditOutcome::Success);
+        assert_eq!(event.shutdown_reason, Some(ShutdownReason::SigInt));
+    }
+
+    #[test]
+    fn shutdown_reason_serialisation() {
+        let event = AuditEvent::server_stopped(ShutdownReason::ClientDisconnected);
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"shutdown_reason\":\"client_disconnected\""));
+
+        let event = AuditEvent::server_stopped(ShutdownReason::SigTerm);
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"shutdown_reason\":\"sig_term\""));
+
+        let event = AuditEvent::server_stopped(ShutdownReason::SigInt);
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"shutdown_reason\":\"sig_int\""));
     }
 }

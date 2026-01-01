@@ -103,7 +103,7 @@ Instead, it relies on the user's existing Git configuration (credential helpers,
 ## Phase 8: Robustness & Production Readiness <- CURRENT
 
 - [x] Request timeout configuration (prevent hung git processes)
-- [ ] Graceful shutdown handling (SIGTERM/SIGINT)
+- [x] Graceful shutdown handling (SIGTERM/SIGINT)
 - [ ] Output size limits (prevent protocol buffer overflow)
 - [ ] Configurable rate limiting (currently hardcoded: 20 burst, 5/sec)
 - [ ] Documentation: mention per-repo git config (without `--global`) as alternative
