@@ -628,6 +628,11 @@ impl McpServer {
             response_text.push_str(&output.stdout);
         }
 
+        // Add stdout truncation indicator
+        if output.stdout_truncated {
+            response_text.push_str("\n\n[stdout truncated due to size limit]");
+        }
+
         if !output.stderr.is_empty() {
             if !response_text.is_empty() {
                 response_text.push_str("\n\n--- stderr ---\n");
@@ -635,7 +640,23 @@ impl McpServer {
             response_text.push_str(&output.stderr);
         }
 
-        // Add warnings
+        // Add stderr truncation indicator
+        if output.stderr_truncated {
+            if output.stderr.is_empty() && !response_text.is_empty() {
+                response_text.push_str("\n\n--- stderr ---\n");
+            }
+            response_text.push_str("\n\n[stderr truncated due to size limit]");
+        }
+
+        // Add truncation warning if any output was truncated
+        if output.is_truncated() {
+            response_text.push_str(
+                "\n\n⚠️ Output was truncated to prevent protocol buffer overflow. \
+                 Consider using more specific git commands to reduce output size.",
+            );
+        }
+
+        // Add other warnings
         for warning in &output.warnings {
             response_text.push_str("\n\n⚠️ ");
             response_text.push_str(warning);
@@ -827,5 +848,78 @@ mod tests {
         let info = ServerInfo::default();
         assert_eq!(info.name, SERVER_NAME);
         assert!(!info.version.is_empty());
+    }
+
+    #[test]
+    fn format_output_no_truncation() {
+        use crate::git::executor::CommandOutput;
+
+        let output = CommandOutput::new_with_truncation(
+            "hello".to_string(),
+            "world".to_string(),
+            0,
+            false,
+            false,
+        );
+        let formatted = McpServer::format_output(&output, "status");
+        assert!(formatted.contains("hello"));
+        assert!(formatted.contains("world"));
+        assert!(!formatted.contains("truncated"));
+    }
+
+    #[test]
+    fn format_output_stdout_truncated() {
+        use crate::git::executor::CommandOutput;
+
+        let output = CommandOutput::new_with_truncation(
+            "partial output".to_string(),
+            String::new(),
+            0,
+            true,
+            false,
+        );
+        let formatted = McpServer::format_output(&output, "log");
+        assert!(formatted.contains("partial output"));
+        assert!(formatted.contains("[stdout truncated due to size limit]"));
+        assert!(formatted.contains("protocol buffer overflow"));
+    }
+
+    #[test]
+    fn format_output_stderr_truncated() {
+        use crate::git::executor::CommandOutput;
+
+        let output = CommandOutput::new_with_truncation(
+            String::new(),
+            "error output".to_string(),
+            1,
+            false,
+            true,
+        );
+        let formatted = McpServer::format_output(&output, "push");
+        assert!(formatted.contains("error output"));
+        assert!(formatted.contains("[stderr truncated due to size limit]"));
+        assert!(formatted.contains("protocol buffer overflow"));
+    }
+
+    #[test]
+    fn format_output_both_truncated() {
+        use crate::git::executor::CommandOutput;
+
+        let output = CommandOutput::new_with_truncation(
+            "stdout".to_string(),
+            "stderr".to_string(),
+            0,
+            true,
+            true,
+        );
+        let formatted = McpServer::format_output(&output, "clone");
+        assert!(formatted.contains("[stdout truncated due to size limit]"));
+        assert!(formatted.contains("[stderr truncated due to size limit]"));
+        // Should only have one truncation warning
+        assert_eq!(
+            formatted.matches("protocol buffer overflow").count(),
+            1,
+            "Should have exactly one truncation warning"
+        );
     }
 }
