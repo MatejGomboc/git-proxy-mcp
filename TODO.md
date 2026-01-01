@@ -68,6 +68,22 @@ AI VM (Claude, GPT, etc.)
 
 ---
 
+## Completed: Phase 5 — Remove Credential Storage
+
+Major architectural simplification completed. The MCP server no longer stores credentials.
+Instead, it relies on the user's existing Git configuration (credential helpers, SSH agent).
+
+- [x] Remove `src/auth/` module entirely
+- [x] Remove `remotes` section from config
+- [x] Simplify `GitExecutor` to just spawn git
+- [x] Remove `secrecy` crate dependency
+- [x] Update config to security/logging settings only
+- [x] Update README with credential-free approach
+- [x] Update example config
+- [x] Fix all tests
+
+---
+
 ## Phase 6: Code Quality & Cleanup <- CURRENT
 
 - [ ] Optimise tokio features (currently using "full", only need subset)
