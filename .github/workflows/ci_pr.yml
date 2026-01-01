@@ -68,7 +68,7 @@ jobs:
 
             # Restore cache from main branch (read-only)
             - name: Restore Rust cache
-              uses: actions/cache/restore@v4
+              uses: actions/cache/restore@v5
               with:
                   path: |
                       ~/.cargo/bin/
