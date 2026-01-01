@@ -114,11 +114,24 @@ module.exports = async ({ github, context, core }) => {
         log(`Found ${caches.length} cache(s).`);
         log('');
 
-        // Group caches by prefix and keep only the most recent in each group
+        // Group caches by type and OS
+        // Rust caches: rust-{OS}-{rustc-hash}-{cargo-lock-hash}
+        // npm caches: npm-markdownlint-{OS}-node-{version}-mdlint-{version}
         const cacheGroups = {};
         for (const cache of caches) {
-            // Extract prefix: everything before the last hash segment
-            const prefix = cache.key.substring(0, cache.key.lastIndexOf('-'));
+            let prefix;
+            if (cache.key.startsWith('rust-')) {
+                // Group by rust-{OS} (e.g., rust-Linux, rust-Windows, rust-macOS)
+                const parts = cache.key.split('-');
+                prefix = `${parts[0]}-${parts[1]}`;
+            } else if (cache.key.startsWith('npm-markdownlint-')) {
+                // Group by npm-markdownlint-{OS} (e.g., npm-markdownlint-Linux)
+                const parts = cache.key.split('-');
+                prefix = `${parts[0]}-${parts[1]}-${parts[2]}`;
+            } else {
+                // Unknown cache type, use full key as prefix (won't group)
+                prefix = cache.key;
+            }
 
             if (!cacheGroups[prefix]) {
                 cacheGroups[prefix] = [];
