@@ -13,7 +13,7 @@ env:
 
 jobs:
     quick-checks:
-        name: Quick Checks (fmt, docs)
+        name: Quick Checks (fmt, docs, markdown)
         runs-on: ubuntu-latest
 
         steps:
@@ -25,8 +25,19 @@ jobs:
               with:
                   components: rustfmt
 
+            - name: Setup Node.js
+              uses: actions/setup-node@v6
+              with:
+                  node-version: "lts/*"
+
+            - name: Install markdownlint-cli2
+              run: npm install -g markdownlint-cli2
+
             - name: Check formatting
               run: cargo fmt --all --check
+
+            - name: Lint markdown
+              run: markdownlint-cli2 "**/*.md"
 
             - name: Check documentation
               run: cargo doc --no-deps --document-private-items
