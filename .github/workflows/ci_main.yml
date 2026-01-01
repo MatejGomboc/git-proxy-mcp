@@ -91,13 +91,13 @@ jobs:
               id: rust-version
               shell: bash
               run: |
-                  # Cross-platform: use shasum on macOS, sha256sum elsewhere
-                  if command -v sha256sum &> /dev/null; then
-                      HASH_CMD="sha256sum"
-                  else
-                      HASH_CMD="shasum -a 256"
-                  fi
-                  echo "version=$(rustc --version | $HASH_CMD | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+                # Cross-platform: use shasum on macOS, sha256sum elsewhere
+                if command -v sha256sum &> /dev/null; then
+                    HASH_CMD="sha256sum"
+                else
+                    HASH_CMD="shasum -a 256"
+                fi
+                echo "version=$(rustc --version | $HASH_CMD | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
             - name: Restore Rust cache
               id: cache-restore
@@ -169,12 +169,12 @@ jobs:
             - name: Check if all jobs succeeded
               id: check-results
               run: |
-                  if [[ "${{ needs.quick-checks.result }}" != "success" ]] || \
-                     [[ "${{ needs.build.result }}" != "success" ]]; then
-                      echo "One or more jobs failed"
-                      exit 1
-                  fi
-                  echo "All jobs completed successfully"
+                if [[ "${{ needs.quick-checks.result }}" != "success" ]] || \
+                   [[ "${{ needs.build.result }}" != "success" ]]; then
+                    echo "One or more jobs failed"
+                    exit 1
+                fi
+                echo "All jobs completed successfully"
 
             - name: Checkout repository
               if: success()

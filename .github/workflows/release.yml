@@ -37,43 +37,43 @@ jobs:
               id: version
               shell: bash
               run: |
-                  if [[ -n "${{ inputs.tag }}" ]]; then
-                      TAG="${{ inputs.tag }}"
-                  else
-                      TAG="${GITHUB_REF#refs/tags/}"
-                  fi
+                if [[ -n "${{ inputs.tag }}" ]]; then
+                    TAG="${{ inputs.tag }}"
+                else
+                    TAG="${GITHUB_REF#refs/tags/}"
+                fi
 
-                  # Validate tag format
-                  if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-.*)?$ ]]; then
-                      echo "Error: Invalid tag format: $TAG"
-                      echo "Expected format: v0.0.0 or v0.0.0-suffix"
-                      exit 1
-                  fi
+                # Validate tag format
+                if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-.*)?$ ]]; then
+                    echo "Error: Invalid tag format: $TAG"
+                    echo "Expected format: v0.0.0 or v0.0.0-suffix"
+                    exit 1
+                fi
 
-                  VERSION="${TAG#v}"
-                  echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-                  echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-                  echo "Release version: $VERSION (tag: $TAG)"
+                VERSION="${TAG#v}"
+                echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+                echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+                echo "Release version: $VERSION (tag: $TAG)"
 
             - name: Verify Cargo.toml version matches tag
               shell: bash
               run: |
-                  CARGO_VERSION=$(grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
-                  TAG_VERSION="${{ steps.version.outputs.version }}"
+                CARGO_VERSION=$(grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+                TAG_VERSION="${{ steps.version.outputs.version }}"
 
-                  # For pre-release tags like v0.1.0-rc1, compare base version
-                  BASE_TAG_VERSION="${TAG_VERSION%%-*}"
+                # For pre-release tags like v0.1.0-rc1, compare base version
+                BASE_TAG_VERSION="${TAG_VERSION%%-*}"
 
-                  if [[ "$CARGO_VERSION" != "$BASE_TAG_VERSION" ]]; then
-                      echo "Error: Version mismatch!"
-                      echo "  Cargo.toml: $CARGO_VERSION"
-                      echo "  Tag:        $BASE_TAG_VERSION"
-                      echo ""
-                      echo "Update Cargo.toml version before tagging."
-                      exit 1
-                  fi
+                if [[ "$CARGO_VERSION" != "$BASE_TAG_VERSION" ]]; then
+                    echo "Error: Version mismatch!"
+                    echo "  Cargo.toml: $CARGO_VERSION"
+                    echo "  Tag:        $BASE_TAG_VERSION"
+                    echo ""
+                    echo "Update Cargo.toml version before tagging."
+                    exit 1
+                fi
 
-                  echo "Version verified: $CARGO_VERSION"
+                echo "Version verified: $CARGO_VERSION"
 
     build:
         name: Build (${{ matrix.target }})
@@ -130,23 +130,23 @@ jobs:
               if: runner.os != 'Windows'
               shell: bash
               run: |
-                  mkdir -p dist
-                  cp target/${{ matrix.target }}/release/${{ matrix.binary }} dist/
-                  cp README.md LICENCE CHANGELOG.md dist/
-                  cp config/example-config.json dist/
-                  cd dist
-                  tar -czvf ../${{ matrix.artifact }}.tar.gz *
+                mkdir -p dist
+                cp target/${{ matrix.target }}/release/${{ matrix.binary }} dist/
+                cp README.md LICENCE CHANGELOG.md dist/
+                cp config/example-config.json dist/
+                cd dist
+                tar -czvf ../${{ matrix.artifact }}.tar.gz *
 
             - name: Prepare artifact (Windows)
               if: runner.os == 'Windows'
               shell: bash
               run: |
-                  mkdir -p dist
-                  cp target/${{ matrix.target }}/release/${{ matrix.binary }} dist/
-                  cp README.md LICENCE CHANGELOG.md dist/
-                  cp config/example-config.json dist/
-                  cd dist
-                  7z a -tzip ../${{ matrix.artifact }}.zip *
+                mkdir -p dist
+                cp target/${{ matrix.target }}/release/${{ matrix.binary }} dist/
+                cp README.md LICENCE CHANGELOG.md dist/
+                cp config/example-config.json dist/
+                cd dist
+                7z a -tzip ../${{ matrix.artifact }}.zip *
 
             - name: Upload artifact (Unix)
               if: runner.os != 'Windows'
@@ -184,38 +184,38 @@ jobs:
             - name: Generate checksums
               shell: bash
               run: |
-                  cd artifacts
-                  find . -type f \( -name "*.tar.gz" -o -name "*.zip" \) -exec mv {} . \;
-                  sha256sum *.tar.gz *.zip > SHA256SUMS.txt
-                  cat SHA256SUMS.txt
+                cd artifacts
+                find . -type f \( -name "*.tar.gz" -o -name "*.zip" \) -exec mv {} . \;
+                sha256sum *.tar.gz *.zip > SHA256SUMS.txt
+                cat SHA256SUMS.txt
 
             - name: Extract release notes from CHANGELOG
               id: release-notes
               shell: bash
               run: |
-                  VERSION="${{ needs.validate.outputs.version }}"
+                VERSION="${{ needs.validate.outputs.version }}"
 
-                  # Try to extract notes for this version from CHANGELOG.md
-                  # Look for ## [version] or ## version header
-                  if grep -q "## \[${VERSION}\]" CHANGELOG.md || grep -q "## ${VERSION}" CHANGELOG.md; then
-                      # Extract content between this version header and the next
-                      sed -n "/## \[${VERSION}\]/,/## \[/p" CHANGELOG.md | sed '$d' > release_notes.md || \
-                      sed -n "/## ${VERSION}/,/## /p" CHANGELOG.md | sed '$d' > release_notes.md
+                # Try to extract notes for this version from CHANGELOG.md
+                # Look for ## [version] or ## version header
+                if grep -q "## \[${VERSION}\]" CHANGELOG.md || grep -q "## ${VERSION}" CHANGELOG.md; then
+                    # Extract content between this version header and the next
+                    sed -n "/## \[${VERSION}\]/,/## \[/p" CHANGELOG.md | sed '$d' > release_notes.md || \
+                    sed -n "/## ${VERSION}/,/## /p" CHANGELOG.md | sed '$d' > release_notes.md
 
-                      if [[ -s release_notes.md ]]; then
-                          echo "Found release notes in CHANGELOG.md"
-                      else
-                          echo "No specific release notes found, using default"
-                          echo "Release ${VERSION}" > release_notes.md
-                      fi
-                  else
-                      echo "No CHANGELOG entry for ${VERSION}, using default"
-                      echo "Release ${VERSION}" > release_notes.md
-                  fi
+                    if [[ -s release_notes.md ]]; then
+                        echo "Found release notes in CHANGELOG.md"
+                    else
+                        echo "No specific release notes found, using default"
+                        echo "Release ${VERSION}" > release_notes.md
+                    fi
+                else
+                    echo "No CHANGELOG entry for ${VERSION}, using default"
+                    echo "Release ${VERSION}" > release_notes.md
+                fi
 
-                  echo ""
-                  echo "--- Release Notes ---"
-                  cat release_notes.md
+                echo ""
+                echo "--- Release Notes ---"
+                cat release_notes.md
 
             - name: Create GitHub Release
               uses: softprops/action-gh-release@v2
