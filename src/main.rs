@@ -142,7 +142,11 @@ fn main() -> ExitCode {
     info!("Note: Authentication uses your existing Git credential configuration");
 
     // Run the server
-    let runtime = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
+    // Using current-thread runtime since MCP uses single-connection stdio transport
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("Failed to create Tokio runtime");
     let result = runtime.block_on(server.run());
 
     match result {

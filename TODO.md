@@ -86,7 +86,7 @@ Instead, it relies on the user's existing Git configuration (credential helpers,
 
 ## Phase 6: Code Quality & Cleanup <- CURRENT
 
-- [ ] Optimise tokio features (currently using "full", only need subset)
+- [x] Optimise tokio features (currently using "full", only need subset)
 - [ ] Audit codebase for British spelling consistency (see CONTRIBUTING.md)
 - [ ] Convert ASCII diagrams to Mermaid (TODO.md, README.md)
 
