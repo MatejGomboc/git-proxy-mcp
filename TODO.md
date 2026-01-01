@@ -124,6 +124,53 @@ Instead, it relies on the user's existing Git configuration (credential helpers,
 
 ## Future Considerations (v1.1+)
 
+### AI Commit Author Identity
+
+Allow AI commits to show a separate contributor identity on GitHub while still using the human's credentials for push authentication. This provides clear audit trail of human vs AI contributions.
+
+**How it works:**
+
+| Aspect | Who | How |
+|--------|-----|-----|
+| Push authentication | Human user | OS credential store / SSH agent (unchanged) |
+| Commit author | AI bot account | `GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL` env vars |
+
+**Workflow:**
+
+1. Human clones repo (as `MatejGomboc`)
+2. AI codes & commits via git-proxy-mcp (as `MatejGomboc-Claude-MCP`)
+3. AI creates PR via GitHub MCP server
+4. Human reviews & approves
+
+**Configuration:**
+
+```json
+{
+  "ai_identity": {
+    "author_name": "MatejGomboc-Claude-MCP",
+    "author_email": "matejgomboc-claude-mcp@users.noreply.github.com"
+  }
+}
+```
+
+**Benefits:**
+
+- Clear audit trail — anyone can see which code is AI-generated
+- Clean GitHub contributor stats — human vs AI contributions separated
+- Accountability — human approves all AI code before merge
+- **Still credential-free** — only sets author metadata, no tokens stored
+
+**Implementation notes:**
+
+- Set `GIT_AUTHOR_NAME` and `GIT_AUTHOR_EMAIL` before spawning git
+- `GIT_COMMITTER_*` stays as user's identity (from git config)
+- Author email must match a GitHub account for avatar/link to appear
+- Feature should be optional and disabled by default
+
+---
+
+### Other Future Features
+
 - Git LFS support (currently detect & warn only)
 - Structured logging with JSON output option
 - Metrics/telemetry endpoint
