@@ -130,11 +130,15 @@ fn main() -> ExitCode {
         force_push = security_config.allow_force_push,
         protected_branches = ?security_config.protected_branches,
         request_timeout_secs = cfg.timeouts.request_timeout_secs,
+        max_output_bytes = cfg.limits.max_output_bytes,
         "Configuration loaded"
     );
 
-    // Create git executor with configured timeout
-    let executor = GitExecutor::with_timeout(cfg.timeouts.request_timeout());
+    // Create git executor with configured timeout and output limits
+    let executor = GitExecutor::with_limits(
+        cfg.timeouts.request_timeout(),
+        cfg.limits.max_output_bytes(),
+    );
 
     // Create MCP server
     let mut server = McpServer::new(executor, security_config, audit_logger);

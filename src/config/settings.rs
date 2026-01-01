@@ -43,6 +43,10 @@ pub struct Config {
     /// Timeout settings.
     #[serde(default)]
     pub timeouts: TimeoutConfig,
+
+    /// Limits settings.
+    #[serde(default)]
+    pub limits: LimitsConfig,
 }
 
 impl Config {
@@ -111,6 +115,11 @@ const fn default_request_timeout_secs() -> u64 {
     300 // 5 minutes
 }
 
+/// Default maximum output size in bytes (10 MiB).
+const fn default_max_output_bytes() -> usize {
+    10 * 1024 * 1024
+}
+
 /// Timeout configuration.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -138,6 +147,37 @@ impl TimeoutConfig {
     #[must_use]
     pub const fn request_timeout(&self) -> Duration {
         Duration::from_secs(self.request_timeout_secs)
+    }
+}
+
+/// Limits configuration.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LimitsConfig {
+    /// Maximum output size in bytes.
+    ///
+    /// If the combined stdout and stderr output from a git command exceeds
+    /// this limit, the output will be truncated and a warning added.
+    /// This prevents protocol buffer overflow when processing large outputs.
+    ///
+    /// Default: 10 MiB (10,485,760 bytes).
+    #[serde(default = "default_max_output_bytes")]
+    pub max_output_bytes: usize,
+}
+
+impl Default for LimitsConfig {
+    fn default() -> Self {
+        Self {
+            max_output_bytes: default_max_output_bytes(),
+        }
+    }
+}
+
+impl LimitsConfig {
+    /// Returns the maximum output size in bytes.
+    #[must_use]
+    pub const fn max_output_bytes(&self) -> usize {
+        self.max_output_bytes
     }
 }
 
@@ -273,5 +313,49 @@ mod tests {
         let config: Config = serde_json::from_str(json).unwrap();
         assert!(config.validate().is_ok());
         assert_eq!(config.timeouts.request_timeout_secs, 120);
+    }
+
+    #[test]
+    fn limits_config_defaults() {
+        let config = LimitsConfig::default();
+        assert_eq!(config.max_output_bytes, 10 * 1024 * 1024);
+        assert_eq!(config.max_output_bytes(), 10 * 1024 * 1024);
+    }
+
+    #[test]
+    fn parse_limits_config() {
+        let json = r#"{
+            "limits": {
+                "max_output_bytes": 5242880
+            }
+        }"#;
+
+        let config: Config = serde_json::from_str(json).unwrap();
+        assert_eq!(config.limits.max_output_bytes, 5 * 1024 * 1024);
+        assert_eq!(config.limits.max_output_bytes(), 5 * 1024 * 1024);
+    }
+
+    #[test]
+    fn parse_full_config_with_limits() {
+        let json = r#"{
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "_comment": "Test config",
+            "security": {
+                "allow_force_push": false
+            },
+            "logging": {
+                "level": "info"
+            },
+            "timeouts": {
+                "request_timeout_secs": 60
+            },
+            "limits": {
+                "max_output_bytes": 1048576
+            }
+        }"#;
+
+        let config: Config = serde_json::from_str(json).unwrap();
+        assert!(config.validate().is_ok());
+        assert_eq!(config.limits.max_output_bytes, 1024 * 1024);
     }
 }

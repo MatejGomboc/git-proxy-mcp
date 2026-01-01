@@ -42,10 +42,19 @@ pub struct CommandOutput {
 
     /// Warning messages (e.g., LFS detected).
     pub warnings: Vec<String>,
+
+    /// Whether stdout was truncated due to size limits.
+    pub stdout_truncated: bool,
+
+    /// Whether stderr was truncated due to size limits.
+    pub stderr_truncated: bool,
 }
 
 impl CommandOutput {
-    /// Creates a new command output.
+    /// Creates a new command output with default (no truncation) flags.
+    ///
+    /// This is a convenience constructor for creating non-truncated outputs.
+    #[cfg(test)]
     const fn new(stdout: String, stderr: String, exit_code: i32) -> Self {
         Self {
             stdout,
@@ -53,6 +62,28 @@ impl CommandOutput {
             exit_code,
             success: exit_code == 0,
             warnings: Vec::new(),
+            stdout_truncated: false,
+            stderr_truncated: false,
+        }
+    }
+
+    /// Creates a new command output with truncation flags.
+    #[must_use]
+    pub const fn new_with_truncation(
+        stdout: String,
+        stderr: String,
+        exit_code: i32,
+        stdout_truncated: bool,
+        stderr_truncated: bool,
+    ) -> Self {
+        Self {
+            stdout,
+            stderr,
+            exit_code,
+            success: exit_code == 0,
+            warnings: Vec::new(),
+            stdout_truncated,
+            stderr_truncated,
         }
     }
 
@@ -60,10 +91,19 @@ impl CommandOutput {
     fn add_warning(&mut self, warning: impl Into<String>) {
         self.warnings.push(warning.into());
     }
+
+    /// Returns whether any output was truncated.
+    #[must_use]
+    pub const fn is_truncated(&self) -> bool {
+        self.stdout_truncated || self.stderr_truncated
+    }
 }
 
 /// Default timeout for git command execution (5 minutes).
 const DEFAULT_TIMEOUT_SECS: u64 = 300;
+
+/// Default maximum output size in bytes (10 MiB).
+const DEFAULT_MAX_OUTPUT_BYTES: usize = 10 * 1024 * 1024;
 
 /// Executes Git commands as subprocesses.
 ///
@@ -76,6 +116,9 @@ pub struct GitExecutor {
 
     /// Timeout for git command execution.
     timeout: Duration,
+
+    /// Maximum output size in bytes (combined stdout + stderr).
+    max_output_bytes: usize,
 }
 
 impl Default for GitExecutor {
@@ -85,12 +128,13 @@ impl Default for GitExecutor {
 }
 
 impl GitExecutor {
-    /// Creates a new Git executor with the default timeout.
+    /// Creates a new Git executor with default settings.
     #[must_use]
     pub fn new() -> Self {
         Self {
             sanitiser: OutputSanitiser::new(),
             timeout: Duration::from_secs(DEFAULT_TIMEOUT_SECS),
+            max_output_bytes: DEFAULT_MAX_OUTPUT_BYTES,
         }
     }
 
@@ -100,6 +144,17 @@ impl GitExecutor {
         Self {
             sanitiser: OutputSanitiser::new(),
             timeout,
+            max_output_bytes: DEFAULT_MAX_OUTPUT_BYTES,
+        }
+    }
+
+    /// Creates a new Git executor with custom timeout and output size limit.
+    #[must_use]
+    pub fn with_limits(timeout: Duration, max_output_bytes: usize) -> Self {
+        Self {
+            sanitiser: OutputSanitiser::new(),
+            timeout,
+            max_output_bytes,
         }
     }
 
@@ -107,6 +162,12 @@ impl GitExecutor {
     #[must_use]
     pub const fn timeout(&self) -> Duration {
         self.timeout
+    }
+
+    /// Returns the configured maximum output size in bytes.
+    #[must_use]
+    pub const fn max_output_bytes(&self) -> usize {
+        self.max_output_bytes
     }
 
     /// Executes a Git command.
@@ -170,9 +231,22 @@ impl GitExecutor {
         let sanitised_stdout = self.sanitiser.sanitise(&stdout).into_owned();
         let sanitised_stderr = self.sanitiser.sanitise(&stderr).into_owned();
 
+        // Apply output size limits
+        let (final_stdout, stdout_truncated) =
+            Self::truncate_output(&sanitised_stdout, self.max_output_bytes);
+        let remaining_budget = self.max_output_bytes.saturating_sub(final_stdout.len());
+        let (final_stderr, stderr_truncated) =
+            Self::truncate_output(&sanitised_stderr, remaining_budget);
+
         let exit_code = output.status.code().unwrap_or(-1);
 
-        let mut result = CommandOutput::new(sanitised_stdout, sanitised_stderr, exit_code);
+        let mut result = CommandOutput::new_with_truncation(
+            final_stdout,
+            final_stderr,
+            exit_code,
+            stdout_truncated,
+            stderr_truncated,
+        );
 
         // Check for LFS
         if Self::detect_lfs(&result) {
@@ -204,6 +278,26 @@ impl GitExecutor {
         }
 
         false
+    }
+
+    /// Truncates output to the specified maximum byte length.
+    ///
+    /// Returns the (possibly truncated) string and a boolean indicating
+    /// whether truncation occurred. Truncation is done at a UTF-8 character
+    /// boundary to avoid invalid UTF-8 sequences.
+    fn truncate_output(output: &str, max_bytes: usize) -> (String, bool) {
+        if output.len() <= max_bytes {
+            return (output.to_string(), false);
+        }
+
+        // Find the last character that fits entirely within max_bytes
+        let truncate_at = output
+            .char_indices()
+            .take_while(|(idx, c)| idx + c.len_utf8() <= max_bytes)
+            .last()
+            .map_or(0, |(idx, c)| idx + c.len_utf8());
+
+        (output[..truncate_at].to_string(), true)
     }
 
     /// Validates that a working directory exists and is accessible.
@@ -349,6 +443,16 @@ mod tests {
         let timeout = Duration::from_secs(60);
         let executor = GitExecutor::with_timeout(timeout);
         assert_eq!(executor.timeout(), timeout);
+        assert_eq!(executor.max_output_bytes(), DEFAULT_MAX_OUTPUT_BYTES);
+    }
+
+    #[test]
+    fn executor_with_limits() {
+        let timeout = Duration::from_secs(60);
+        let max_output = 1024 * 1024; // 1 MiB
+        let executor = GitExecutor::with_limits(timeout, max_output);
+        assert_eq!(executor.timeout(), timeout);
+        assert_eq!(executor.max_output_bytes(), max_output);
     }
 
     #[test]
@@ -357,5 +461,110 @@ mod tests {
         let msg = error.to_string();
         assert!(msg.contains("timed out"));
         assert!(msg.contains("300 seconds"));
+    }
+
+    #[test]
+    fn truncate_output_no_truncation() {
+        let output = "Hello, world!";
+        let (result, truncated) = GitExecutor::truncate_output(output, 100);
+        assert_eq!(result, "Hello, world!");
+        assert!(!truncated);
+    }
+
+    #[test]
+    fn truncate_output_exact_limit() {
+        let output = "Hello";
+        let (result, truncated) = GitExecutor::truncate_output(output, 5);
+        assert_eq!(result, "Hello");
+        assert!(!truncated);
+    }
+
+    #[test]
+    fn truncate_output_basic() {
+        let output = "Hello, world!";
+        let (result, truncated) = GitExecutor::truncate_output(output, 5);
+        assert_eq!(result, "Hello");
+        assert!(truncated);
+    }
+
+    #[test]
+    fn truncate_output_utf8_boundary() {
+        // Test with multi-byte UTF-8 characters (emoji: 4 bytes each)
+        let output = "Hi 👋🌍"; // "Hi " = 3 bytes, emoji = 4 bytes each = 11 bytes total
+
+        // With limit 11, fits exactly (no truncation)
+        let (result, truncated) = GitExecutor::truncate_output(output, 11);
+        assert_eq!(result, "Hi 👋🌍");
+        assert!(!truncated);
+
+        // With limit 7, truncates to "Hi 👋" (3 + 4 = 7 bytes)
+        let (result, truncated) = GitExecutor::truncate_output(output, 7);
+        assert_eq!(result, "Hi 👋");
+        assert!(truncated);
+
+        // With limit 6, can't fit the emoji (4 bytes), so only "Hi "
+        let (result, truncated) = GitExecutor::truncate_output(output, 6);
+        assert_eq!(result, "Hi ");
+        assert!(truncated);
+    }
+
+    #[test]
+    fn truncate_output_multibyte_char_boundary() {
+        // "日本語" = 9 bytes (3 bytes per character)
+        let output = "日本語";
+
+        // With limit 9, fits exactly (no truncation)
+        let (result, truncated) = GitExecutor::truncate_output(output, 9);
+        assert_eq!(result, "日本語");
+        assert!(!truncated);
+
+        // With limit 6, truncates to "日本" (6 bytes)
+        let (result, truncated) = GitExecutor::truncate_output(output, 6);
+        assert_eq!(result, "日本");
+        assert!(truncated);
+
+        // With limit 5, can only fit first character (3 bytes)
+        let (result, truncated) = GitExecutor::truncate_output(output, 5);
+        assert_eq!(result, "日");
+        assert!(truncated);
+    }
+
+    #[test]
+    fn truncate_output_empty() {
+        let output = "";
+        let (result, truncated) = GitExecutor::truncate_output(output, 10);
+        assert_eq!(result, "");
+        assert!(!truncated);
+    }
+
+    #[test]
+    fn truncate_output_zero_limit() {
+        let output = "Hello";
+        let (result, truncated) = GitExecutor::truncate_output(output, 0);
+        assert_eq!(result, "");
+        assert!(truncated);
+    }
+
+    #[test]
+    fn command_output_truncation_flags() {
+        let output = CommandOutput::new_with_truncation(
+            "stdout".to_string(),
+            "stderr".to_string(),
+            0,
+            true,
+            false,
+        );
+        assert!(output.stdout_truncated);
+        assert!(!output.stderr_truncated);
+        assert!(output.is_truncated());
+
+        let output = CommandOutput::new_with_truncation(
+            "stdout".to_string(),
+            "stderr".to_string(),
+            0,
+            false,
+            false,
+        );
+        assert!(!output.is_truncated());
     }
 }
