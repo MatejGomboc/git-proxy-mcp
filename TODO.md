@@ -99,12 +99,12 @@ while allowing AI assistants to work with repos in their own environments.
 
 ## Phase 6: Cross-Platform Release ← CURRENT
 
-- [ ] GitHub Actions release workflow
-- [ ] Build targets (Windows, macOS, Linux)
+- [x] GitHub Actions release workflow
+- [x] Build targets (Windows x64, macOS x64/ARM64, Linux x64)
 - [ ] Binary signing (if applicable)
-- [ ] Semantic versioning and CHANGELOG maintenance
-- [ ] User documentation (installation guide, configuration reference)
-- [ ] Example MCP client configurations (Claude Desktop, etc.)
+- [x] Semantic versioning and CHANGELOG maintenance
+- [x] User documentation (installation guide, configuration reference)
+- [x] Example MCP client configurations (Claude Desktop, etc.)
 
 ---
 
