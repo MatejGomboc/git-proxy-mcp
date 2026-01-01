@@ -377,4 +377,5 @@ See the attached [LICENCE](LICENCE) file for more info.
 ## Links
 
 - [MCP Specification](https://modelcontextprotocol.io/)
+- [Error Reference](docs/errors.md)
 - [Report an Issue](https://github.com/MatejGomboc/git-proxy-mcp/issues)
