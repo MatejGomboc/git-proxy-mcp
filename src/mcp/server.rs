@@ -542,8 +542,7 @@ impl McpServer {
 
         // Include git identity if configured (for AI to use when creating commits)
         if self.git_identity.is_partial() {
-            result["gitIdentity"] =
-                serde_json::to_value(&self.git_identity).unwrap_or(Value::Null);
+            result["gitIdentity"] = serde_json::to_value(&self.git_identity).unwrap_or(Value::Null);
         }
 
         Ok(JsonRpcResponse::success(req.id.clone(), result))
