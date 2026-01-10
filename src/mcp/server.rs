@@ -45,11 +45,18 @@ use crate::mcp::protocol::{
     ErrorCode, IncomingMessage, JsonRpcError, JsonRpcErrorData, JsonRpcNotification,
     JsonRpcRequest, JsonRpcResponse, RequestId, MCP_PROTOCOL_VERSION, SERVER_NAME,
 };
+use crate::mcp::tools::{
+    handle_repo_clone, handle_repo_clone_cancel, handle_repo_clone_chunk, handle_repo_clone_start,
+    handle_repo_diff, handle_repo_pull, handle_repo_push, handle_repo_refs, RepoCloneArgs,
+    RepoCloneCancelArgs, RepoCloneChunkArgs, RepoCloneStartArgs, RepoDiffArgs, RepoPullArgs,
+    RepoPushArgs, RepoRefsArgs,
+};
 use crate::mcp::transport::StdioTransport;
 use crate::security::{
     AuditEvent, AuditLogger, BranchGuard, PushGuard, RateLimiter, RepoFilter, SecurityGuard,
     ShutdownReason,
 };
+use crate::streaming::chunked::StreamingSessionManager;
 
 /// Server state in the MCP lifecycle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -237,6 +244,8 @@ pub struct McpServer {
     rate_limiter: RateLimiter,
     /// Audit logger.
     audit_logger: Arc<AuditLogger>,
+    /// Streaming session manager for Tier 2 chunked streaming.
+    streaming_sessions: StreamingSessionManager,
 }
 
 impl McpServer {
@@ -302,6 +311,7 @@ impl McpServer {
             repo_filter,
             rate_limiter,
             audit_logger: Arc::new(audit_logger),
+            streaming_sessions: StreamingSessionManager::new(),
         }
     }
 
@@ -542,6 +552,15 @@ impl McpServer {
 
         let result = match params.name.as_str() {
             "git" => self.call_git_tool(&params.arguments).await,
+            "repo/clone" => self.call_repo_clone_tool(&params.arguments),
+            "repo/push" => self.call_repo_push_tool(&params.arguments),
+            "repo/refs" => self.call_repo_refs_tool(&params.arguments),
+            "repo/diff" => self.call_repo_diff_tool(&params.arguments),
+            "repo/pull" => self.call_repo_pull_tool(&params.arguments),
+            // Tier 2: Chunked streaming tools
+            "repo/clone_start" => self.call_repo_clone_start_tool(&params.arguments),
+            "repo/clone_chunk" => self.call_repo_clone_chunk_tool(&params.arguments),
+            "repo/clone_cancel" => self.call_repo_clone_cancel_tool(&params.arguments),
             _ => ToolCallResult::error(format!("Unknown tool: {}", params.name)),
         };
 
@@ -579,37 +598,285 @@ impl McpServer {
     }
 
     /// Returns the list of available tools.
+    #[allow(clippy::too_many_lines)] // Tool definitions are naturally verbose
     fn get_tool_definitions() -> Vec<ToolDefinition> {
-        vec![ToolDefinition {
-            name: "git".to_string(),
-            description: Some(
-                "Execute remote Git commands using your existing Git credential configuration. \
-                 Only remote operations are supported: clone, fetch, pull, push, ls-remote. \
-                 Local commands (status, log, diff, commit, etc.) should be run directly. \
-                 Authentication is handled by your system's credential helpers and SSH agent."
-                    .to_string(),
-            ),
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "command": {
-                        "type": "string",
-                        "enum": ["clone", "fetch", "ls-remote", "pull", "push"],
-                        "description": "The remote Git command to execute"
+        vec![
+            // Legacy git subprocess tool
+            ToolDefinition {
+                name: "git".to_string(),
+                description: Some(
+                    "Execute remote Git commands using your existing Git credential configuration. \
+                     Only remote operations are supported: clone, fetch, pull, push, ls-remote. \
+                     Local commands (status, log, diff, commit, etc.) should be run directly. \
+                     Authentication is handled by your system's credential helpers and SSH agent."
+                        .to_string(),
+                ),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "command": {
+                            "type": "string",
+                            "enum": ["clone", "fetch", "ls-remote", "pull", "push"],
+                            "description": "The remote Git command to execute"
+                        },
+                        "args": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Arguments to pass to the Git command"
+                        },
+                        "cwd": {
+                            "type": "string",
+                            "description": "Working directory for the Git command (optional)"
+                        }
                     },
-                    "args": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "Arguments to pass to the Git command"
+                    "required": ["command"]
+                }),
+            },
+            // Tier 1: Stream repository as tar.gz
+            ToolDefinition {
+                name: "repo/clone".to_string(),
+                description: Some(
+                    "Clone a repository and return it as a base64-encoded tar.gz archive. \
+                     The repository is fetched using your local Git credentials (SSH agent or \
+                     credential helpers) but no source files are written to your disk. \
+                     Use this to get a complete repository snapshot that can be extracted \
+                     on the AI's VM."
+                        .to_string(),
+                ),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "url": {
+                            "type": "string",
+                            "description": "Repository URL (https:// or git@)"
+                        },
+                        "branch": {
+                            "type": "string",
+                            "description": "Branch to clone (defaults to 'main')"
+                        },
+                        "depth": {
+                            "type": "integer",
+                            "description": "Shallow clone depth (1 = only latest commit)"
+                        },
+                        "sparse": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Sparse checkout patterns (glob syntax, e.g., 'src/**/*.rs')"
+                        },
+                        "exclude_binary": {
+                            "type": "boolean",
+                            "description": "Exclude binary files (files with null bytes or mostly non-printable chars). Useful for AI code review."
+                        },
+                        "max_file_size": {
+                            "type": "integer",
+                            "description": "Maximum file size in bytes. Files larger than this are skipped. Useful for excluding large assets."
+                        },
+                        "resolve_lfs": {
+                            "type": "boolean",
+                            "description": "Resolve Git LFS pointers to actual content. When enabled, LFS pointer files are replaced with their actual content."
+                        },
+                        "include_submodules": {
+                            "type": "boolean",
+                            "description": "Include submodule contents in the archive. When enabled, submodules are fetched and their files are included at their respective paths."
+                        }
                     },
-                    "cwd": {
-                        "type": "string",
-                        "description": "Working directory for the Git command (optional)"
-                    }
-                },
-                "required": ["command"]
-            }),
-        }]
+                    "required": ["url"]
+                }),
+            },
+            // Tier 1: Push a git bundle to remote
+            ToolDefinition {
+                name: "repo/push".to_string(),
+                description: Some(
+                    "Push a git bundle to a remote repository. The AI creates a bundle using \
+                     'git bundle create' and sends it base64-encoded. The MCP server unbundles \
+                     and pushes using your local Git credentials. Protected branch guards apply."
+                        .to_string(),
+                ),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "bundle": {
+                            "type": "string",
+                            "description": "Base64-encoded git bundle created with 'git bundle create'"
+                        },
+                        "url": {
+                            "type": "string",
+                            "description": "Target repository URL (https:// or git@)"
+                        },
+                        "branch": {
+                            "type": "string",
+                            "description": "Target branch to push to"
+                        },
+                        "force": {
+                            "type": "boolean",
+                            "description": "Force push (use with caution, may be blocked by guards)"
+                        }
+                    },
+                    "required": ["bundle", "url", "branch"]
+                }),
+            },
+            // Tier 2: Start chunked clone
+            ToolDefinition {
+                name: "repo/clone_start".to_string(),
+                description: Some(
+                    "Start a chunked clone for large repositories. Returns a session ID that \
+                     can be used with repo/clone_chunk to retrieve the data in pieces. \
+                     Use this instead of repo/clone when working with large repositories \
+                     to get progress updates and enable resume on failure."
+                        .to_string(),
+                ),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "url": {
+                            "type": "string",
+                            "description": "Repository URL (https:// or git@)"
+                        },
+                        "branch": {
+                            "type": "string",
+                            "description": "Branch to clone (defaults to 'main')"
+                        },
+                        "depth": {
+                            "type": "integer",
+                            "description": "Shallow clone depth (1 = only latest commit)"
+                        },
+                        "sparse": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Sparse checkout paths (glob patterns)"
+                        },
+                        "chunk_size": {
+                            "type": "integer",
+                            "description": "Chunk size in bytes (default: 1MB, max: 4MB)"
+                        }
+                    },
+                    "required": ["url"]
+                }),
+            },
+            // Tier 2: Get a chunk from streaming session
+            ToolDefinition {
+                name: "repo/clone_chunk".to_string(),
+                description: Some(
+                    "Get a chunk from a streaming clone session. Call repeatedly with \
+                     incrementing chunk_index (starting from 0) until is_last is true. \
+                     Concatenate all chunks to reconstruct the tar.gz archive."
+                        .to_string(),
+                ),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "session_id": {
+                            "type": "string",
+                            "description": "Session ID from repo/clone_start"
+                        },
+                        "chunk_index": {
+                            "type": "integer",
+                            "description": "Chunk index to retrieve (0-based)"
+                        }
+                    },
+                    "required": ["session_id", "chunk_index"]
+                }),
+            },
+            // Tier 2: Cancel a streaming session
+            ToolDefinition {
+                name: "repo/clone_cancel".to_string(),
+                description: Some(
+                    "Cancel a streaming clone session and free resources. Call this if \
+                     you no longer need the remaining chunks. Sessions also auto-expire \
+                     after 1 hour of inactivity."
+                        .to_string(),
+                ),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "session_id": {
+                            "type": "string",
+                            "description": "Session ID to cancel"
+                        }
+                    },
+                    "required": ["session_id"]
+                }),
+            },
+            // List remote refs without cloning
+            ToolDefinition {
+                name: "repo/refs".to_string(),
+                description: Some(
+                    "List branches and tags from a remote repository without cloning. \
+                     Returns structured information about available branches, tags, and \
+                     the default branch. Use this to explore a repository before cloning. \
+                     Equivalent to 'git ls-remote' but with structured output."
+                        .to_string(),
+                ),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "url": {
+                            "type": "string",
+                            "description": "Repository URL (https:// or git@)"
+                        }
+                    },
+                    "required": ["url"]
+                }),
+            },
+            // Generate diff between commits
+            ToolDefinition {
+                name: "repo/diff".to_string(),
+                description: Some(
+                    "Generate a unified diff between two commits from a remote repository. \
+                     Returns the diff text and statistics (files changed, insertions, deletions). \
+                     Use this to review changes between commits, branches, or tags without \
+                     downloading the entire repository content."
+                        .to_string(),
+                ),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "url": {
+                            "type": "string",
+                            "description": "Repository URL (https:// or git@)"
+                        },
+                        "base_commit": {
+                            "type": "string",
+                            "description": "Base commit reference (SHA, branch name, tag, or relative ref like HEAD~5)"
+                        },
+                        "head_commit": {
+                            "type": "string",
+                            "description": "Head commit reference (SHA, branch name, tag, or relative ref)"
+                        }
+                    },
+                    "required": ["url", "base_commit", "head_commit"]
+                }),
+            },
+            // Incremental sync (pull changes since known commit)
+            ToolDefinition {
+                name: "repo/pull".to_string(),
+                description: Some(
+                    "Fetch changes since a known commit for incremental sync. Returns a unified \
+                     diff, a tar.gz archive of changed/added files, and a list of deleted files. \
+                     Use this when the AI already has a repository and needs to sync updates \
+                     without re-downloading everything."
+                        .to_string(),
+                ),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "url": {
+                            "type": "string",
+                            "description": "Repository URL (https:// or git@)"
+                        },
+                        "branch": {
+                            "type": "string",
+                            "description": "Branch name to sync (e.g., 'main')"
+                        },
+                        "since_commit": {
+                            "type": "string",
+                            "description": "Commit SHA that the AI already has (40-character hex)"
+                        }
+                    },
+                    "required": ["url", "branch", "since_commit"]
+                }),
+            },
+        ]
     }
 
     /// Applies all security guards to a command.
@@ -792,6 +1059,516 @@ impl McpServer {
                 "Command failed with exit code {}:\n{}",
                 output.exit_code, response_text
             ))
+        }
+    }
+
+    /// Calls the `repo/clone` tool.
+    ///
+    /// This tool clones a repository and returns it as a base64-encoded tar.gz.
+    /// Source files are never written to the user's disk.
+    fn call_repo_clone_tool(&self, arguments: &Value) -> ToolCallResult {
+        use crate::git2_ops::auth::sanitize_url_for_logging;
+
+        // Parse arguments
+        let args: RepoCloneArgs = match serde_json::from_value(arguments.clone()) {
+            Ok(a) => a,
+            Err(e) => {
+                return ToolCallResult::error(format!("Invalid arguments: {e}"));
+            }
+        };
+
+        let sanitized_url = sanitize_url_for_logging(&args.url);
+
+        // Check rate limiter
+        if !self.rate_limiter.try_acquire() {
+            self.audit_logger
+                .log_silent(&AuditEvent::repo_clone_blocked(
+                    &sanitized_url,
+                    "rate limit exceeded",
+                ));
+            return ToolCallResult::error(
+                "Rate limit exceeded. Please wait before sending more requests.",
+            );
+        }
+
+        // Check repo filter
+        if let Some(reason) = self
+            .repo_filter
+            .check("clone", std::slice::from_ref(&args.url))
+            .reason()
+        {
+            self.audit_logger
+                .log_silent(&AuditEvent::repo_clone_blocked(&sanitized_url, reason));
+            return ToolCallResult::error(reason.to_string());
+        }
+
+        // Execute the clone with timing
+        let start = Instant::now();
+        match handle_repo_clone(args) {
+            Ok(result) => {
+                let duration = start.elapsed();
+                self.audit_logger
+                    .log_silent(&AuditEvent::repo_clone_success(
+                        &sanitized_url,
+                        &result.branch,
+                        &result.commit,
+                        result.file_count,
+                        result.archive_size,
+                        duration,
+                    ));
+
+                // Return the result as JSON text
+                match serde_json::to_string_pretty(&result) {
+                    Ok(json) => ToolCallResult::text(json),
+                    Err(e) => ToolCallResult::error(format!("Failed to serialize result: {e}")),
+                }
+            }
+            Err(e) => {
+                self.audit_logger.log_silent(&AuditEvent::repo_clone_failed(
+                    &sanitized_url,
+                    e.to_string(),
+                ));
+                ToolCallResult::error(e.to_string())
+            }
+        }
+    }
+
+    /// Calls the `repo/push` tool.
+    ///
+    /// This tool receives a git bundle and pushes it to a remote repository.
+    /// Only the bundle file touches disk (not source files).
+    fn call_repo_push_tool(&self, arguments: &Value) -> ToolCallResult {
+        use crate::git2_ops::auth::sanitize_url_for_logging;
+
+        // Parse arguments
+        let args: RepoPushArgs = match serde_json::from_value(arguments.clone()) {
+            Ok(a) => a,
+            Err(e) => {
+                return ToolCallResult::error(format!("Invalid arguments: {e}"));
+            }
+        };
+
+        let sanitized_url = sanitize_url_for_logging(&args.url);
+
+        // Check rate limiter
+        if !self.rate_limiter.try_acquire() {
+            self.audit_logger.log_silent(&AuditEvent::repo_push_blocked(
+                &sanitized_url,
+                "rate limit exceeded",
+            ));
+            return ToolCallResult::error(
+                "Rate limit exceeded. Please wait before sending more requests.",
+            );
+        }
+
+        // Check repo filter
+        if let Some(reason) = self
+            .repo_filter
+            .check("push", std::slice::from_ref(&args.url))
+            .reason()
+        {
+            self.audit_logger
+                .log_silent(&AuditEvent::repo_push_blocked(&sanitized_url, reason));
+            return ToolCallResult::error(reason.to_string());
+        }
+
+        // Check branch guard (protected branches)
+        if let Some(reason) = self
+            .branch_guard
+            .check("push", std::slice::from_ref(&args.branch))
+            .reason()
+        {
+            self.audit_logger.log_silent(&AuditEvent::repo_push_blocked(
+                &sanitized_url,
+                format!("protected branch: {reason}"),
+            ));
+            return ToolCallResult::error(reason.to_string());
+        }
+
+        // Check push guard (force push)
+        if args.force {
+            if let Some(reason) = self
+                .push_guard
+                .check("push", &["--force".to_string()])
+                .reason()
+            {
+                self.audit_logger.log_silent(&AuditEvent::repo_push_blocked(
+                    &sanitized_url,
+                    format!("force push blocked: {reason}"),
+                ));
+                return ToolCallResult::error(reason.to_string());
+            }
+        }
+
+        // Execute the push with timing
+        let start = Instant::now();
+        let branch = args.branch.clone();
+        let force = args.force;
+
+        match handle_repo_push(args) {
+            Ok(result) => {
+                let duration = start.elapsed();
+                self.audit_logger.log_silent(&AuditEvent::repo_push_success(
+                    &sanitized_url,
+                    &result.branch,
+                    &result.commit,
+                    force,
+                    duration,
+                ));
+
+                // Return the result as JSON text
+                match serde_json::to_string_pretty(&result) {
+                    Ok(json) => ToolCallResult::text(json),
+                    Err(e) => ToolCallResult::error(format!("Failed to serialize result: {e}")),
+                }
+            }
+            Err(e) => {
+                self.audit_logger.log_silent(&AuditEvent::repo_push_failed(
+                    &sanitized_url,
+                    format!("push to {branch} failed: {e}"),
+                ));
+                ToolCallResult::error(e.to_string())
+            }
+        }
+    }
+
+    /// Calls the `repo/clone_start` tool (Tier 2).
+    ///
+    /// Starts a chunked streaming session for a repository clone.
+    fn call_repo_clone_start_tool(&self, arguments: &Value) -> ToolCallResult {
+        use crate::git2_ops::auth::sanitize_url_for_logging;
+
+        // Parse arguments
+        let args: RepoCloneStartArgs = match serde_json::from_value(arguments.clone()) {
+            Ok(a) => a,
+            Err(e) => {
+                return ToolCallResult::error(format!("Invalid arguments: {e}"));
+            }
+        };
+
+        let sanitized_url = sanitize_url_for_logging(&args.url);
+
+        // Check rate limiter
+        if !self.rate_limiter.try_acquire() {
+            self.audit_logger
+                .log_silent(&AuditEvent::repo_clone_blocked(
+                    &sanitized_url,
+                    "rate limit exceeded",
+                ));
+            return ToolCallResult::error(
+                "Rate limit exceeded. Please wait before sending more requests.",
+            );
+        }
+
+        // Check repo filter
+        if let Some(reason) = self
+            .repo_filter
+            .check("clone", std::slice::from_ref(&args.url))
+            .reason()
+        {
+            self.audit_logger
+                .log_silent(&AuditEvent::repo_clone_blocked(&sanitized_url, reason));
+            return ToolCallResult::error(reason.to_string());
+        }
+
+        // Execute the clone_start
+        let start = Instant::now();
+        match handle_repo_clone_start(args, &self.streaming_sessions) {
+            Ok(result) => {
+                let duration = start.elapsed();
+                self.audit_logger
+                    .log_silent(&AuditEvent::repo_clone_success(
+                        &sanitized_url,
+                        &result.branch,
+                        &result.commit,
+                        0, // file_count not known until all chunks retrieved
+                        result.total_size,
+                        duration,
+                    ));
+
+                // Return the result as JSON text
+                match serde_json::to_string_pretty(&result) {
+                    Ok(json) => ToolCallResult::text(json),
+                    Err(e) => ToolCallResult::error(format!("Failed to serialize result: {e}")),
+                }
+            }
+            Err(e) => {
+                self.audit_logger.log_silent(&AuditEvent::repo_clone_failed(
+                    &sanitized_url,
+                    e.to_string(),
+                ));
+                ToolCallResult::error(e.to_string())
+            }
+        }
+    }
+
+    /// Calls the `repo/clone_chunk` tool (Tier 2).
+    ///
+    /// Retrieves a chunk from a streaming session.
+    fn call_repo_clone_chunk_tool(&self, arguments: &Value) -> ToolCallResult {
+        // Parse arguments
+        let args: RepoCloneChunkArgs = match serde_json::from_value(arguments.clone()) {
+            Ok(a) => a,
+            Err(e) => {
+                return ToolCallResult::error(format!("Invalid arguments: {e}"));
+            }
+        };
+
+        // Execute the chunk retrieval
+        match handle_repo_clone_chunk(args, &self.streaming_sessions) {
+            Ok(result) => {
+                // Return the result as JSON text
+                match serde_json::to_string_pretty(&result) {
+                    Ok(json) => ToolCallResult::text(json),
+                    Err(e) => ToolCallResult::error(format!("Failed to serialize result: {e}")),
+                }
+            }
+            Err(e) => ToolCallResult::error(e.to_string()),
+        }
+    }
+
+    /// Calls the `repo/clone_cancel` tool (Tier 2).
+    ///
+    /// Cancels a streaming session and frees resources.
+    fn call_repo_clone_cancel_tool(&self, arguments: &Value) -> ToolCallResult {
+        // Parse arguments
+        let args: RepoCloneCancelArgs = match serde_json::from_value(arguments.clone()) {
+            Ok(a) => a,
+            Err(e) => {
+                return ToolCallResult::error(format!("Invalid arguments: {e}"));
+            }
+        };
+
+        // Execute the cancel
+        match handle_repo_clone_cancel(args, &self.streaming_sessions) {
+            Ok(result) => {
+                // Return the result as JSON text
+                match serde_json::to_string_pretty(&result) {
+                    Ok(json) => ToolCallResult::text(json),
+                    Err(e) => ToolCallResult::error(format!("Failed to serialize result: {e}")),
+                }
+            }
+            Err(e) => ToolCallResult::error(e.to_string()),
+        }
+    }
+
+    /// Calls the `repo/refs` tool.
+    ///
+    /// Lists branches and tags from a remote repository without cloning.
+    fn call_repo_refs_tool(&self, arguments: &Value) -> ToolCallResult {
+        use crate::git2_ops::auth::sanitize_url_for_logging;
+
+        // Parse arguments
+        let args: RepoRefsArgs = match serde_json::from_value(arguments.clone()) {
+            Ok(a) => a,
+            Err(e) => {
+                return ToolCallResult::error(format!("Invalid arguments: {e}"));
+            }
+        };
+
+        let sanitized_url = sanitize_url_for_logging(&args.url);
+
+        // Check rate limiter
+        if !self.rate_limiter.try_acquire() {
+            self.audit_logger
+                .log_silent(&AuditEvent::repo_clone_blocked(
+                    &sanitized_url,
+                    "rate limit exceeded",
+                ));
+            return ToolCallResult::error(
+                "Rate limit exceeded. Please wait before sending more requests.",
+            );
+        }
+
+        // Check repo filter
+        if let Some(reason) = self
+            .repo_filter
+            .check("ls-remote", std::slice::from_ref(&args.url))
+            .reason()
+        {
+            self.audit_logger
+                .log_silent(&AuditEvent::repo_clone_blocked(&sanitized_url, reason));
+            return ToolCallResult::error(reason.to_string());
+        }
+
+        // Execute the refs listing
+        let start = Instant::now();
+        match handle_repo_refs(args) {
+            Ok(result) => {
+                let duration = start.elapsed();
+                tracing::info!(
+                    url = %sanitized_url,
+                    branches = result.branches.len(),
+                    tags = result.tags.len(),
+                    default_branch = %result.default_branch,
+                    duration_ms = duration.as_millis(),
+                    "repo/refs complete"
+                );
+
+                // Return the result as JSON text
+                match serde_json::to_string_pretty(&result) {
+                    Ok(json) => ToolCallResult::text(json),
+                    Err(e) => ToolCallResult::error(format!("Failed to serialize result: {e}")),
+                }
+            }
+            Err(e) => {
+                tracing::warn!(
+                    url = %sanitized_url,
+                    error = %e,
+                    "repo/refs failed"
+                );
+                ToolCallResult::error(e.to_string())
+            }
+        }
+    }
+
+    /// Calls the `repo/diff` tool.
+    ///
+    /// Generates a unified diff between two commits from a remote repository.
+    fn call_repo_diff_tool(&self, arguments: &Value) -> ToolCallResult {
+        use crate::git2_ops::auth::sanitize_url_for_logging;
+
+        // Parse arguments
+        let args: RepoDiffArgs = match serde_json::from_value(arguments.clone()) {
+            Ok(a) => a,
+            Err(e) => {
+                return ToolCallResult::error(format!("Invalid arguments: {e}"));
+            }
+        };
+
+        let sanitized_url = sanitize_url_for_logging(&args.url);
+
+        // Check rate limiter
+        if !self.rate_limiter.try_acquire() {
+            self.audit_logger
+                .log_silent(&AuditEvent::repo_clone_blocked(
+                    &sanitized_url,
+                    "rate limit exceeded",
+                ));
+            return ToolCallResult::error(
+                "Rate limit exceeded. Please wait before sending more requests.",
+            );
+        }
+
+        // Check repo filter
+        if let Some(reason) = self
+            .repo_filter
+            .check("diff", std::slice::from_ref(&args.url))
+            .reason()
+        {
+            self.audit_logger
+                .log_silent(&AuditEvent::repo_clone_blocked(&sanitized_url, reason));
+            return ToolCallResult::error(reason.to_string());
+        }
+
+        // Execute the diff generation
+        let start = Instant::now();
+        match handle_repo_diff(args) {
+            Ok(result) => {
+                let duration = start.elapsed();
+                tracing::info!(
+                    url = %sanitized_url,
+                    files = result.stats.files_changed,
+                    insertions = result.stats.insertions,
+                    deletions = result.stats.deletions,
+                    duration_ms = duration.as_millis(),
+                    "repo/diff complete"
+                );
+
+                // Return the result as JSON text
+                match serde_json::to_string_pretty(&result) {
+                    Ok(json) => ToolCallResult::text(json),
+                    Err(e) => ToolCallResult::error(format!("Failed to serialize result: {e}")),
+                }
+            }
+            Err(e) => {
+                tracing::warn!(
+                    url = %sanitized_url,
+                    error = %e,
+                    "repo/diff failed"
+                );
+                ToolCallResult::error(e.to_string())
+            }
+        }
+    }
+
+    /// Calls the `repo/pull` tool.
+    ///
+    /// Fetches changes since a known commit for incremental sync.
+    fn call_repo_pull_tool(&self, arguments: &Value) -> ToolCallResult {
+        use crate::git2_ops::auth::sanitize_url_for_logging;
+
+        // Parse arguments
+        let args: RepoPullArgs = match serde_json::from_value(arguments.clone()) {
+            Ok(a) => a,
+            Err(e) => {
+                return ToolCallResult::error(format!("Invalid arguments: {e}"));
+            }
+        };
+
+        let sanitized_url = sanitize_url_for_logging(&args.url);
+
+        // Check rate limiter
+        if !self.rate_limiter.try_acquire() {
+            self.audit_logger
+                .log_silent(&AuditEvent::repo_clone_blocked(
+                    &sanitized_url,
+                    "rate limit exceeded",
+                ));
+            return ToolCallResult::error(
+                "Rate limit exceeded. Please wait before sending more requests.",
+            );
+        }
+
+        // Check repo filter
+        if let Some(reason) = self
+            .repo_filter
+            .check("fetch", std::slice::from_ref(&args.url))
+            .reason()
+        {
+            self.audit_logger
+                .log_silent(&AuditEvent::repo_clone_blocked(&sanitized_url, reason));
+            return ToolCallResult::error(reason.to_string());
+        }
+
+        // Execute the pull
+        let start = Instant::now();
+        match handle_repo_pull(args) {
+            Ok(result) => {
+                let duration = start.elapsed();
+                if result.up_to_date {
+                    tracing::info!(
+                        url = %sanitized_url,
+                        duration_ms = duration.as_millis(),
+                        "repo/pull: already up to date"
+                    );
+                } else {
+                    tracing::info!(
+                        url = %sanitized_url,
+                        commits = result.stats.commits,
+                        files = result.stats.files_changed,
+                        added = result.stats.files_added,
+                        modified = result.stats.files_modified,
+                        deleted = result.stats.files_deleted,
+                        duration_ms = duration.as_millis(),
+                        "repo/pull complete"
+                    );
+                }
+
+                // Return the result as JSON text
+                match serde_json::to_string_pretty(&result) {
+                    Ok(json) => ToolCallResult::text(json),
+                    Err(e) => ToolCallResult::error(format!("Failed to serialize result: {e}")),
+                }
+            }
+            Err(e) => {
+                tracing::warn!(
+                    url = %sanitized_url,
+                    error = %e,
+                    "repo/pull failed"
+                );
+                ToolCallResult::error(e.to_string())
+            }
         }
     }
 }

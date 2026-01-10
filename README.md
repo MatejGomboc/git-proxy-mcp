@@ -27,12 +27,13 @@ git-proxy-mcp acts as an **authenticated streaming proxy** between Git providers
 ```
 ┌─────────────────┐      ┌─────────────────┐      ┌─────────────────┐
 │   Git Provider  │      │   YOUR PC       │      │   AI's VM       │
-│   (GitHub, etc) │◄────►│   MCP Server    │◄────►│   Claude.ai     │
-│                 │      │                 │      │                 │
-│   repo objects  │      │ • Credentials   │      │ /home/claude/   │
-│                 │      │ • Auth only     │      │   repo/         │
-│                 │      │ • NO file copy  │      │   .git/         │
-└─────────────────┘      └─────────────────┘      └─────────────────┘
+│                 │      │   MCP Server    │◄────►│   Claude.ai     │
+│ • GitHub        │◄────►│                 │      │                 │
+│ • GitLab        │      │ • Credentials   │      │ /home/claude/   │
+│ • Bitbucket     │      │ • Auth only     │      │   repo/         │
+│ • Azure DevOps  │      │ • NO file copy  │      │   .git/         │
+│ • Self-hosted   │      └─────────────────┘      └─────────────────┘
+└─────────────────┘
 ```
 
 **Key insight:** The AI has its own VM with full Linux capabilities. It just can't authenticate to your private repos. We solve *only* that problem.
@@ -79,17 +80,25 @@ git-proxy-mcp acts as an **authenticated streaming proxy** between Git providers
 
 | Feature | Status |
 |---------|--------|
-| Streaming clone (repo → AI's VM) | 🚧 In Development |
-| Streaming push (AI's VM → repo) | 🚧 In Development |
-| Incremental sync (pull new changes) | 🚧 Planned |
-| Shallow clone support | 🚧 Planned |
-| Sparse checkout | 🚧 Planned |
-| GitHub authentication | 🚧 Planned |
-| GitLab authentication | 🚧 Planned |
-| SSH key support | 🚧 Planned |
+| Streaming clone (repo → AI's VM) | ✅ Implemented |
+| Streaming push (AI's VM → repo) | ✅ Implemented |
+| Chunked streaming (large repos) | ✅ Implemented |
+| Shallow clone support | ✅ Implemented |
+| Sparse checkout | ✅ Implemented |
+| **Multi-provider support** | ✅ Implemented |
+| • GitHub | ✅ HTTPS + SSH |
+| • GitLab (cloud + self-hosted) | ✅ HTTPS + SSH |
+| • Bitbucket | ✅ HTTPS + SSH |
+| • Azure DevOps | ✅ HTTPS + SSH |
+| • Any Git server | ✅ Standard protocols |
+| SSH agent authentication | ✅ Implemented |
+| Credential helper authentication | ✅ Implemented |
 | Credential-free design | ✅ Core principle |
-| Audit logging | ✅ From v1 |
-| Rate limiting | ✅ From v1 |
+| Audit logging | ✅ Implemented |
+| Rate limiting | ✅ Implemented |
+| Protected branch guards | ✅ Implemented |
+| Force push protection | ✅ Implemented |
+| Incremental sync (pull new changes) | 🚧 Planned |
 
 > See [TODO.md](TODO.md) for the full development roadmap.
 
@@ -150,9 +159,11 @@ git-proxy-mcp acts as an **authenticated streaming proxy** between Git providers
 
 ## MCP Tools
 
-### `repo/clone`
+### Tier 1: Single-Response Tools
 
-Stream a repository to the AI's workspace.
+#### `repo/clone`
+
+Stream a repository to the AI's workspace (small-to-medium repos).
 
 ```json
 {
@@ -166,11 +177,11 @@ Stream a repository to the AI's workspace.
 }
 ```
 
-**Response:** Streamed tar.gz of repository contents.
+**Response:** Base64-encoded tar.gz with commit SHA and file count.
 
-### `repo/push`
+#### `repo/push`
 
-Push commits from AI's workspace to remote.
+Push a git bundle from AI's workspace to remote.
 
 ```json
 {
@@ -178,18 +189,68 @@ Push commits from AI's workspace to remote.
   "arguments": {
     "url": "https://github.com/user/private-repo",
     "branch": "feature/fix-bug",
-    "base": "main",
-    "commits": [
-      { "message": "Fix the bug", "patch": "<diff>" },
-      { "message": "Add tests", "patch": "<diff>" }
-    ]
+    "bundle": "<base64-encoded git bundle>",
+    "force": false
   }
 }
 ```
 
-**Response:** Commit URLs on remote.
+**Response:** Pushed commit SHA and branch name.
 
-### `repo/pull`
+### Tier 2: Chunked Streaming Tools (Large Repos)
+
+For repositories too large to transfer in a single response.
+
+#### `repo/clone_start`
+
+Start a chunked clone session.
+
+```json
+{
+  "name": "repo/clone_start",
+  "arguments": {
+    "url": "https://gitlab.com/org/large-repo",
+    "branch": "main",
+    "depth": 1,
+    "chunk_size": 1048576
+  }
+}
+```
+
+**Response:** Session ID, total chunks, total size.
+
+#### `repo/clone_chunk`
+
+Get a chunk from a streaming session.
+
+```json
+{
+  "name": "repo/clone_chunk",
+  "arguments": {
+    "session_id": "stream_abc123",
+    "chunk_index": 0
+  }
+}
+```
+
+**Response:** Base64-encoded chunk data, is_last flag.
+
+#### `repo/clone_cancel`
+
+Cancel a streaming session (optional, auto-expires after 1 hour).
+
+```json
+{
+  "name": "repo/clone_cancel",
+  "arguments": {
+    "session_id": "stream_abc123"
+  }
+}
+```
+
+### Future Tools (Planned)
+
+#### `repo/pull`
 
 Sync new changes from remote to AI's workspace.
 

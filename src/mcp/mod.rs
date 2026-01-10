@@ -31,10 +31,13 @@
 //!
 //! This implementation targets MCP protocol version 2024-11-05.
 
+pub mod progress;
 pub mod protocol;
 pub mod server;
+pub mod tools;
 pub mod transport;
 
+pub use progress::{ProgressNotification, ProgressSender, ProgressUpdate};
 pub use protocol::{JsonRpcError, JsonRpcRequest, JsonRpcResponse, MCP_PROTOCOL_VERSION};
 pub use server::{McpServer, SecurityConfig};
 pub use transport::StdioTransport;

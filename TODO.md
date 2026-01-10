@@ -54,7 +54,7 @@ GitHub                     User's PC                    AI's VM
 
 ---
 
-## Phase 1: Foundation (Tier 1) <- CURRENT
+## Phase 1: Foundation (Tier 1) ✅ COMPLETE
 
 ### 1.1 Add git2 Dependency and Module Structure
 
@@ -90,9 +90,9 @@ tempfile = "3.10"
 
 **Acceptance criteria:**
 
-- [ ] `cargo build` succeeds
-- [ ] Module structure in place
-- [ ] Smoke test: can create `git2::Repository`
+- [x] `cargo build` succeeds
+- [x] Module structure in place
+- [x] Smoke test: can create `git2::Repository`
 
 ---
 
@@ -135,10 +135,10 @@ pub fn create_callbacks() -> RemoteCallbacks<'static> {
 
 **Acceptance criteria:**
 
-- [ ] Compiles
-- [ ] SSH agent path implemented
-- [ ] Credential helper path implemented
-- [ ] Code audit: no credential leakage
+- [x] Compiles
+- [x] SSH agent path implemented
+- [x] Credential helper path implemented
+- [x] Code audit: no credential leakage
 
 ---
 
@@ -308,13 +308,13 @@ pub async fn handle_repo_clone(args: RepoCloneArgs) -> Result<RepoCloneResult, T
 
 **Acceptance criteria:**
 
-- [ ] `repo/clone` tool works
-- [ ] Public repos clone without auth
-- [ ] Private repos clone with credential helper
-- [ ] Private repos clone with SSH agent
-- [ ] **NO source files on disk** (verify!)
-- [ ] Valid tar.gz output
-- [ ] Temp bare repo cleaned up
+- [x] `repo/clone` tool works
+- [x] Public repos clone without auth
+- [x] Private repos clone with credential helper
+- [x] Private repos clone with SSH agent
+- [x] **NO source files on disk** (verify!)
+- [x] Valid tar.gz output
+- [x] Temp bare repo cleaned up
 
 ---
 
@@ -362,11 +362,11 @@ pub fn process_bundle_and_push(
 
 **Acceptance criteria:**
 
-- [ ] `repo/push` tool works
-- [ ] Push to existing branch
-- [ ] Create and push to new branch
-- [ ] Protected branch guard works
-- [ ] Bundle temp file cleaned up
+- [x] `repo/push` tool works
+- [x] Push to existing branch
+- [x] Create and push to new branch
+- [x] Protected branch guard works
+- [x] Bundle temp file cleaned up
 
 ---
 
@@ -398,46 +398,310 @@ strace -f -e write cargo run 2>&1 | grep -v /tmp
 
 ---
 
-## Phase 2: Tier 1 Hardening
+## Phase 2: Tier 1 Hardening ✅ COMPLETE
 
-- [ ] Comprehensive error handling
-- [ ] Shallow clone support (`depth` parameter)
-- [ ] Sparse checkout support (`sparse` parameter)
-- [ ] Audit logging for all operations
-- [ ] Rate limiting integration
-- [ ] Security guards (branch protection, force push)
-
----
-
-## Phase 3: Tier 2 (Chunked Streaming) <- TARGET
-
-- [ ] Stream tar in chunks instead of buffering entire repo
-- [ ] Handle repos larger than available RAM
-- [ ] Resume interrupted transfers
-- [ ] Progress reporting
-
-**Tier 2 is the production-ready goal.**
+- [x] Comprehensive error handling
+- [x] Shallow clone support (`depth` parameter)
+- [x] Sparse checkout support (`sparse` parameter)
+- [x] Audit logging for all operations
+- [x] Rate limiting integration
+- [x] Security guards (branch protection, force push)
 
 ---
 
-## Phase 4: Polish & Release
+## Phase 3: Tier 2 (Chunked Streaming) ✅ COMPLETE
 
-- [ ] Multi-provider support (GitLab, Bitbucket)
-- [ ] Comprehensive documentation
-- [ ] Performance benchmarks
-- [ ] Security audit
+- [x] Stream tar in chunks instead of buffering entire repo
+- [x] Handle repos larger than available RAM (via multi-call protocol)
+- [x] Resume interrupted transfers (chunks can be requested in any order)
+- [x] Progress reporting (total_chunks, chunk_index, is_last)
+- [x] **Feature parity with Tier 1** — all filtering options supported:
+    - Binary file exclusion (`exclude_binary`)
+    - File size limits (`max_file_size`)
+    - LFS resolution (`resolve_lfs`)
+    - Submodule inclusion (`include_submodules`)
+- [x] Disk-backed storage for archives > 10MB (O(chunk) memory)
+
+**New tools:**
+
+- `repo/clone_start` — Start chunked clone, returns session_id and total_chunks
+- `repo/clone_chunk` — Get chunk by index (base64 encoded)
+- `repo/clone_cancel` — Cancel session and free resources
+
+**Tier 2 is now production-ready with full feature parity!**
+
+---
+
+## Phase 4: Polish & Release ✅ COMPLETE
+
+- [x] Multi-provider support (GitLab, Bitbucket, Azure DevOps, self-hosted)
+- [x] Comprehensive documentation (README, ARCHITECTURE, rustdoc)
+- [x] Performance benchmarks (`tests/perf_tests.rs`)
+- [x] Security audit (`tests/security_audit.rs`)
+
+---
+
+## Phase 5: Future Enhancements (Planned)
+
+### 5.1 Incremental Sync (`repo/pull`) ✅ IMPLEMENTED
+
+**Goal:** Sync new changes from remote to AI's workspace without re-cloning.
+
+```rust
+#[derive(Deserialize)]
+pub struct RepoPullArgs {
+    pub url: String,
+    pub branch: String,
+    pub since_commit: String,  // Base commit AI already has
+}
+
+#[derive(Serialize)]
+pub struct RepoPullResult {
+    pub diff: String,              // Unified diff text
+    pub files_archive: String,     // Base64 tar.gz of changed/added files
+    pub changed_files: Vec<ChangedFile>,
+    pub deleted_files: Vec<String>,
+    pub base_commit: String,
+    pub new_commit: String,
+    pub stats: PullStats,          // Commits, files, insertions, deletions
+    pub up_to_date: bool,
+}
+```
+
+**Tool:** `repo/pull`
+
+**Use case:** AI has repo from earlier clone, needs to fetch latest changes without re-downloading entire repo.
+
+**Response includes:**
+
+- Unified diff for review
+- Tar.gz of changed/added files (for applying updates)
+- List of deleted files
+- Full statistics (commits, files added/modified/deleted, lines)
+
+---
+
+### 5.2 LFS Support ✅ IMPLEMENTED
+
+**Goal:** Handle Git LFS files transparently.
+
+```rust
+#[derive(Deserialize)]
+pub struct RepoCloneArgs {
+    // ... existing fields ...
+    pub resolve_lfs: Option<bool>,  // Resolve LFS pointers to actual content
+}
+
+#[derive(Serialize)]
+pub struct RepoCloneResult {
+    // ... existing fields ...
+    pub lfs_resolved: usize,   // LFS pointers successfully resolved
+    pub lfs_failed: usize,     // LFS pointers that failed to resolve
+}
+```
+
+**Tool:** `repo/clone` (enhanced)
+
+**Implementation:**
+
+- [x] Detect LFS pointers in tree walk (version, oid, size format)
+- [x] Fetch LFS objects via authenticated Batch API
+- [x] Include real content in tar (not pointers)
+- [x] Track resolved/failed statistics in response
+- [x] **LFS credentials from OS credential store** (macOS Keychain, Windows Credential Manager, git-credential-manager)
+    - Uses `git credential fill` protocol to retrieve credentials on-demand
+    - Credentials NEVER leave user's PC, NEVER sent to AI
+    - Automatic for any host with stored git credentials
+
+---
+
+### 5.3 Submodule Support ✅ IMPLEMENTED
+
+**Goal:** Clone repositories with submodules.
+
+```rust
+#[derive(Deserialize)]
+pub struct RepoCloneArgs {
+    // ... existing fields ...
+    pub include_submodules: Option<bool>,  // Include submodule contents in archive
+}
+
+#[derive(Serialize)]
+pub struct RepoCloneResult {
+    // ... existing fields ...
+    pub submodules_included: usize,   // Submodules successfully included
+    pub submodules_failed: usize,     // Submodules that failed to fetch
+}
+```
+
+**Tool:** `repo/clone` (enhanced)
+
+**Implementation:**
+
+- [x] Parse `.gitmodules` to get submodule URLs and paths
+- [x] Detect submodule entries in tree (mode `160000`)
+- [x] Recursively fetch each submodule as bare repo
+- [x] Include submodule contents in tar at correct paths
+- [x] Apply same filtering options (sparse, binary, max_size) to submodules
+- [x] Track included/failed statistics in response
+
+---
+
+### 5.4 Disk-Backed Chunked Sessions ✅ IMPLEMENTED
+
+**Goal:** Reduce memory pressure for very large repos.
+
+**Implementation:**
+
+- [x] `SessionStorage` enum with Memory and File variants
+- [x] Automatic disk-backed storage for archives > 10MB (`DISK_THRESHOLD`)
+- [x] `NamedTempFile` for automatic cleanup when session is dropped
+- [x] Random access file I/O via `Seek` and `Read` traits
+- [x] Updated `StreamingSession` to use `SessionStorage` internally
+- [x] Transparent to API consumers (no public interface change)
+
+```rust
+// In streaming/chunked.rs
+pub const DISK_THRESHOLD: usize = 10 * 1024 * 1024; // 10MB
+
+enum SessionStorage {
+    Memory(Vec<u8>),  // For small archives
+    File { file: NamedTempFile, size: usize },  // For large archives
+}
+```
+
+**Benefits:**
+
+- Memory usage: O(chunk size) instead of O(archive size) for large repos
+- Can handle repos larger than available RAM
+- Automatic temp file cleanup via `NamedTempFile` Drop
+
+---
+
+### 5.5 Binary File Filtering ✅ IMPLEMENTED
+
+**Goal:** Option to exclude binary files from clone.
+
+**Use case:** AI only needs source code, not images/binaries.
+
+```rust
+#[derive(Deserialize)]
+pub struct RepoCloneArgs {
+    // ... existing fields ...
+    pub exclude_binary: Option<bool>,  // Skip binary files
+    pub max_file_size: Option<usize>,  // Skip files larger than N bytes
+}
+
+#[derive(Serialize)]
+pub struct RepoCloneResult {
+    // ... existing fields ...
+    pub skipped_by_filter: usize,   // Files skipped by sparse filter
+    pub skipped_binary: usize,      // Binary files skipped
+    pub skipped_too_large: usize,   // Files exceeding size limit
+}
+```
+
+**Tool:** `repo/clone` (enhanced)
+
+**Binary detection:** Files containing null bytes or >30% non-printable characters are considered binary (similar to Git's internal heuristic).
+
+---
+
+### 5.6 Progress Callbacks ✅ IMPLEMENTED (Infrastructure)
+
+**Goal:** Real-time progress during long operations.
+
+**Implementation:**
+
+- [x] `ProgressSender` type for sending progress updates from sync code
+- [x] `ProgressUpdate` enum with Transfer, FileProcessing, LfsDownload, SubmoduleFetch variants
+- [x] Rate-limited sending (100ms minimum interval to avoid flooding)
+- [x] Progress integrated into git2 fetch operations
+- [x] Progress integrated into tar creation (file processing)
+- [x] Progress integrated into LFS downloads
+- [x] Progress integrated into submodule fetching
+- [x] `OutgoingNotification` type for MCP progress notifications
+- [x] `write_notification` method on transport
+
+**Note:** Infrastructure is in place. Full real-time MCP notification streaming requires
+async/sync bridging refactoring (sync git2 operations with async transport).
+Progress is currently logged and reported via callbacks.
+
+**Files:**
+
+- `src/mcp/progress.rs` — Progress types and sender
+- `src/mcp/protocol.rs` — `OutgoingNotification` type
+- `src/mcp/transport.rs` — `write_notification` method
+- `src/git2_ops/auth.rs` — `create_callbacks_with_progress`
+- `src/git2_ops/clone.rs` — `FetchOptions2.progress`
+- `src/streaming/tar.rs` — `TarOptions.progress`
+- `src/mcp/tools/repo_clone.rs` — `handle_repo_clone_with_progress`
+
+---
+
+### 5.7 Diff/Patch Tool ✅ IMPLEMENTED
+
+**Goal:** Get diff between two commits without full clone.
+
+```rust
+#[derive(Deserialize)]
+pub struct RepoDiffArgs {
+    pub url: String,
+    pub base_commit: String,
+    pub head_commit: String,
+}
+
+#[derive(Serialize)]
+pub struct RepoDiffResult {
+    pub diff: String,  // Unified diff format
+    pub stats: DiffStats,
+    pub base_commit: String,   // Resolved full SHA
+    pub head_commit: String,   // Resolved full SHA
+}
+```
+
+**Tool:** `repo/diff`
+
+**Use case:** AI wants to review changes between commits.
+
+---
+
+### 5.8 Branch/Tag Listing ✅ IMPLEMENTED
+
+**Goal:** List branches and tags without full clone.
+
+```rust
+#[derive(Deserialize)]
+pub struct RepoRefsArgs {
+    pub url: String,
+}
+
+#[derive(Serialize)]
+pub struct RepoRefsResult {
+    pub branches: Vec<RefInfo>,
+    pub tags: Vec<RefInfo>,
+    pub default_branch: String,
+    pub total_refs: usize,
+}
+```
+
+**Tool:** `repo/refs`
+
+**Use case:** AI wants to know available branches before cloning.
 
 ---
 
 ## Success Metrics
 
-| Metric | Tier 1 | Tier 2 |
+| Metric | Tier 1 ✅ | Tier 2 ✅ |
 |--------|--------|--------|
 | Files on user's disk | None | None |
 | Credentials to AI | **NEVER** | **NEVER** |
 | Data through user's PC | Yes (RAM) | Yes (chunked) |
 | Clone 100 files | < 5s | < 5s |
 | Memory for large repo | O(repo) | O(chunk) |
+
+**Both tiers are now implemented!**
 
 ---
 

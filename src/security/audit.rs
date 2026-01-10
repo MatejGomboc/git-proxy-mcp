@@ -55,6 +55,12 @@ pub enum AuditEventType {
 
     /// Server stopped.
     ServerStopped,
+
+    /// Tier 1 repo/clone operation.
+    RepoClone,
+
+    /// Tier 1 repo/push operation.
+    RepoPush,
 }
 
 /// Reason for server shutdown.
@@ -110,6 +116,26 @@ pub struct AuditEvent {
     /// Reason for server shutdown (if server stopped event).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shutdown_reason: Option<ShutdownReason>,
+
+    /// Repository URL (sanitised, for Tier 1 operations).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+
+    /// Branch name (for Tier 1 operations).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+
+    /// Commit SHA (for Tier 1 operations).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub commit: Option<String>,
+
+    /// Number of files (for repo/clone).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_count: Option<usize>,
+
+    /// Archive size in bytes (for repo/clone).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub archive_size: Option<usize>,
 }
 
 impl AuditEvent {
@@ -127,6 +153,11 @@ impl AuditEvent {
             duration_ms: None,
             exit_code: None,
             shutdown_reason: None,
+            url: None,
+            branch: None,
+            commit: None,
+            file_count: None,
+            archive_size: None,
         }
     }
 
@@ -145,19 +176,16 @@ impl AuditEvent {
             AuditOutcome::Failed
         };
 
-        Self {
-            timestamp: Self::current_timestamp(),
-            event_type: AuditEventType::CommandExecuted,
-            command: Some(command.into()),
-            args: Some(args),
-            working_dir,
-            outcome,
-            reason: None,
-            #[allow(clippy::cast_possible_truncation)] // Duration in ms fits in u64
-            duration_ms: Some(duration.as_millis() as u64),
-            exit_code: Some(exit_code),
-            shutdown_reason: None,
+        let mut event = Self::new(AuditEventType::CommandExecuted, outcome);
+        event.command = Some(command.into());
+        event.args = Some(args);
+        event.working_dir = working_dir;
+        #[allow(clippy::cast_possible_truncation)] // Duration in ms fits in u64
+        {
+            event.duration_ms = Some(duration.as_millis() as u64);
         }
+        event.exit_code = Some(exit_code);
+        event
     }
 
     /// Creates an event for a blocked command.
@@ -168,18 +196,12 @@ impl AuditEvent {
         working_dir: Option<PathBuf>,
         reason: impl Into<String>,
     ) -> Self {
-        Self {
-            timestamp: Self::current_timestamp(),
-            event_type: AuditEventType::CommandBlocked,
-            command: Some(command.into()),
-            args: Some(args),
-            working_dir,
-            outcome: AuditOutcome::Blocked,
-            reason: Some(reason.into()),
-            duration_ms: None,
-            exit_code: None,
-            shutdown_reason: None,
-        }
+        let mut event = Self::new(AuditEventType::CommandBlocked, AuditOutcome::Blocked);
+        event.command = Some(command.into());
+        event.args = Some(args);
+        event.working_dir = working_dir;
+        event.reason = Some(reason.into());
+        event
     }
 
     /// Creates an event for rate limit exceeded.
@@ -189,18 +211,12 @@ impl AuditEvent {
         args: Vec<String>,
         working_dir: Option<PathBuf>,
     ) -> Self {
-        Self {
-            timestamp: Self::current_timestamp(),
-            event_type: AuditEventType::RateLimitExceeded,
-            command: Some(command.into()),
-            args: Some(args),
-            working_dir,
-            outcome: AuditOutcome::Blocked,
-            reason: Some("Rate limit exceeded".to_string()),
-            duration_ms: None,
-            exit_code: None,
-            shutdown_reason: None,
-        }
+        let mut event = Self::new(AuditEventType::RateLimitExceeded, AuditOutcome::Blocked);
+        event.command = Some(command.into());
+        event.args = Some(args);
+        event.working_dir = working_dir;
+        event.reason = Some("Rate limit exceeded".to_string());
+        event
     }
 
     /// Creates an event for server start.
@@ -214,6 +230,88 @@ impl AuditEvent {
     pub fn server_stopped(reason: ShutdownReason) -> Self {
         let mut event = Self::new(AuditEventType::ServerStopped, AuditOutcome::Success);
         event.shutdown_reason = Some(reason);
+        event
+    }
+
+    /// Creates an event for a successful repo/clone operation.
+    #[must_use]
+    pub fn repo_clone_success(
+        url: impl Into<String>,
+        branch: impl Into<String>,
+        commit: impl Into<String>,
+        file_count: usize,
+        archive_size: usize,
+        duration: Duration,
+    ) -> Self {
+        let mut event = Self::new(AuditEventType::RepoClone, AuditOutcome::Success);
+        event.url = Some(url.into());
+        event.branch = Some(branch.into());
+        event.commit = Some(commit.into());
+        event.file_count = Some(file_count);
+        event.archive_size = Some(archive_size);
+        #[allow(clippy::cast_possible_truncation)]
+        {
+            event.duration_ms = Some(duration.as_millis() as u64);
+        }
+        event
+    }
+
+    /// Creates an event for a failed repo/clone operation.
+    #[must_use]
+    pub fn repo_clone_failed(url: impl Into<String>, reason: impl Into<String>) -> Self {
+        let mut event = Self::new(AuditEventType::RepoClone, AuditOutcome::Failed);
+        event.url = Some(url.into());
+        event.reason = Some(reason.into());
+        event
+    }
+
+    /// Creates an event for a blocked repo/clone operation.
+    #[must_use]
+    pub fn repo_clone_blocked(url: impl Into<String>, reason: impl Into<String>) -> Self {
+        let mut event = Self::new(AuditEventType::RepoClone, AuditOutcome::Blocked);
+        event.url = Some(url.into());
+        event.reason = Some(reason.into());
+        event
+    }
+
+    /// Creates an event for a successful repo/push operation.
+    #[must_use]
+    pub fn repo_push_success(
+        url: impl Into<String>,
+        branch: impl Into<String>,
+        commit: impl Into<String>,
+        force: bool,
+        duration: Duration,
+    ) -> Self {
+        let mut event = Self::new(AuditEventType::RepoPush, AuditOutcome::Success);
+        event.url = Some(url.into());
+        event.branch = Some(branch.into());
+        event.commit = Some(commit.into());
+        if force {
+            event.reason = Some("force push".to_string());
+        }
+        #[allow(clippy::cast_possible_truncation)]
+        {
+            event.duration_ms = Some(duration.as_millis() as u64);
+        }
+        event
+    }
+
+    /// Creates an event for a failed repo/push operation.
+    #[must_use]
+    pub fn repo_push_failed(url: impl Into<String>, reason: impl Into<String>) -> Self {
+        let mut event = Self::new(AuditEventType::RepoPush, AuditOutcome::Failed);
+        event.url = Some(url.into());
+        event.reason = Some(reason.into());
+        event
+    }
+
+    /// Creates an event for a blocked repo/push operation.
+    #[must_use]
+    pub fn repo_push_blocked(url: impl Into<String>, reason: impl Into<String>) -> Self {
+        let mut event = Self::new(AuditEventType::RepoPush, AuditOutcome::Blocked);
+        event.url = Some(url.into());
+        event.reason = Some(reason.into());
         event
     }
 
@@ -559,5 +657,124 @@ mod tests {
         let event = AuditEvent::server_stopped(ShutdownReason::SigInt);
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains("\"shutdown_reason\":\"sig_int\""));
+    }
+
+    #[test]
+    fn audit_event_repo_clone_success() {
+        let event = AuditEvent::repo_clone_success(
+            "https://github.com/owner/repo.git",
+            "main",
+            "abc123def",
+            100,
+            50000,
+            Duration::from_millis(2000),
+        );
+
+        assert_eq!(event.event_type, AuditEventType::RepoClone);
+        assert_eq!(event.outcome, AuditOutcome::Success);
+        assert_eq!(
+            event.url,
+            Some("https://github.com/owner/repo.git".to_string())
+        );
+        assert_eq!(event.branch, Some("main".to_string()));
+        assert_eq!(event.commit, Some("abc123def".to_string()));
+        assert_eq!(event.file_count, Some(100));
+        assert_eq!(event.archive_size, Some(50000));
+        assert_eq!(event.duration_ms, Some(2000));
+    }
+
+    #[test]
+    fn audit_event_repo_clone_failed() {
+        let event = AuditEvent::repo_clone_failed(
+            "https://github.com/owner/repo.git",
+            "authentication failed",
+        );
+
+        assert_eq!(event.event_type, AuditEventType::RepoClone);
+        assert_eq!(event.outcome, AuditOutcome::Failed);
+        assert_eq!(event.reason, Some("authentication failed".to_string()));
+    }
+
+    #[test]
+    fn audit_event_repo_clone_blocked() {
+        let event = AuditEvent::repo_clone_blocked(
+            "https://github.com/owner/repo.git",
+            "repository not in allowlist",
+        );
+
+        assert_eq!(event.event_type, AuditEventType::RepoClone);
+        assert_eq!(event.outcome, AuditOutcome::Blocked);
+        assert_eq!(
+            event.reason,
+            Some("repository not in allowlist".to_string())
+        );
+    }
+
+    #[test]
+    fn audit_event_repo_push_success() {
+        let event = AuditEvent::repo_push_success(
+            "https://github.com/owner/repo.git",
+            "feature",
+            "def456ghi",
+            false,
+            Duration::from_millis(1500),
+        );
+
+        assert_eq!(event.event_type, AuditEventType::RepoPush);
+        assert_eq!(event.outcome, AuditOutcome::Success);
+        assert_eq!(
+            event.url,
+            Some("https://github.com/owner/repo.git".to_string())
+        );
+        assert_eq!(event.branch, Some("feature".to_string()));
+        assert_eq!(event.commit, Some("def456ghi".to_string()));
+        assert!(event.reason.is_none()); // No force push
+    }
+
+    #[test]
+    fn audit_event_repo_push_force() {
+        let event = AuditEvent::repo_push_success(
+            "https://github.com/owner/repo.git",
+            "feature",
+            "def456ghi",
+            true, // force push
+            Duration::from_millis(1500),
+        );
+
+        assert_eq!(event.reason, Some("force push".to_string()));
+    }
+
+    #[test]
+    fn audit_event_repo_push_blocked() {
+        let event = AuditEvent::repo_push_blocked(
+            "https://github.com/owner/repo.git",
+            "force push to protected branch",
+        );
+
+        assert_eq!(event.event_type, AuditEventType::RepoPush);
+        assert_eq!(event.outcome, AuditOutcome::Blocked);
+        assert_eq!(
+            event.reason,
+            Some("force push to protected branch".to_string())
+        );
+    }
+
+    #[test]
+    fn audit_event_tier1_serialization() {
+        let event = AuditEvent::repo_clone_success(
+            "https://github.com/owner/repo.git",
+            "main",
+            "abc123",
+            50,
+            10000,
+            Duration::from_secs(1),
+        );
+
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"event_type\":\"repo_clone\""));
+        assert!(json.contains("\"outcome\":\"success\""));
+        assert!(json.contains("\"url\":\"https://github.com/owner/repo.git\""));
+        assert!(json.contains("\"branch\":\"main\""));
+        assert!(json.contains("\"file_count\":50"));
     }
 }
