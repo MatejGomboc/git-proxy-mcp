@@ -26,28 +26,11 @@ git-proxy-mcp acts as an **authenticated streaming proxy** between Git providers
 
 ```mermaid
 flowchart LR
-    subgraph providers["Git Providers"]
-        GitHub
-        GitLab
-        Bitbucket
-        Azure["Azure DevOps"]
-        Self["Self-hosted"]
-    end
+    Git["Git Providers\n(GitHub, GitLab, etc.)"]
+    MCP["YOUR PC\ngit-proxy-mcp\n(credentials stay here)"]
+    AI["AI's VM\n/home/claude/repo/\n(files live here)"]
 
-    subgraph pc["YOUR PC - MCP Server"]
-        MCP["git-proxy-mcp"]
-        Creds["Credentials stay here"]
-    end
-
-    subgraph ai["AI's VM"]
-        Claude["Claude.ai"]
-        Repo["/home/claude/repo/"]
-    end
-
-    providers <--> MCP
-    MCP <--> Claude
-    MCP --- Creds
-    Claude --- Repo
+    Git <--> MCP <--> AI
 ```
 
 **Key insight:** The AI has its own VM with full Linux capabilities. It just can't authenticate to your private repos. We solve *only* that problem.
@@ -96,36 +79,20 @@ flowchart LR
 
 ```mermaid
 flowchart TB
-    subgraph pc["YOUR PC - credentials stay here, files don't"]
-        subgraph mcp["git-proxy-mcp"]
-            Auth["Auth callbacks"]
-            Stream["Object streaming"]
-            NoStore["No file storage"]
-        end
-
-        subgraph config["Git Configuration"]
-            GitConfig["~/.gitconfig"]
-            SSH["SSH keys via ssh-agent"]
-            CredHelper["Credential helpers"]
-            OSStore["OS credential store"]
-        end
-
-        mcp <--> config
+    subgraph pc["YOUR PC (credentials stay here)"]
+        MCP["git-proxy-mcp\nAuth callbacks | Object streaming | No file storage"]
+        Config["Git config: ~/.gitconfig, ssh-agent, credential helpers"]
+        MCP <--> Config
     end
 
-    subgraph aivm["AI's VM - files live here, credentials don't"]
-        subgraph repo["/home/claude/repo/"]
-            Git[".git/"]
-            Src["src/"]
-            Cargo["Cargo.toml"]
-        end
-
-        Workflow["AI workflow: branch, edit, test, commit"]
-        repo --- Workflow
+    subgraph ai["AI's VM (files live here)"]
+        Repo["/home/claude/repo/\n.git/ | src/ | Cargo.toml"]
+        Work["AI workflow: branch, edit, test, commit"]
+        Repo --- Work
     end
 
-    mcp -->|"Streaming: files/patches"| aivm
-    aivm -->|"Bundles for push"| mcp
+    MCP -->|"files/patches"| Repo
+    Repo -->|"bundles"| MCP
 ```
 
 ### What Flows Where
