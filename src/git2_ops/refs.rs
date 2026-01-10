@@ -11,6 +11,7 @@
 
 use git2::{Direction, Repository};
 use serde::Serialize;
+use tempfile::TempDir;
 use tracing::{debug, info};
 
 use super::auth::{create_callbacks, sanitize_url_for_logging, validate_url};
@@ -74,9 +75,9 @@ pub fn list_remote_refs(url: &str) -> Result<RefsResult, Git2Error> {
     // Validate URL
     validate_url(url)?;
 
-    // Create a temporary in-memory repository for the remote connection
-    let temp_path = std::env::temp_dir().join(format!("git-proxy-refs-{}", std::process::id()));
-    let repo = Repository::init_bare(&temp_path)?;
+    // Create a temporary repository for the remote connection (auto-cleaned on drop)
+    let temp_dir = TempDir::new().map_err(Git2Error::TempDirFailed)?;
+    let repo = Repository::init_bare(temp_dir.path())?;
 
     let (mut branches, mut tags, default_branch, head_oid) = {
         // Create remote with callbacks in a scope so it gets dropped before repo
@@ -143,9 +144,9 @@ pub fn list_remote_refs(url: &str) -> Result<RefsResult, Git2Error> {
 
     let total_refs = branches.len() + tags.len();
 
-    // Clean up the temporary directory
+    // Clean up: drop repo first, then temp_dir cleans itself
     drop(repo);
-    let _ = std::fs::remove_dir_all(temp_path);
+    drop(temp_dir);
 
     info!(
         branches = branches.len(),

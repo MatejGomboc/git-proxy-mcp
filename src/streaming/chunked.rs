@@ -200,6 +200,14 @@ impl StreamingSession {
         data: Vec<u8>,
         chunk_size: usize,
     ) -> Result<Self, std::io::Error> {
+        // Validate chunk_size to prevent division by zero
+        if chunk_size == 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "chunk_size must be greater than zero",
+            ));
+        }
+
         let data_size = data.len();
         let storage = SessionStorage::new(data)?;
         let num_chunks = data_size.div_ceil(chunk_size);
@@ -772,5 +780,22 @@ mod tests {
 
         session.get_chunk(2);
         assert!((session.progress() - 100.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn streaming_session_rejects_zero_chunk_size() {
+        let data = vec![0u8; 100];
+        let result = StreamingSession::new(
+            "test".to_string(),
+            "url".to_string(),
+            "main".to_string(),
+            "abc123".to_string(),
+            data,
+            0, // Zero chunk_size should fail
+        );
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
     }
 }

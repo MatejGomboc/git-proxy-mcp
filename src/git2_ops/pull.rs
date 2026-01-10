@@ -25,7 +25,7 @@ use git2::{Delta, DiffFormat, DiffOptions, FetchOptions, Oid, Repository, TreeWa
 use serde::Serialize;
 use tar::{Builder, Header};
 use tempfile::TempDir;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use super::auth::{create_callbacks, sanitize_url_for_logging, validate_url};
 use super::error::Git2Error;
@@ -256,6 +256,7 @@ pub fn pull_changes(url: &str, branch: &str, since_commit: &str) -> Result<PullR
                 .to_string();
 
             if path.is_empty() {
+                debug!(delta_idx = delta_idx, "delta has no path, skipping");
                 continue;
             }
 
@@ -413,7 +414,7 @@ fn create_files_archive(
                 header.set_cksum();
 
                 if let Err(e) = tar.append_data(&mut header, &path, content) {
-                    debug!(path = %path, error = %e, "failed to add file to archive");
+                    warn!(path = %path, error = %e, "failed to add file to archive, file will be missing");
                 }
             }
 
