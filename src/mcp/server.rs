@@ -240,13 +240,13 @@ pub struct GitIdentity {
 impl GitIdentity {
     /// Returns true if both name and email are set.
     #[must_use]
-    pub fn is_configured(&self) -> bool {
+    pub const fn is_configured(&self) -> bool {
         self.name.is_some() && self.email.is_some()
     }
 
     /// Returns true if at least one field is set.
     #[must_use]
-    pub fn is_partial(&self) -> bool {
+    pub const fn is_partial(&self) -> bool {
         self.name.is_some() || self.email.is_some()
     }
 }
@@ -543,7 +543,7 @@ impl McpServer {
         // Include git identity if configured (for AI to use when creating commits)
         if self.git_identity.is_partial() {
             result["gitIdentity"] =
-                serde_json::to_value(&self.git_identity).unwrap_or_else(|_| json!(null));
+                serde_json::to_value(&self.git_identity).unwrap_or(Value::Null);
         }
 
         Ok(JsonRpcResponse::success(req.id.clone(), result))
