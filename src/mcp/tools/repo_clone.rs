@@ -45,6 +45,16 @@ pub struct RepoCloneArgs {
     /// Sparse checkout paths — only include files matching these patterns
     #[serde(default)]
     pub sparse: Option<Vec<String>>,
+
+    /// Exclude binary files (files with null bytes or mostly non-printable chars).
+    /// Useful for AI code review where only source code is needed.
+    #[serde(default)]
+    pub exclude_binary: Option<bool>,
+
+    /// Maximum file size in bytes. Files larger than this are skipped.
+    /// Useful for excluding large generated files or assets.
+    #[serde(default)]
+    pub max_file_size: Option<usize>,
 }
 
 /// Result of a successful `repo/clone` operation.
@@ -64,6 +74,25 @@ pub struct RepoCloneResult {
 
     /// Size of the archive in bytes (before base64 encoding)
     pub archive_size: usize,
+
+    /// Number of files skipped by sparse filter (if any)
+    #[serde(skip_serializing_if = "is_zero")]
+    pub skipped_by_filter: usize,
+
+    /// Number of binary files skipped (when `exclude_binary` is true)
+    #[serde(skip_serializing_if = "is_zero")]
+    pub skipped_binary: usize,
+
+    /// Number of files skipped due to size limit (when `max_file_size` is set)
+    #[serde(skip_serializing_if = "is_zero")]
+    pub skipped_too_large: usize,
+}
+
+/// Helper for `skip_serializing_if` — skip if value is zero.
+#[allow(clippy::trivially_copy_pass_by_ref)] // serde requires &T for skip_serializing_if
+#[allow(clippy::missing_const_for_fn)] // serde skip_serializing_if doesn't need const
+fn is_zero(n: &usize) -> bool {
+    *n == 0
 }
 
 /// Error from repo/clone operation (safe for display).
@@ -129,6 +158,12 @@ pub fn handle_repo_clone(args: RepoCloneArgs) -> Result<RepoCloneResult, RepoClo
     if let Some(ref sparse) = args.sparse {
         debug!(patterns = ?sparse, "sparse checkout requested");
     }
+    if args.exclude_binary == Some(true) {
+        debug!("binary file exclusion enabled");
+    }
+    if let Some(max_size) = args.max_file_size {
+        debug!(max_size = max_size, "max file size limit set");
+    }
 
     // Fetch into bare repository
     let fetch_opts = FetchOptions2 {
@@ -144,9 +179,11 @@ pub fn handle_repo_clone(args: RepoCloneArgs) -> Result<RepoCloneResult, RepoClo
         "fetch complete, creating tar"
     );
 
-    // Create tar.gz from tree (in memory), with optional sparse filtering
+    // Create tar.gz from tree (in memory), with optional filtering
     let tar_opts = TarOptions {
         sparse_patterns: args.sparse,
+        exclude_binary: args.exclude_binary,
+        max_file_size: args.max_file_size,
     };
 
     let tar_result =
@@ -156,6 +193,9 @@ pub fn handle_repo_clone(args: RepoCloneArgs) -> Result<RepoCloneResult, RepoClo
         file_count = tar_result.file_count,
         compressed_size = tar_result.data.len(),
         uncompressed_size = tar_result.uncompressed_size,
+        skipped_by_filter = tar_result.skipped_by_filter,
+        skipped_binary = tar_result.skipped_binary,
+        skipped_too_large = tar_result.skipped_too_large,
         "tar creation complete"
     );
 
@@ -176,6 +216,9 @@ pub fn handle_repo_clone(args: RepoCloneArgs) -> Result<RepoCloneResult, RepoClo
         branch: fetch_result.branch,
         file_count: tar_result.file_count,
         archive_size: tar_result.data.len(),
+        skipped_by_filter: tar_result.skipped_by_filter,
+        skipped_binary: tar_result.skipped_binary,
+        skipped_too_large: tar_result.skipped_too_large,
     })
 }
 
@@ -208,10 +251,45 @@ mod tests {
             branch: "main".to_string(),
             file_count: 10,
             archive_size: 1024,
+            skipped_by_filter: 0,
+            skipped_binary: 0,
+            skipped_too_large: 0,
         };
         let json = serde_json::to_string(&result).unwrap();
         assert!(json.contains("\"archive\":\"SGVsbG8=\""));
         assert!(json.contains("\"file_count\":10"));
+        // Zero skipped counts should not be serialized
+        assert!(!json.contains("skipped"));
+    }
+
+    #[test]
+    fn repo_clone_result_serializes_skipped_counts() {
+        let result = RepoCloneResult {
+            archive: "SGVsbG8=".to_string(),
+            commit: "abc123".to_string(),
+            branch: "main".to_string(),
+            file_count: 10,
+            archive_size: 1024,
+            skipped_by_filter: 5,
+            skipped_binary: 3,
+            skipped_too_large: 2,
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("\"skipped_by_filter\":5"));
+        assert!(json.contains("\"skipped_binary\":3"));
+        assert!(json.contains("\"skipped_too_large\":2"));
+    }
+
+    #[test]
+    fn repo_clone_args_with_filtering() {
+        let json = r#"{
+            "url": "https://github.com/owner/repo.git",
+            "exclude_binary": true,
+            "max_file_size": 1048576
+        }"#;
+        let args: RepoCloneArgs = serde_json::from_str(json).unwrap();
+        assert_eq!(args.exclude_binary, Some(true));
+        assert_eq!(args.max_file_size, Some(1048576));
     }
 
     // Integration tests that require network access are in tests/

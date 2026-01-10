@@ -528,7 +528,7 @@ pub struct StreamingSession {
 
 ---
 
-### 5.5 Binary File Filtering
+### 5.5 Binary File Filtering ✅ IMPLEMENTED
 
 **Goal:** Option to exclude binary files from clone.
 
@@ -541,7 +541,19 @@ pub struct RepoCloneArgs {
     pub exclude_binary: Option<bool>,  // Skip binary files
     pub max_file_size: Option<usize>,  // Skip files larger than N bytes
 }
+
+#[derive(Serialize)]
+pub struct RepoCloneResult {
+    // ... existing fields ...
+    pub skipped_by_filter: usize,   // Files skipped by sparse filter
+    pub skipped_binary: usize,      // Binary files skipped
+    pub skipped_too_large: usize,   // Files exceeding size limit
+}
 ```
+
+**Tool:** `repo/clone` (enhanced)
+
+**Binary detection:** Files containing null bytes or >30% non-printable characters are considered binary (similar to Git's internal heuristic).
 
 ---
 

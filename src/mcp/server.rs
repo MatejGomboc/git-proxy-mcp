@@ -656,12 +656,20 @@ impl McpServer {
                         },
                         "depth": {
                             "type": "integer",
-                            "description": "Shallow clone depth (not yet implemented)"
+                            "description": "Shallow clone depth (1 = only latest commit)"
                         },
                         "sparse": {
                             "type": "array",
                             "items": {"type": "string"},
-                            "description": "Sparse checkout paths (not yet implemented)"
+                            "description": "Sparse checkout patterns (glob syntax, e.g., 'src/**/*.rs')"
+                        },
+                        "exclude_binary": {
+                            "type": "boolean",
+                            "description": "Exclude binary files (files with null bytes or mostly non-printable chars). Useful for AI code review."
+                        },
+                        "max_file_size": {
+                            "type": "integer",
+                            "description": "Maximum file size in bytes. Files larger than this are skipped. Useful for excluding large assets."
                         }
                     },
                     "required": ["url"]

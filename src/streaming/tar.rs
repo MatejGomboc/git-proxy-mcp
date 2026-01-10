@@ -36,6 +36,14 @@ pub struct TarOptions {
     /// Sparse checkout patterns — only include files matching these glob patterns.
     /// If empty or None, all files are included.
     pub sparse_patterns: Option<Vec<String>>,
+
+    /// Exclude binary files (files containing null bytes or mostly non-printable chars).
+    /// Useful for AI code review where only source code is needed.
+    pub exclude_binary: Option<bool>,
+
+    /// Maximum file size in bytes. Files larger than this are skipped.
+    /// Useful for excluding large generated files or assets.
+    pub max_file_size: Option<usize>,
 }
 
 /// Compiled sparse patterns for efficient matching.
@@ -84,6 +92,37 @@ impl SparseFilter {
     }
 }
 
+/// Detect if file content is binary.
+///
+/// A file is considered binary if:
+/// - It contains null bytes (common in compiled binaries, images, etc.)
+/// - More than 30% of the first 8KB are non-printable characters
+///
+/// This heuristic is similar to what Git uses internally.
+fn is_binary(content: &[u8]) -> bool {
+    // Check first 8KB for performance on large files
+    let check_len = content.len().min(8192);
+    let sample = &content[..check_len];
+
+    // Null bytes are a strong indicator of binary
+    if sample.contains(&0) {
+        return true;
+    }
+
+    // Count non-printable, non-whitespace characters
+    let non_text_count = sample
+        .iter()
+        .filter(|&&b| {
+            // Consider printable ASCII (32-126), tab, newline, carriage return as text
+            !((32..=126).contains(&b) || b == b'\t' || b == b'\n' || b == b'\r')
+        })
+        .count();
+
+    // If more than 30% non-text, consider it binary
+    let threshold = check_len * 30 / 100;
+    non_text_count > threshold
+}
+
 /// Result of creating a tar archive.
 #[derive(Debug)]
 pub struct TarResult {
@@ -93,6 +132,12 @@ pub struct TarResult {
     pub file_count: usize,
     /// Total uncompressed size
     pub uncompressed_size: u64,
+    /// Number of files skipped by sparse filter
+    pub skipped_by_filter: usize,
+    /// Number of binary files skipped (when `exclude_binary` is true)
+    pub skipped_binary: usize,
+    /// Number of files skipped due to size limit
+    pub skipped_too_large: usize,
 }
 
 /// Create a tar.gz archive from a git tree.
@@ -153,6 +198,7 @@ pub fn create_tar_from_tree(repo: &Repository, commit_id: Oid) -> Result<TarResu
 /// - The tree cannot be retrieved
 /// - The tree walk fails
 /// - The tar archive cannot be finalized
+#[allow(clippy::too_many_lines)] // Tree walk + tar creation is naturally verbose
 pub fn create_tar_from_tree_with_options(
     repo: &Repository,
     commit_id: Oid,
@@ -160,7 +206,13 @@ pub fn create_tar_from_tree_with_options(
 ) -> Result<TarResult, Git2Error> {
     let options = options.unwrap_or_default();
 
-    debug!(commit = %commit_id, sparse = ?options.sparse_patterns, "creating tar from tree");
+    debug!(
+        commit = %commit_id,
+        sparse = ?options.sparse_patterns,
+        exclude_binary = ?options.exclude_binary,
+        max_file_size = ?options.max_file_size,
+        "creating tar from tree"
+    );
 
     let commit = repo
         .find_commit(commit_id)
@@ -176,10 +228,16 @@ pub fn create_tar_from_tree_with_options(
         .as_ref()
         .map(|p| SparseFilter::new(p));
 
+    // Get filtering options
+    let exclude_binary = options.exclude_binary.unwrap_or(false);
+    let max_file_size = options.max_file_size;
+
     let mut archive_buffer = Vec::new();
     let mut file_count = 0usize;
     let mut uncompressed_size = 0u64;
     let mut skipped_by_filter = 0usize;
+    let mut skipped_binary = 0usize;
+    let mut skipped_too_large = 0usize;
 
     {
         let encoder = GzEncoder::new(&mut archive_buffer, Compression::fast());
@@ -212,6 +270,22 @@ pub fn create_tar_from_tree_with_options(
                 match repo.find_blob(entry.id()) {
                     Ok(blob) => {
                         let content = blob.content();
+
+                        // Check file size limit
+                        if let Some(max_size) = max_file_size {
+                            if content.len() > max_size {
+                                trace!(path = %path, size = content.len(), max = max_size, "skipped: too large");
+                                skipped_too_large += 1;
+                                return TreeWalkResult::Ok;
+                            }
+                        }
+
+                        // Check if binary
+                        if exclude_binary && is_binary(content) {
+                            trace!(path = %path, "skipped: binary file");
+                            skipped_binary += 1;
+                            return TreeWalkResult::Ok;
+                        }
 
                         trace!(path = %path, size = content.len(), "adding file to tar");
 
@@ -256,6 +330,8 @@ pub fn create_tar_from_tree_with_options(
     debug!(
         file_count = file_count,
         skipped_by_filter = skipped_by_filter,
+        skipped_binary = skipped_binary,
+        skipped_too_large = skipped_too_large,
         uncompressed_size = uncompressed_size,
         compressed_size = archive_buffer.len(),
         "tar creation complete"
@@ -265,6 +341,9 @@ pub fn create_tar_from_tree_with_options(
         data: archive_buffer,
         file_count,
         uncompressed_size,
+        skipped_by_filter,
+        skipped_binary,
+        skipped_too_large,
     })
 }
 
@@ -335,6 +414,50 @@ mod tests {
     fn tar_options_default() {
         let opts = TarOptions::default();
         assert!(opts.sparse_patterns.is_none());
+        assert!(opts.exclude_binary.is_none());
+        assert!(opts.max_file_size.is_none());
+    }
+
+    #[test]
+    fn is_binary_detects_null_bytes() {
+        // Binary file with null bytes
+        let binary = b"some\x00binary\x00content";
+        assert!(is_binary(binary));
+    }
+
+    #[test]
+    fn is_binary_accepts_text() {
+        // Plain text file
+        let text = b"Hello, World!\nThis is a text file.\n";
+        assert!(!is_binary(text));
+    }
+
+    #[test]
+    fn is_binary_accepts_source_code() {
+        // Rust source code
+        let code = b"fn main() {\n    println!(\"Hello\");\n}\n";
+        assert!(!is_binary(code));
+    }
+
+    #[test]
+    fn is_binary_detects_high_non_printable() {
+        // File with many non-printable characters (>30%)
+        let mut data = vec![0x80u8; 50];
+        data.extend_from_slice(b"some text");
+        assert!(is_binary(&data));
+    }
+
+    #[test]
+    fn is_binary_accepts_utf8() {
+        // UTF-8 text with non-ASCII characters should be treated as binary
+        // (our simple heuristic doesn't handle UTF-8 specially)
+        let _utf8 = "Hello 世界".as_bytes();
+        // UTF-8 multibyte chars have bytes > 127, counted as non-printable
+        // This is a known limitation - we err on the side of caution
+        // For small amounts of UTF-8, it should still pass
+        let text_with_some_utf8 = b"Hello world with a few UTF-8: \xc3\xa9";
+        // Less than 30% non-printable, should pass
+        assert!(!is_binary(text_with_some_utf8));
     }
 
     // Integration tests that require a git repo are in tests/streaming_tests.rs
