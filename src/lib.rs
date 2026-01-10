@@ -14,16 +14,20 @@
 //!
 //! Credentials NEVER leave the user's PC. Only file contents flow to the AI.
 //!
-//! ## Tier 1: Memory Buffer (Current)
+//! ## Tier 1: Single-Response Streaming
 //!
 //! - Clone: Fetch to bare repo, stream tree as tar.gz (in memory)
 //! - Push: Receive bundle, authenticated push
 //! - Memory usage: O(repo size)
+//! - Tools: `repo/clone`, `repo/push`
 //!
-//! ## Tier 2: Chunked Streaming (Future)
+//! ## Tier 2: Chunked Streaming
 //!
 //! - Stream in chunks for large repos
 //! - Memory usage: O(chunk size)
+//! - Resume interrupted transfers
+//! - Progress reporting
+//! - Tools: `repo/clone_start`, `repo/clone_chunk`, `repo/clone_cancel`
 //!
 //! # Credential Handling
 //!

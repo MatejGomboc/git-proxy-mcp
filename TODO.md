@@ -435,6 +435,164 @@ strace -f -e write cargo run 2>&1 | grep -v /tmp
 
 ---
 
+## Phase 5: Future Enhancements (Planned)
+
+### 5.1 Incremental Sync (`repo/pull`)
+
+**Goal:** Sync new changes from remote to AI's workspace without re-cloning.
+
+```rust
+#[derive(Deserialize)]
+pub struct RepoPullArgs {
+    pub url: String,
+    pub branch: String,
+    pub since_commit: String,  // Base commit AI already has
+}
+
+#[derive(Serialize)]
+pub struct RepoPullResult {
+    pub patch: String,         // Base64 patch/bundle of changes
+    pub new_commit: String,
+    pub files_changed: usize,
+}
+```
+
+**Use case:** AI has repo from earlier clone, needs to fetch latest changes without re-downloading entire repo.
+
+**Implementation approach:**
+
+- [ ] Fetch new commits since `since_commit`
+- [ ] Generate patch/bundle of delta
+- [ ] Stream delta to AI (smaller than full clone)
+
+---
+
+### 5.2 LFS Support
+
+**Goal:** Handle Git LFS files transparently.
+
+**Challenges:**
+
+- LFS files are pointers, not actual content
+- Need to fetch from LFS server with credentials
+- Large binary files may need chunked streaming
+
+**Implementation approach:**
+
+- [ ] Detect LFS pointers in tree walk
+- [ ] Fetch LFS objects via authenticated API
+- [ ] Include real content in tar (not pointers)
+
+---
+
+### 5.3 Submodule Support
+
+**Goal:** Clone repositories with submodules.
+
+**Implementation approach:**
+
+- [ ] Detect `.gitmodules` in tree
+- [ ] Recursively fetch submodule repos
+- [ ] Include submodule contents in tar at correct paths
+
+---
+
+### 5.4 Disk-Backed Chunked Sessions (Optimization)
+
+**Goal:** Reduce memory pressure for very large repos.
+
+**Current:** Tier 2 holds entire tar.gz in memory across chunks.
+
+**Proposed:** Write tar.gz to temp file, read chunks from disk.
+
+```rust
+// In streaming/chunked.rs
+pub struct StreamingSession {
+    // Current: data: Vec<u8>
+    // Future: data_file: Option<tempfile::NamedTempFile>
+}
+```
+
+**Benefits:**
+
+- Memory usage: O(chunk size) instead of O(archive size)
+- Can handle repos larger than available RAM
+
+---
+
+### 5.5 Binary File Filtering
+
+**Goal:** Option to exclude binary files from clone.
+
+**Use case:** AI only needs source code, not images/binaries.
+
+```rust
+#[derive(Deserialize)]
+pub struct RepoCloneArgs {
+    // ... existing fields ...
+    pub exclude_binary: Option<bool>,  // Skip binary files
+    pub max_file_size: Option<usize>,  // Skip files larger than N bytes
+}
+```
+
+---
+
+### 5.6 Progress Callbacks
+
+**Goal:** Real-time progress during long operations.
+
+**Implementation approach:**
+
+- [ ] Use MCP notifications for progress updates
+- [ ] Report: bytes transferred, files processed, estimated time
+
+---
+
+### 5.7 Diff/Patch Tool
+
+**Goal:** Get diff between two commits without full clone.
+
+```rust
+#[derive(Deserialize)]
+pub struct RepoDiffArgs {
+    pub url: String,
+    pub base_commit: String,
+    pub head_commit: String,
+}
+
+#[derive(Serialize)]
+pub struct RepoDiffResult {
+    pub diff: String,  // Unified diff format
+    pub stats: DiffStats,
+}
+```
+
+**Use case:** AI wants to review changes between commits.
+
+---
+
+### 5.8 Branch/Tag Listing
+
+**Goal:** List branches and tags without full clone.
+
+```rust
+#[derive(Deserialize)]
+pub struct RepoRefsArgs {
+    pub url: String,
+}
+
+#[derive(Serialize)]
+pub struct RepoRefsResult {
+    pub branches: Vec<RefInfo>,
+    pub tags: Vec<RefInfo>,
+    pub default_branch: String,
+}
+```
+
+**Use case:** AI wants to know available branches before cloning.
+
+---
+
 ## Success Metrics
 
 | Metric | Tier 1 ✅ | Tier 2 ✅ |
