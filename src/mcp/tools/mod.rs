@@ -8,6 +8,7 @@
 //! ## Tier 1 (Single Response)
 //!
 //! - [`repo_clone`] — Clone a repository and stream as tar.gz
+//! - [`repo_diff`] — Get diff between two commits
 //! - [`repo_push`] — Push a git bundle to a remote repository
 //! - [`repo_refs`] — List branches and tags without cloning
 //!
@@ -26,6 +27,7 @@
 pub mod repo_clone;
 pub mod repo_clone_chunk;
 pub mod repo_clone_start;
+pub mod repo_diff;
 pub mod repo_push;
 pub mod repo_refs;
 
@@ -35,5 +37,6 @@ pub use repo_clone_chunk::{
     RepoCloneChunkArgs, RepoCloneChunkResult,
 };
 pub use repo_clone_start::{handle_repo_clone_start, RepoCloneStartArgs, RepoCloneStartResult};
+pub use repo_diff::{handle_repo_diff, RepoDiffArgs, RepoDiffResult};
 pub use repo_push::{handle_repo_push, RepoPushArgs, RepoPushResult};
 pub use repo_refs::{handle_repo_refs, RepoRefsArgs, RepoRefsResult};

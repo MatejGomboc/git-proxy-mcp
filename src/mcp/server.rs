@@ -52,8 +52,8 @@ use crate::security::{
 };
 use crate::mcp::tools::{
     handle_repo_clone, handle_repo_clone_cancel, handle_repo_clone_chunk, handle_repo_clone_start,
-    handle_repo_push, handle_repo_refs, RepoCloneCancelArgs, RepoCloneArgs, RepoCloneChunkArgs,
-    RepoCloneStartArgs, RepoPushArgs, RepoRefsArgs,
+    handle_repo_diff, handle_repo_push, handle_repo_refs, RepoCloneCancelArgs, RepoCloneArgs,
+    RepoCloneChunkArgs, RepoCloneStartArgs, RepoDiffArgs, RepoPushArgs, RepoRefsArgs,
 };
 use crate::streaming::chunked::StreamingSessionManager;
 
@@ -554,6 +554,7 @@ impl McpServer {
             "repo/clone" => self.call_repo_clone_tool(&params.arguments),
             "repo/push" => self.call_repo_push_tool(&params.arguments),
             "repo/refs" => self.call_repo_refs_tool(&params.arguments),
+            "repo/diff" => self.call_repo_diff_tool(&params.arguments),
             // Tier 2: Chunked streaming tools
             "repo/clone_start" => self.call_repo_clone_start_tool(&params.arguments),
             "repo/clone_chunk" => self.call_repo_clone_chunk_tool(&params.arguments),
@@ -797,6 +798,35 @@ impl McpServer {
                         }
                     },
                     "required": ["url"]
+                }),
+            },
+            // Generate diff between commits
+            ToolDefinition {
+                name: "repo/diff".to_string(),
+                description: Some(
+                    "Generate a unified diff between two commits from a remote repository. \
+                     Returns the diff text and statistics (files changed, insertions, deletions). \
+                     Use this to review changes between commits, branches, or tags without \
+                     downloading the entire repository content."
+                        .to_string(),
+                ),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "url": {
+                            "type": "string",
+                            "description": "Repository URL (https:// or git@)"
+                        },
+                        "base_commit": {
+                            "type": "string",
+                            "description": "Base commit reference (SHA, branch name, tag, or relative ref like HEAD~5)"
+                        },
+                        "head_commit": {
+                            "type": "string",
+                            "description": "Head commit reference (SHA, branch name, tag, or relative ref)"
+                        }
+                    },
+                    "required": ["url", "base_commit", "head_commit"]
                 }),
             },
         ]
@@ -1334,6 +1364,75 @@ impl McpServer {
                     url = %sanitized_url,
                     error = %e,
                     "repo/refs failed"
+                );
+                ToolCallResult::error(e.to_string())
+            }
+        }
+    }
+
+    /// Calls the `repo/diff` tool.
+    ///
+    /// Generates a unified diff between two commits from a remote repository.
+    fn call_repo_diff_tool(&self, arguments: &Value) -> ToolCallResult {
+        use crate::git2_ops::auth::sanitize_url_for_logging;
+
+        // Parse arguments
+        let args: RepoDiffArgs = match serde_json::from_value(arguments.clone()) {
+            Ok(a) => a,
+            Err(e) => {
+                return ToolCallResult::error(format!("Invalid arguments: {e}"));
+            }
+        };
+
+        let sanitized_url = sanitize_url_for_logging(&args.url);
+
+        // Check rate limiter
+        if !self.rate_limiter.try_acquire() {
+            self.audit_logger.log_silent(&AuditEvent::repo_clone_blocked(
+                &sanitized_url,
+                "rate limit exceeded",
+            ));
+            return ToolCallResult::error(
+                "Rate limit exceeded. Please wait before sending more requests.",
+            );
+        }
+
+        // Check repo filter
+        if let Some(reason) = self
+            .repo_filter
+            .check("diff", std::slice::from_ref(&args.url))
+            .reason()
+        {
+            self.audit_logger
+                .log_silent(&AuditEvent::repo_clone_blocked(&sanitized_url, reason));
+            return ToolCallResult::error(reason.to_string());
+        }
+
+        // Execute the diff generation
+        let start = Instant::now();
+        match handle_repo_diff(args) {
+            Ok(result) => {
+                let duration = start.elapsed();
+                tracing::info!(
+                    url = %sanitized_url,
+                    files = result.stats.files_changed,
+                    insertions = result.stats.insertions,
+                    deletions = result.stats.deletions,
+                    duration_ms = duration.as_millis(),
+                    "repo/diff complete"
+                );
+
+                // Return the result as JSON text
+                match serde_json::to_string_pretty(&result) {
+                    Ok(json) => ToolCallResult::text(json),
+                    Err(e) => ToolCallResult::error(format!("Failed to serialize result: {e}")),
+                }
+            }
+            Err(e) => {
+                tracing::warn!(
+                    url = %sanitized_url,
+                    error = %e,
+                    "repo/diff failed"
                 );
                 ToolCallResult::error(e.to_string())
             }

@@ -548,7 +548,7 @@ pub struct RepoCloneArgs {
 
 ---
 
-### 5.7 Diff/Patch Tool
+### 5.7 Diff/Patch Tool ✅ IMPLEMENTED
 
 **Goal:** Get diff between two commits without full clone.
 
@@ -564,8 +564,12 @@ pub struct RepoDiffArgs {
 pub struct RepoDiffResult {
     pub diff: String,  // Unified diff format
     pub stats: DiffStats,
+    pub base_commit: String,   // Resolved full SHA
+    pub head_commit: String,   // Resolved full SHA
 }
 ```
+
+**Tool:** `repo/diff`
 
 **Use case:** AI wants to review changes between commits.
 
