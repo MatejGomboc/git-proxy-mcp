@@ -1,6 +1,6 @@
-# Architecture: git-proxy-mcp v2
+# Architecture: git-proxy-mcp
 
-This document describes the v2 architecture — a pure streaming credential proxy.
+This document describes the architecture — a pure streaming credential proxy.
 
 ## Core Principle: ZERO FILE STORAGE
 
@@ -11,8 +11,7 @@ This is the fundamental design principle that distinguishes git-proxy-mcp from o
 | Approach | Files on User's Disk |
 |----------|---------------------|
 | Git CLI | Full working tree |
-| v1 git-proxy-mcp | Full clone (then deleted) |
-| **v2 git-proxy-mcp** | **NONE** |
+| **git-proxy-mcp** | **NONE** |
 
 ## How Zero-Storage Works
 
@@ -204,11 +203,11 @@ For large repositories, Tier 1 may buffer too much data in memory. Tier 2 solves
 
 ### Credential Security
 
-Same as before — credentials never stored, git2 callbacks only.
+Credentials never stored, git2 callbacks only.
 
 ### Data Security
 
-**Stronger than v1:**
+**Key security benefits:**
 
 - Source files never on user's disk, even temporarily
 - If MCP server crashes, no source files left behind
@@ -269,15 +268,3 @@ All providers work automatically via:
 
 - **SSH**: ssh-agent (private key never leaves agent)
 - **HTTPS**: System credential helpers (macOS Keychain, Windows Credential Manager, libsecret)
-
-## Comparison: v1 vs v2
-
-| Aspect | v1 | v2 |
-|--------|----|----|  
-| Git library | CLI subprocess | git2 (in-process) |
-| Clone method | Full checkout | Bare repo, tree walk |
-| Files on disk | Yes (temp) | No (objects only) |
-| Working tree | Created, then deleted | Never created |
-| Tar creation | From disk files | From git objects |
-| Memory usage | Lower | Higher |
-| Security | Good | Better (no files) |
