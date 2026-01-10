@@ -55,11 +55,13 @@ This is the fundamental design principle that distinguishes git-proxy-mcp from o
 ### The Key Insight: Bare Repositories
 
 A **bare repository** contains:
+
 - Git objects (commits, trees, blobs) — compressed, deduplicated
 - References (branches, tags)
 - NO working tree (no checked-out files)
 
 We use bare repos because:
+
 1. `git2::Repository::init_bare()` — no working directory created
 2. We can fetch objects from remotes
 3. We can walk trees and read blob contents
@@ -159,6 +161,7 @@ Same as before — credentials never stored, git2 callbacks only.
 ### Data Security
 
 **Stronger than v1:**
+
 - Source files never on user's disk, even temporarily
 - If MCP server crashes, no source files left behind
 - Nothing to clean up, nothing to leak
@@ -166,6 +169,7 @@ Same as before — credentials never stored, git2 callbacks only.
 ### Audit Trail
 
 All operations logged (without credentials), showing:
+
 - Repository URL (sanitized)
 - Branch
 - Commit SHA

@@ -2,7 +2,9 @@
 
 **Your Git credentials stay on your machine. Your repo lives in the AI's workspace.**
 
-A secure MCP server that lets cloud-based AI assistants (Claude.ai, ChatGPT, Gemini, etc.) work with private Git repositories using your existing Git credentials — without those credentials ever leaving your machine.
+A secure MCP server that lets cloud-based AI assistants (Claude.ai, ChatGPT, Gemini, etc.)
+work with private Git repositories using your existing Git credentials — without those
+credentials ever leaving your machine.
 
 ---
 

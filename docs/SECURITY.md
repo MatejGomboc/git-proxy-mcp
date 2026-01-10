@@ -196,7 +196,7 @@ pub fn sanitize_url(url: &str) -> String {
 
 ## Secure Coding Guidelines
 
-### DO:
+### DO
 
 ```rust
 // ✅ Use system credential helpers
@@ -218,7 +218,7 @@ if path.starts_with("..") {
 Err("Authentication failed. Check your credential configuration.")
 ```
 
-### DON'T:
+### DON'T
 
 ```rust
 // ❌ Store credentials
