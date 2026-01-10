@@ -161,9 +161,13 @@ impl AuditEvent {
         }
     }
 
-    /// Creates an event for a successfully executed command.
+    /// Creates an event for an executed command.
+    ///
+    /// The outcome is determined by the exit code:
+    /// - `exit_code == 0` → `AuditOutcome::Success`
+    /// - `exit_code != 0` → `AuditOutcome::Failed`
     #[must_use]
-    pub fn command_success(
+    pub fn command_executed(
         command: impl Into<String>,
         args: Vec<String>,
         working_dir: Option<PathBuf>,
@@ -526,8 +530,8 @@ mod tests {
     use tempfile::NamedTempFile;
 
     #[test]
-    fn audit_event_command_success() {
-        let event = AuditEvent::command_success(
+    fn audit_event_command_executed_success() {
+        let event = AuditEvent::command_executed(
             "clone",
             vec!["https://github.com/user/repo.git".to_string()],
             None,
@@ -543,13 +547,14 @@ mod tests {
     }
 
     #[test]
-    fn audit_event_command_failed() {
-        let event = AuditEvent::command_success(
+    fn audit_event_command_executed_failure() {
+        // Non-zero exit code should result in Failed outcome
+        let event = AuditEvent::command_executed(
             "push",
             vec!["origin".to_string(), "main".to_string()],
             None,
             Duration::from_millis(500),
-            1,
+            1, // Non-zero exit code
         );
 
         assert_eq!(event.outcome, AuditOutcome::Failed);
@@ -580,7 +585,7 @@ mod tests {
 
     #[test]
     fn audit_event_serialization() {
-        let event = AuditEvent::command_success("status", vec![], None, Duration::from_secs(1), 0);
+        let event = AuditEvent::command_executed("status", vec![], None, Duration::from_secs(1), 0);
 
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains("\"event_type\":\"command_executed\""));

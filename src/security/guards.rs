@@ -104,8 +104,7 @@ impl BranchGuard {
 
         // Check for wildcard patterns (e.g., "release/*")
         for pattern in &self.protected_branches {
-            if pattern.ends_with('*') {
-                let prefix = &pattern[..pattern.len() - 1];
+            if let Some(prefix) = pattern.strip_suffix('*') {
                 if branch.starts_with(prefix) {
                     return true;
                 }
@@ -380,36 +379,33 @@ impl RepoFilter {
     }
 
     /// Normalises a repository URL for comparison.
+    /// Uses UTF-8 safe string operations throughout.
     fn normalise_url(url: &str) -> String {
         let mut normalised = url.to_lowercase();
 
-        // Remove protocol
-        if let Some(pos) = normalised.find("://") {
-            normalised = normalised[pos + 3..].to_string();
+        // Remove protocol (using split for UTF-8 safety)
+        if let Some((_scheme, rest)) = normalised.split_once("://") {
+            normalised = rest.to_string();
         }
 
         // Handle SSH URLs in git@host:path format
         // Convert git@github.com:user/repo to github.com/user/repo
-        if normalised.starts_with("git@") {
-            normalised = normalised[4..].to_string();
+        if let Some(rest) = normalised.strip_prefix("git@") {
             // Replace first : with / (separates host from path in SSH URLs)
-            if let Some(colon_pos) = normalised.find(':') {
-                normalised.replace_range(colon_pos..=colon_pos, "/");
-            }
-        } else if let Some(at_pos) = normalised.find('@') {
+            normalised = rest.replacen(':', "/", 1);
+        } else if let Some((_creds, rest)) = normalised.split_once('@') {
             // Remove credentials if present (user:pass@host format)
-            normalised = normalised[at_pos + 1..].to_string();
+            normalised = rest.to_string();
         }
 
-        // Remove .git suffix (case-insensitive)
-        if normalised.len() >= 4 && normalised[normalised.len() - 4..].eq_ignore_ascii_case(".git")
-        {
-            normalised.truncate(normalised.len() - 4);
+        // Remove .git suffix (case-insensitive, UTF-8 safe)
+        if let Some(without_git) = normalised.strip_suffix(".git") {
+            normalised = without_git.to_string();
         }
 
         // Remove trailing slash
-        if normalised.ends_with('/') {
-            normalised.pop();
+        if let Some(without_slash) = normalised.strip_suffix('/') {
+            normalised = without_slash.to_string();
         }
 
         normalised

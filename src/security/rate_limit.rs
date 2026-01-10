@@ -178,6 +178,9 @@ impl RateLimiter {
 
         if current_tokens >= 1.0 {
             Duration::ZERO
+        } else if self.refill_rate <= 0.0 {
+            // No refill rate means tokens will never be available
+            Duration::MAX
         } else {
             let tokens_needed = 1.0 - current_tokens;
             let seconds = tokens_needed / self.refill_rate;
@@ -415,5 +418,19 @@ mod tests {
         let stats = limiter.stats();
 
         assert!((stats.block_rate() - 0.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn rate_limiter_zero_refill_time_until_available() {
+        let limiter = RateLimiter::new(1, 0.0);
+
+        // With tokens available, should be zero
+        assert_eq!(limiter.time_until_available(), Duration::ZERO);
+
+        // Exhaust tokens
+        limiter.try_acquire();
+
+        // With zero refill rate, should return Duration::MAX
+        assert_eq!(limiter.time_until_available(), Duration::MAX);
     }
 }

@@ -132,7 +132,7 @@ fn test_repo_filter_normalises_urls() {
 
 #[test]
 fn test_audit_event_does_not_contain_credentials() {
-    let event = AuditEvent::command_success(
+    let event = AuditEvent::command_executed(
         "clone",
         vec!["https://github.com/user/repo.git".to_string()],
         None,
