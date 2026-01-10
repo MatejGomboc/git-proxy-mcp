@@ -113,8 +113,11 @@ pub fn parse_gitmodules(content: &[u8]) -> HashMap<String, SubmoduleInfo> {
                 );
             }
 
-            // Parse new section name
-            let inner = &line[1..line.len() - 1];
+            // Parse new section name - use strip methods for safe slicing
+            let inner = line
+                .strip_prefix('[')
+                .and_then(|s| s.strip_suffix(']'))
+                .unwrap_or("");
             if let Some(name) = inner.strip_prefix("submodule \"") {
                 if let Some(name) = name.strip_suffix('"') {
                     current_name = Some(name.to_string());
