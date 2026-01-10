@@ -76,7 +76,7 @@ pub struct RepoPullResult {
     pub up_to_date: bool,
 }
 
-/// Error from repo_pull operation (safe for display).
+/// Error from `repo_pull` operation (safe for display).
 #[derive(Debug)]
 pub struct RepoPullError {
     /// Error message (credential-safe)

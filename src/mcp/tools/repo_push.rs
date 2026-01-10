@@ -60,7 +60,7 @@ pub struct RepoPushResult {
     pub remote_url: String,
 }
 
-/// Error from repo_push operation (safe for display).
+/// Error from `repo_push` operation (safe for display).
 #[derive(Debug)]
 pub struct RepoPushError {
     /// Error message (credential-safe)

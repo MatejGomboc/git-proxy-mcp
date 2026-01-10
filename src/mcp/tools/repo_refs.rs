@@ -48,7 +48,7 @@ pub struct RepoRefsResult {
     pub total_refs: usize,
 }
 
-/// Error from repo_refs operation (safe for display).
+/// Error from `repo_refs` operation (safe for display).
 #[derive(Debug)]
 pub struct RepoRefsError {
     /// Error message (credential-safe)

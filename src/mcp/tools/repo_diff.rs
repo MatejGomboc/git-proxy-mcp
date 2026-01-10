@@ -56,7 +56,7 @@ pub struct RepoDiffResult {
     pub head_commit: String,
 }
 
-/// Error from repo_diff operation (safe for display).
+/// Error from `repo_diff` operation (safe for display).
 #[derive(Debug)]
 pub struct RepoDiffError {
     /// Error message (credential-safe)

@@ -123,7 +123,7 @@ fn is_zero(n: &usize) -> bool {
     *n == 0
 }
 
-/// Error from repo_clone operation (safe for display).
+/// Error from `repo_clone` operation (safe for display).
 #[derive(Debug)]
 pub struct RepoCloneError {
     /// Error message (credential-safe)
