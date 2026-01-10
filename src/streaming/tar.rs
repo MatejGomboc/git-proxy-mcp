@@ -161,6 +161,8 @@ pub struct TarResult {
     pub skipped_binary: usize,
     /// Number of files skipped due to size limit
     pub skipped_too_large: usize,
+    /// Number of files skipped due to path being too long for tar header
+    pub skipped_path_too_long: usize,
     /// Number of LFS pointers resolved (when `resolve_lfs` is true)
     pub lfs_resolved: usize,
     /// Number of LFS pointers that failed to resolve
@@ -296,6 +298,7 @@ pub fn create_tar_from_tree_with_options(
     let mut skipped_by_filter = 0usize;
     let mut skipped_binary = 0usize;
     let mut skipped_too_large = 0usize;
+    let mut skipped_path_too_long = 0usize;
     let mut lfs_resolved = 0usize;
     let mut lfs_failed = 0usize;
     let mut submodules_included = 0usize;
@@ -395,8 +398,9 @@ pub fn create_tar_from_tree_with_options(
                         // Create tar header
                         let mut header = tar::Header::new_gnu();
                         if header.set_path(&path).is_err() {
-                            // Path too long, try to handle gracefully
+                            // Path too long for tar header (>100 chars without extension)
                             debug!(path = %path, "path too long for tar, skipping");
+                            skipped_path_too_long += 1;
                             return TreeWalkResult::Ok;
                         }
                         header.set_size(content.len() as u64);
@@ -526,6 +530,7 @@ pub fn create_tar_from_tree_with_options(
                                         let mut header = tar::Header::new_gnu();
                                         if header.set_path(&full_path).is_err() {
                                             debug!(path = %full_path, "submodule path too long for tar");
+                                            skipped_path_too_long += 1;
                                             return TreeWalkResult::Ok;
                                         }
                                         header.set_size(content.len() as u64);
@@ -590,6 +595,7 @@ pub fn create_tar_from_tree_with_options(
         skipped_by_filter = skipped_by_filter,
         skipped_binary = skipped_binary,
         skipped_too_large = skipped_too_large,
+        skipped_path_too_long = skipped_path_too_long,
         lfs_resolved = lfs_resolved,
         lfs_failed = lfs_failed,
         submodules_included = submodules_included,
@@ -606,6 +612,7 @@ pub fn create_tar_from_tree_with_options(
         skipped_by_filter,
         skipped_binary,
         skipped_too_large,
+        skipped_path_too_long,
         lfs_resolved,
         lfs_failed,
         submodules_included,
