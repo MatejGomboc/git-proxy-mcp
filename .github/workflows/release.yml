@@ -89,7 +89,7 @@ jobs:
                       artifact: git-proxy-mcp-linux-x86_64
                       binary: git-proxy-mcp
 
-                    - os: macos-latest
+                    - os: macos-13
                       target: x86_64-apple-darwin
                       artifact: git-proxy-mcp-macos-x86_64
                       binary: git-proxy-mcp
