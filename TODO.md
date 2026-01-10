@@ -537,26 +537,34 @@ pub struct RepoCloneResult {
 
 ---
 
-### 5.4 Disk-Backed Chunked Sessions (Optimization)
+### 5.4 Disk-Backed Chunked Sessions ✅ IMPLEMENTED
 
 **Goal:** Reduce memory pressure for very large repos.
 
-**Current:** Tier 2 holds entire tar.gz in memory across chunks.
+**Implementation:**
 
-**Proposed:** Write tar.gz to temp file, read chunks from disk.
+- [x] `SessionStorage` enum with Memory and File variants
+- [x] Automatic disk-backed storage for archives > 10MB (`DISK_THRESHOLD`)
+- [x] `NamedTempFile` for automatic cleanup when session is dropped
+- [x] Random access file I/O via `Seek` and `Read` traits
+- [x] Updated `StreamingSession` to use `SessionStorage` internally
+- [x] Transparent to API consumers (no public interface change)
 
 ```rust
 // In streaming/chunked.rs
-pub struct StreamingSession {
-    // Current: data: Vec<u8>
-    // Future: data_file: Option<tempfile::NamedTempFile>
+pub const DISK_THRESHOLD: usize = 10 * 1024 * 1024; // 10MB
+
+enum SessionStorage {
+    Memory(Vec<u8>),  // For small archives
+    File { file: NamedTempFile, size: usize },  // For large archives
 }
 ```
 
 **Benefits:**
 
-- Memory usage: O(chunk size) instead of O(archive size)
+- Memory usage: O(chunk size) instead of O(archive size) for large repos
 - Can handle repos larger than available RAM
+- Automatic temp file cleanup via `NamedTempFile` Drop
 
 ---
 

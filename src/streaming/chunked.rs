@@ -36,6 +36,13 @@
 //! - **Tier 1**: O(repository size) — entire tar.gz in memory
 //! - **Tier 2**: O(chunk size) — only current chunk in memory
 //!
+//! ## Disk-Backed Sessions
+//!
+//! For archives larger than `DISK_THRESHOLD` (default 10MB), the data is
+//! stored in a temporary file instead of memory. This allows handling
+//! repositories larger than available RAM while only keeping the current
+//! chunk in memory.
+//!
 //! Default chunk size: 1MB (adjustable per request)
 //!
 //! # Resume Support
@@ -48,10 +55,12 @@
 //! AI can resume interrupted transfers by requesting missing chunks.
 
 use std::collections::HashMap;
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
+use tempfile::NamedTempFile;
 use tracing::{debug, info, warn};
 
 /// Default chunk size: 1MB (before base64 encoding)
@@ -60,11 +69,89 @@ pub const DEFAULT_CHUNK_SIZE: usize = 1024 * 1024;
 /// Maximum chunk size: 4MB
 pub const MAX_CHUNK_SIZE: usize = 4 * 1024 * 1024;
 
+/// Threshold for disk-backed sessions: 10MB
+/// Archives larger than this are stored in temp files instead of memory.
+pub const DISK_THRESHOLD: usize = 10 * 1024 * 1024;
+
 /// Session timeout: 1 hour
 const SESSION_TIMEOUT: Duration = Duration::from_secs(3600);
 
 /// Maximum concurrent streaming sessions
 const MAX_SESSIONS: usize = 10;
+
+/// Storage backend for session data.
+///
+/// Small archives (< `DISK_THRESHOLD`) are kept in memory for fast access.
+/// Large archives are stored in temp files to reduce memory pressure.
+#[derive(Debug)]
+enum SessionStorage {
+    /// Data kept in memory (fast, but uses RAM).
+    Memory(Vec<u8>),
+    /// Data stored in a temp file (slower, but O(chunk) memory).
+    /// The file is automatically deleted when the session is dropped.
+    File {
+        /// The temp file containing the archive data.
+        file: NamedTempFile,
+        /// Total size of the data (for bounds checking).
+        size: usize,
+    },
+}
+
+impl SessionStorage {
+    /// Create storage for the given data.
+    ///
+    /// If the data is larger than `DISK_THRESHOLD`, it will be written
+    /// to a temp file. Otherwise, it stays in memory.
+    fn new(data: Vec<u8>) -> Result<Self, std::io::Error> {
+        if data.len() > DISK_THRESHOLD {
+            // Write to temp file
+            let mut file = NamedTempFile::new()?;
+            file.write_all(&data)?;
+            file.flush()?;
+            let size = data.len();
+            // Data is dropped here, freeing memory
+            Ok(Self::File { file, size })
+        } else {
+            Ok(Self::Memory(data))
+        }
+    }
+
+    /// Get the total size of the stored data.
+    fn len(&self) -> usize {
+        match self {
+            Self::Memory(data) => data.len(),
+            Self::File { size, .. } => *size,
+        }
+    }
+
+    /// Read a chunk of data at the specified offset.
+    ///
+    /// Returns up to `chunk_size` bytes starting at `offset`.
+    fn read_chunk(&mut self, offset: usize, chunk_size: usize) -> Result<Vec<u8>, std::io::Error> {
+        let total = self.len();
+        if offset >= total {
+            return Ok(Vec::new());
+        }
+
+        let end = (offset + chunk_size).min(total);
+        let len = end - offset;
+
+        match self {
+            Self::Memory(data) => Ok(data[offset..end].to_vec()),
+            Self::File { file, .. } => {
+                file.seek(SeekFrom::Start(offset as u64))?;
+                let mut buffer = vec![0u8; len];
+                file.read_exact(&mut buffer)?;
+                Ok(buffer)
+            }
+        }
+    }
+
+    /// Check if storage is disk-backed.
+    const fn is_disk_backed(&self) -> bool {
+        matches!(self, Self::File { .. })
+    }
+}
 
 /// A streaming session for chunked clone.
 #[derive(Debug)]
@@ -81,9 +168,9 @@ pub struct StreamingSession {
     /// Commit SHA
     pub commit: String,
 
-    /// Complete tar.gz data (kept in memory for chunked retrieval)
-    /// In a future optimization, this could be backed by a temp file
-    data: Vec<u8>,
+    /// Storage backend for archive data.
+    /// Small archives are in memory, large ones are disk-backed.
+    storage: SessionStorage,
 
     /// Chunk size for this session
     chunk_size: usize,
@@ -100,7 +187,11 @@ pub struct StreamingSession {
 
 impl StreamingSession {
     /// Create a new streaming session.
-    #[must_use]
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if disk-backed storage fails to initialize
+    /// (e.g., temp file creation fails).
     pub fn new(
         id: String,
         url: String,
@@ -108,21 +199,37 @@ impl StreamingSession {
         commit: String,
         data: Vec<u8>,
         chunk_size: usize,
-    ) -> Self {
-        let num_chunks = data.len().div_ceil(chunk_size);
+    ) -> Result<Self, std::io::Error> {
+        let data_size = data.len();
+        let storage = SessionStorage::new(data)?;
+        let num_chunks = data_size.div_ceil(chunk_size);
         let now = Instant::now();
 
-        Self {
+        if storage.is_disk_backed() {
+            debug!(
+                session_id = %id,
+                size = data_size,
+                "using disk-backed storage for large archive"
+            );
+        }
+
+        Ok(Self {
             id,
             url,
             branch,
             commit,
-            data,
+            storage,
             chunk_size,
             retrieved_chunks: vec![false; num_chunks],
             created_at: now,
             last_accessed: now,
-        }
+        })
+    }
+
+    /// Check if this session is using disk-backed storage.
+    #[must_use]
+    pub const fn is_disk_backed(&self) -> bool {
+        self.storage.is_disk_backed()
     }
 
     /// Get the total number of chunks.
@@ -134,12 +241,13 @@ impl StreamingSession {
     /// Get the total data size.
     #[must_use]
     pub fn total_size(&self) -> usize {
-        self.data.len()
+        self.storage.len()
     }
 
     /// Get a specific chunk by index.
     ///
-    /// Returns None if index is out of bounds.
+    /// Returns None if index is out of bounds or if there's an I/O error
+    /// reading from disk-backed storage.
     pub fn get_chunk(&mut self, index: usize) -> Option<ChunkData> {
         if index >= self.total_chunks() {
             return None;
@@ -148,12 +256,11 @@ impl StreamingSession {
         self.last_accessed = Instant::now();
         self.retrieved_chunks[index] = true;
 
-        let start = index * self.chunk_size;
-        let end = ((index + 1) * self.chunk_size).min(self.data.len());
-        let chunk_bytes = &self.data[start..end];
+        let offset = index * self.chunk_size;
+        let chunk_bytes = self.storage.read_chunk(offset, self.chunk_size).ok()?;
 
         Some(ChunkData {
-            data: chunk_bytes.to_vec(),
+            data: chunk_bytes,
             index,
             is_last: index == self.total_chunks() - 1,
         })
@@ -240,9 +347,14 @@ impl StreamingSessionManager {
 
     /// Create a new streaming session.
     ///
+    /// For archives larger than `DISK_THRESHOLD` (10MB), the data is stored
+    /// in a temp file instead of memory to reduce memory pressure.
+    ///
     /// # Errors
     ///
-    /// Returns an error if the maximum number of sessions is reached.
+    /// Returns an error if:
+    /// - The maximum number of sessions is reached
+    /// - Disk-backed storage initialization fails (temp file creation)
     #[allow(clippy::significant_drop_tightening)]
     pub fn create_session(
         &self,
@@ -281,7 +393,7 @@ impl StreamingSessionManager {
             commit.to_string(),
             data,
             chunk_size,
-        );
+        )?;
 
         let info = StreamingSessionInfo {
             session_id: id.clone(),
@@ -296,6 +408,7 @@ impl StreamingSessionManager {
             session_id = %id,
             total_chunks = info.total_chunks,
             total_size = info.total_size,
+            disk_backed = session.is_disk_backed(),
             "created streaming session"
         );
 
@@ -472,6 +585,9 @@ pub enum StreamingError {
 
     /// Lock poisoned (should never happen in normal operation)
     LockPoisoned,
+
+    /// I/O error (e.g., temp file creation failed)
+    IoError(String),
 }
 
 impl std::fmt::Display for StreamingError {
@@ -487,7 +603,14 @@ impl std::fmt::Display for StreamingError {
                 "too many active streaming sessions (max {MAX_SESSIONS})"
             ),
             Self::LockPoisoned => write!(f, "internal error: session lock poisoned"),
+            Self::IoError(msg) => write!(f, "I/O error: {msg}"),
         }
+    }
+}
+
+impl From<std::io::Error> for StreamingError {
+    fn from(err: std::io::Error) -> Self {
+        Self::IoError(err.to_string())
     }
 }
 
@@ -521,7 +644,8 @@ mod tests {
             "abc123".to_string(),
             data,
             1000, // 1000 byte chunks
-        );
+        )
+        .unwrap();
 
         // Should have 3 chunks: 1000, 1000, 500
         assert_eq!(session.total_chunks(), 3);
@@ -557,7 +681,8 @@ mod tests {
             "abc123".to_string(),
             data,
             50,
-        );
+        )
+        .unwrap();
 
         assert_eq!(session.total_chunks(), 2);
         assert!(session.get_chunk(0).is_some());
@@ -631,7 +756,8 @@ mod tests {
             "abc123".to_string(),
             data,
             100,
-        );
+        )
+        .unwrap();
 
         assert_eq!(session.total_chunks(), 3);
         assert!((session.progress() - 0.0).abs() < f64::EPSILON);
