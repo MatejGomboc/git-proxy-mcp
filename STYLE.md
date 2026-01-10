@@ -34,7 +34,6 @@ Avoid duplicating information across files. Each piece of information should hav
 | British spelling | `CONTRIBUTING.md` § British Spelling |
 | PR requirements | `CONTRIBUTING.md` § Pull Requests |
 | Security policy | `SECURITY.md` |
-| Development roadmap | `TODO.md` |
 | Formatting rules | `.editorconfig` |
 
 **Guidelines:**

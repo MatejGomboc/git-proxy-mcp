@@ -284,10 +284,11 @@ impl ProgressSender {
     ///
     /// Returns true if the update was sent, false if rate-limited or channel closed.
     ///
-    /// # Panics
+    /// # Mutex Poisoning
     ///
-    /// Panics if the internal mutex is poisoned (only happens if another thread
-    /// panicked while holding the lock).
+    /// If the internal mutex is poisoned (a thread panicked while holding the lock),
+    /// this method recovers gracefully by extracting the inner value and continuing.
+    /// A warning is logged when this occurs.
     #[must_use]
     pub fn send(&self, update: ProgressUpdate) -> bool {
         // Always send Complete updates
@@ -295,7 +296,12 @@ impl ProgressSender {
 
         if !is_complete {
             // Rate limit non-complete updates
-            let mut last_sent = self.last_sent.lock().unwrap();
+            let mut last_sent = self.last_sent.lock().unwrap_or_else(|poisoned| {
+                tracing::warn!(
+                    "Progress sender mutex was poisoned; recovering with potentially stale state"
+                );
+                poisoned.into_inner()
+            });
             if last_sent.elapsed() < MIN_PROGRESS_INTERVAL {
                 return false;
             }

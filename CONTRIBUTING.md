@@ -283,7 +283,6 @@ When adding or modifying code that handles credentials:
 | `CONTRIBUTING.md` | This file — contributor guidelines |
 | `SECURITY.md` | Security policy and vulnerability reporting |
 | `CHANGELOG.md` | User-facing change history |
-| `TODO.md` | Development roadmap (internal) |
 | Rustdoc comments | API documentation |
 
 ### Updating Documentation
