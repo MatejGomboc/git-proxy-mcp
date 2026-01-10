@@ -76,32 +76,6 @@ git-proxy-mcp acts as an **authenticated streaming proxy** between Git providers
 
 ---
 
-## Features
-
-| Feature | Status |
-|---------|--------|
-| Streaming clone (repo → AI's VM) | ✅ Implemented |
-| Streaming push (AI's VM → repo) | ✅ Implemented |
-| Chunked streaming (large repos) | ✅ Implemented |
-| Shallow clone support | ✅ Implemented |
-| Sparse checkout | ✅ Implemented |
-| **Multi-provider support** | ✅ Implemented |
-| • GitHub | ✅ HTTPS + SSH |
-| • GitLab (cloud + self-hosted) | ✅ HTTPS + SSH |
-| • Bitbucket | ✅ HTTPS + SSH |
-| • Azure DevOps | ✅ HTTPS + SSH |
-| • Any Git server | ✅ Standard protocols |
-| SSH agent authentication | ✅ Implemented |
-| Credential helper authentication | ✅ Implemented |
-| Credential-free design | ✅ Core principle |
-| Audit logging | ✅ Implemented |
-| Rate limiting | ✅ Implemented |
-| Protected branch guards | ✅ Implemented |
-| Force push protection | ✅ Implemented |
-| Incremental sync (pull new changes) | ✅ Implemented |
-
----
-
 ## Architecture
 
 ### Security Model
@@ -300,8 +274,6 @@ List remote branches and tags.
 ---
 
 ## Installation
-
-> ⚠️ **v2 is under development.** See [Releases](https://github.com/MatejGomboc/git-proxy-mcp/releases) for current builds.
 
 ### Prerequisites
 
