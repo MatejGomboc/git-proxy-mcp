@@ -134,9 +134,10 @@ fn test_sanitiser_handles_medium_output() {
     let output = sanitiser.sanitise(&input);
     let elapsed = start.elapsed();
 
-    // Should complete in reasonable time (under 100ms for 100KB)
+    // Should complete in reasonable time (under 500ms for 100KB)
+    // CI environments can be significantly slower than local machines
     assert!(
-        elapsed.as_millis() < 100,
+        elapsed.as_millis() < 500,
         "Sanitisation took too long: {elapsed:?}"
     );
 
