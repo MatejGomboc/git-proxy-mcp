@@ -4,10 +4,10 @@
 
 See `docs/VISION.md` for the full architecture:
 
-| Tier | Data Flow | Status |
-|------|-----------|--------|
-| **Tier 1** | GitHub → MCP (RAM) → AI | Current focus |
-| **Tier 2** | GitHub → MCP (chunks) → AI | Target |
+| Tier | Data Flow |
+|------|-----------|
+| **Tier 1** | GitHub → MCP (RAM) → AI |
+| **Tier 2** | GitHub → MCP (chunks) → AI |
 
 **Core principle:** Credentials NEVER leave user's PC. Files stream through MCP to AI's VM.
 
@@ -84,14 +84,6 @@ src/
 ├── session.rs          # Session tracking
 └── security/           # Guards from v1
 ```
-
-## Status
-
-All planned features are implemented:
-
-- Tier 1 (memory streaming) ✅
-- Tier 2 (chunked streaming) ✅
-- LFS, submodules, incremental sync ✅
 
 ## Off Limits
 

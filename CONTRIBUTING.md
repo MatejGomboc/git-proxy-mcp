@@ -178,11 +178,11 @@ Use British spelling in all documentation and user-facing text:
 
 ### Security-Conscious Coding
 
-- The MCP server does NOT store credentials — it spawns git as a subprocess
+- The MCP server does NOT store credentials — it uses git2 credential callbacks
 - All git output is sanitised to remove accidentally leaked credentials
 - Never log, print, or include credentials in error messages
 - Review all error paths for potential credential leakage
-- Use `GIT_TERMINAL_PROMPT=0` to prevent interactive prompts
+- Repository files are never written to disk (bare repos + in-memory streaming)
 
 ---
 

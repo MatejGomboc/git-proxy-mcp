@@ -39,7 +39,7 @@ Repo files:  Stream through MCP → land in AI's VM
 
 ## Two Implementation Tiers
 
-### Tier 1: Single-Response Streaming ✅ IMPLEMENTED
+### Tier 1: Single-Response Streaming
 
 ```
 GitHub ──► MCP (buffer in RAM) ──► AI
@@ -55,7 +55,7 @@ GitHub ──► MCP (buffer in RAM) ──► AI
 
 **Use case:** Small to medium repos.
 
-### Tier 2: Chunked Streaming ✅ IMPLEMENTED
+### Tier 2: Chunked Streaming
 
 ```
 GitHub ──► MCP (small chunks) ──► AI
@@ -166,30 +166,16 @@ GitHub ──► MCP (small chunks) ──► AI
 
 ## MCP Tools
 
-| Tool | Description | Status |
-|------|-------------|--------|
-| `repo/clone` | Authenticated fetch, stream repo as tar.gz | ✅ Implemented |
-| `repo/push` | Receive bundle from AI, authenticated push | ✅ Implemented |
-| `repo/clone_start` | Start chunked clone for large repos | ✅ Implemented |
-| `repo/clone_chunk` | Get chunk from streaming session | ✅ Implemented |
-| `repo/clone_cancel` | Cancel streaming session | ✅ Implemented |
-| `repo/pull` | Stream delta of changes since last sync | ✅ Implemented |
-| `repo/diff` | Get diff between commits | ✅ Implemented |
-| `repo/refs` | List branches and tags | ✅ Implemented |
-
----
-
-## Implementation Roadmap
-
-| Phase | Focus | Status |
-|-------|-------|--------|
-| 1 | git2 integration, credential callbacks | ✅ Complete |
-| 2 | Bare repo fetch, in-memory tar streaming | ✅ Complete |
-| 3 | Push via bundle reception | ✅ Complete |
-| 4 | Chunked streaming for large repos | ✅ Complete |
-| 5 | Shallow clone, sparse checkout, multi-provider | ✅ Complete |
-| 6 | Incremental sync (`repo/pull`) | 🚧 Planned |
-| 7 | LFS support, submodules | 🚧 Planned |
+| Tool | Description |
+|------|-------------|
+| `repo/clone` | Authenticated fetch, stream repo as tar.gz |
+| `repo/push` | Receive bundle from AI, authenticated push |
+| `repo/clone_start` | Start chunked clone for large repos |
+| `repo/clone_chunk` | Get chunk from streaming session |
+| `repo/clone_cancel` | Cancel streaming session |
+| `repo/pull` | Stream delta of changes since last sync |
+| `repo/diff` | Get diff between commits |
+| `repo/refs` | List branches and tags |
 
 ---
 
@@ -200,7 +186,3 @@ GitHub ──► MCP (small chunks) ──► AI
 3. **Stream, don't buffer** — Chunked transfer for large repos (Tier 2)
 4. **Validate everything** — Security guards on push operations
 5. **Audit everything** — Log all operations (without credentials)
-
----
-
-*Both Tier 1 and Tier 2 are now implemented. The server is production-ready.*
