@@ -439,7 +439,7 @@ impl McpServer {
         let response = match req.method.as_str() {
             "initialize" => self.handle_initialize(&req),
             "tools/list" => self.handle_tools_list(&req),
-            "tools/call" => self.handle_tools_call(&req).await,
+            "tools/call" => self.handle_tools_call(&req),
             "ping" => Ok(Self::handle_ping(&req)),
             _ => Err(JsonRpcError::method_not_found(req.id.clone(), &req.method)),
         };
@@ -518,7 +518,7 @@ impl McpServer {
     }
 
     /// Handles the tools/call request.
-    async fn handle_tools_call(
+    fn handle_tools_call(
         &self,
         req: &JsonRpcRequest,
     ) -> Result<JsonRpcResponse, JsonRpcError> {
