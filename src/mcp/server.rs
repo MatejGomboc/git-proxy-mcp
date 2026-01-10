@@ -50,7 +50,12 @@ use crate::security::{
     AuditEvent, AuditLogger, BranchGuard, PushGuard, RateLimiter, RepoFilter, SecurityGuard,
     ShutdownReason,
 };
-use crate::mcp::tools::{handle_repo_clone, handle_repo_push, RepoCloneArgs, RepoPushArgs};
+use crate::mcp::tools::{
+    handle_repo_clone, handle_repo_clone_cancel, handle_repo_clone_chunk, handle_repo_clone_start,
+    handle_repo_push, RepoCloneCancelArgs, RepoCloneArgs, RepoCloneChunkArgs, RepoCloneStartArgs,
+    RepoPushArgs,
+};
+use crate::streaming::chunked::StreamingSessionManager;
 
 /// Server state in the MCP lifecycle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -238,6 +243,8 @@ pub struct McpServer {
     rate_limiter: RateLimiter,
     /// Audit logger.
     audit_logger: Arc<AuditLogger>,
+    /// Streaming session manager for Tier 2 chunked streaming.
+    streaming_sessions: StreamingSessionManager,
 }
 
 impl McpServer {
@@ -303,6 +310,7 @@ impl McpServer {
             repo_filter,
             rate_limiter,
             audit_logger: Arc::new(audit_logger),
+            streaming_sessions: StreamingSessionManager::new(),
         }
     }
 
@@ -545,6 +553,10 @@ impl McpServer {
             "git" => self.call_git_tool(&params.arguments).await,
             "repo/clone" => self.call_repo_clone_tool(&params.arguments),
             "repo/push" => self.call_repo_push_tool(&params.arguments),
+            // Tier 2: Chunked streaming tools
+            "repo/clone_start" => self.call_repo_clone_start_tool(&params.arguments),
+            "repo/clone_chunk" => self.call_repo_clone_chunk_tool(&params.arguments),
+            "repo/clone_cancel" => self.call_repo_clone_cancel_tool(&params.arguments),
             _ => ToolCallResult::error(format!("Unknown tool: {}", params.name)),
         };
 
@@ -582,6 +594,7 @@ impl McpServer {
     }
 
     /// Returns the list of available tools.
+    #[allow(clippy::too_many_lines)] // Tool definitions are naturally verbose
     fn get_tool_definitions() -> Vec<ToolDefinition> {
         vec![
             // Legacy git subprocess tool
@@ -680,6 +693,88 @@ impl McpServer {
                         }
                     },
                     "required": ["bundle", "url", "branch"]
+                }),
+            },
+            // Tier 2: Start chunked clone
+            ToolDefinition {
+                name: "repo/clone_start".to_string(),
+                description: Some(
+                    "Start a chunked clone for large repositories. Returns a session ID that \
+                     can be used with repo/clone_chunk to retrieve the data in pieces. \
+                     Use this instead of repo/clone when working with large repositories \
+                     to get progress updates and enable resume on failure."
+                        .to_string(),
+                ),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "url": {
+                            "type": "string",
+                            "description": "Repository URL (https:// or git@)"
+                        },
+                        "branch": {
+                            "type": "string",
+                            "description": "Branch to clone (defaults to 'main')"
+                        },
+                        "depth": {
+                            "type": "integer",
+                            "description": "Shallow clone depth (1 = only latest commit)"
+                        },
+                        "sparse": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Sparse checkout paths (glob patterns)"
+                        },
+                        "chunk_size": {
+                            "type": "integer",
+                            "description": "Chunk size in bytes (default: 1MB, max: 4MB)"
+                        }
+                    },
+                    "required": ["url"]
+                }),
+            },
+            // Tier 2: Get a chunk from streaming session
+            ToolDefinition {
+                name: "repo/clone_chunk".to_string(),
+                description: Some(
+                    "Get a chunk from a streaming clone session. Call repeatedly with \
+                     incrementing chunk_index (starting from 0) until is_last is true. \
+                     Concatenate all chunks to reconstruct the tar.gz archive."
+                        .to_string(),
+                ),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "session_id": {
+                            "type": "string",
+                            "description": "Session ID from repo/clone_start"
+                        },
+                        "chunk_index": {
+                            "type": "integer",
+                            "description": "Chunk index to retrieve (0-based)"
+                        }
+                    },
+                    "required": ["session_id", "chunk_index"]
+                }),
+            },
+            // Tier 2: Cancel a streaming session
+            ToolDefinition {
+                name: "repo/clone_cancel".to_string(),
+                description: Some(
+                    "Cancel a streaming clone session and free resources. Call this if \
+                     you no longer need the remaining chunks. Sessions also auto-expire \
+                     after 1 hour of inactivity."
+                        .to_string(),
+                ),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "session_id": {
+                            "type": "string",
+                            "description": "Session ID to cancel"
+                        }
+                    },
+                    "required": ["session_id"]
                 }),
             },
         ]
@@ -979,7 +1074,7 @@ impl McpServer {
         // Check branch guard (protected branches)
         if let Some(reason) = self
             .branch_guard
-            .check("push", &[args.branch.clone()])
+            .check("push", std::slice::from_ref(&args.branch))
             .reason()
         {
             self.audit_logger.log_silent(&AuditEvent::repo_push_blocked(
@@ -1033,6 +1128,124 @@ impl McpServer {
                 ));
                 ToolCallResult::error(e.to_string())
             }
+        }
+    }
+
+    /// Calls the `repo/clone_start` tool (Tier 2).
+    ///
+    /// Starts a chunked streaming session for a repository clone.
+    fn call_repo_clone_start_tool(&self, arguments: &Value) -> ToolCallResult {
+        use crate::git2_ops::auth::sanitize_url_for_logging;
+
+        // Parse arguments
+        let args: RepoCloneStartArgs = match serde_json::from_value(arguments.clone()) {
+            Ok(a) => a,
+            Err(e) => {
+                return ToolCallResult::error(format!("Invalid arguments: {e}"));
+            }
+        };
+
+        let sanitized_url = sanitize_url_for_logging(&args.url);
+
+        // Check rate limiter
+        if !self.rate_limiter.try_acquire() {
+            self.audit_logger.log_silent(&AuditEvent::repo_clone_blocked(
+                &sanitized_url,
+                "rate limit exceeded",
+            ));
+            return ToolCallResult::error(
+                "Rate limit exceeded. Please wait before sending more requests.",
+            );
+        }
+
+        // Check repo filter
+        if let Some(reason) = self
+            .repo_filter
+            .check("clone", std::slice::from_ref(&args.url))
+            .reason()
+        {
+            self.audit_logger
+                .log_silent(&AuditEvent::repo_clone_blocked(&sanitized_url, reason));
+            return ToolCallResult::error(reason.to_string());
+        }
+
+        // Execute the clone_start
+        let start = Instant::now();
+        match handle_repo_clone_start(args, &self.streaming_sessions) {
+            Ok(result) => {
+                let duration = start.elapsed();
+                self.audit_logger.log_silent(&AuditEvent::repo_clone_success(
+                    &sanitized_url,
+                    &result.branch,
+                    &result.commit,
+                    0, // file_count not known until all chunks retrieved
+                    result.total_size,
+                    duration,
+                ));
+
+                // Return the result as JSON text
+                match serde_json::to_string_pretty(&result) {
+                    Ok(json) => ToolCallResult::text(json),
+                    Err(e) => ToolCallResult::error(format!("Failed to serialize result: {e}")),
+                }
+            }
+            Err(e) => {
+                self.audit_logger.log_silent(&AuditEvent::repo_clone_failed(
+                    &sanitized_url,
+                    e.to_string(),
+                ));
+                ToolCallResult::error(e.to_string())
+            }
+        }
+    }
+
+    /// Calls the `repo/clone_chunk` tool (Tier 2).
+    ///
+    /// Retrieves a chunk from a streaming session.
+    fn call_repo_clone_chunk_tool(&self, arguments: &Value) -> ToolCallResult {
+        // Parse arguments
+        let args: RepoCloneChunkArgs = match serde_json::from_value(arguments.clone()) {
+            Ok(a) => a,
+            Err(e) => {
+                return ToolCallResult::error(format!("Invalid arguments: {e}"));
+            }
+        };
+
+        // Execute the chunk retrieval
+        match handle_repo_clone_chunk(args, &self.streaming_sessions) {
+            Ok(result) => {
+                // Return the result as JSON text
+                match serde_json::to_string_pretty(&result) {
+                    Ok(json) => ToolCallResult::text(json),
+                    Err(e) => ToolCallResult::error(format!("Failed to serialize result: {e}")),
+                }
+            }
+            Err(e) => ToolCallResult::error(e.to_string()),
+        }
+    }
+
+    /// Calls the `repo/clone_cancel` tool (Tier 2).
+    ///
+    /// Cancels a streaming session and frees resources.
+    fn call_repo_clone_cancel_tool(&self, arguments: &Value) -> ToolCallResult {
+        // Parse arguments
+        let args: RepoCloneCancelArgs = match serde_json::from_value(arguments.clone()) {
+            Ok(a) => a,
+            Err(e) => {
+                return ToolCallResult::error(format!("Invalid arguments: {e}"));
+            }
+        };
+
+        // Execute the cancel
+        match handle_repo_clone_cancel(args, &self.streaming_sessions) {
+            Ok(result) => {
+                // Return the result as JSON text
+                match serde_json::to_string_pretty(&result) {
+                    Ok(json) => ToolCallResult::text(json),
+                    Err(e) => ToolCallResult::error(format!("Failed to serialize result: {e}")),
+                }
+            }
+            Err(e) => ToolCallResult::error(e.to_string()),
         }
     }
 }
