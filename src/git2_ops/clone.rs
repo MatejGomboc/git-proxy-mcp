@@ -125,11 +125,13 @@ pub fn fetch_bare(url: &str, options: Option<FetchOptions2>) -> Result<FetchResu
         fetch_opts.remote_callbacks(callbacks);
 
         // Configure shallow clone if depth is specified
-        if let Some(_depth) = options.depth {
-            // Note: git2's shallow clone support is limited
-            // For now, we'll fetch full history
-            // TODO: Implement shallow fetch when git2 supports it better
-            debug!("depth parameter ignored — full fetch");
+        if let Some(depth) = options.depth {
+            // git2 depth() takes i32, 0 means full clone
+            // Cap at i32::MAX and convert safely
+            #[allow(clippy::cast_possible_wrap)]
+            let depth_i32 = depth.min(i32::MAX as u32) as i32;
+            fetch_opts.depth(depth_i32);
+            debug!(depth = depth, "shallow clone configured");
         }
 
         debug!(refspec = %refspec, "fetching");

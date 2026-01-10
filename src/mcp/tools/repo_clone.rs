@@ -26,7 +26,7 @@ use tracing::{debug, info};
 use crate::git2_ops::auth::sanitize_url_for_logging;
 use crate::git2_ops::clone::{fetch_bare, FetchOptions2};
 use crate::git2_ops::error::Git2Error;
-use crate::streaming::tar::{create_tar_from_tree, encode_base64};
+use crate::streaming::tar::{create_tar_from_tree_with_options, encode_base64, TarOptions};
 
 /// Arguments for the `repo/clone` tool.
 #[derive(Debug, Clone, Deserialize)]
@@ -38,11 +38,11 @@ pub struct RepoCloneArgs {
     #[serde(default)]
     pub branch: Option<String>,
 
-    /// Shallow clone depth (not yet implemented)
+    /// Shallow clone depth (1 = only latest commit, None = full history)
     #[serde(default)]
     pub depth: Option<u32>,
 
-    /// Sparse checkout paths (not yet implemented)
+    /// Sparse checkout paths — only include files matching these patterns
     #[serde(default)]
     pub sparse: Option<Vec<String>>,
 }
@@ -122,17 +122,17 @@ pub fn handle_repo_clone(args: RepoCloneArgs) -> Result<RepoCloneResult, RepoClo
         "repo/clone tool called"
     );
 
-    // Log warnings for unimplemented features
-    if args.depth.is_some() {
-        debug!("depth parameter not yet implemented, performing full clone");
+    // Log info about optional features
+    if let Some(depth) = args.depth {
+        debug!(depth = depth, "shallow clone requested");
     }
-    if args.sparse.is_some() {
-        debug!("sparse parameter not yet implemented, cloning full tree");
+    if let Some(ref sparse) = args.sparse {
+        debug!(patterns = ?sparse, "sparse checkout requested");
     }
 
     // Fetch into bare repository
     let fetch_opts = FetchOptions2 {
-        branch: args.branch,
+        branch: args.branch.clone(),
         depth: args.depth,
     };
 
@@ -144,8 +144,13 @@ pub fn handle_repo_clone(args: RepoCloneArgs) -> Result<RepoCloneResult, RepoClo
         "fetch complete, creating tar"
     );
 
-    // Create tar.gz from tree (in memory)
-    let tar_result = create_tar_from_tree(&fetch_result.repo, fetch_result.head_commit)?;
+    // Create tar.gz from tree (in memory), with optional sparse filtering
+    let tar_opts = TarOptions {
+        sparse_patterns: args.sparse,
+    };
+
+    let tar_result =
+        create_tar_from_tree_with_options(&fetch_result.repo, fetch_result.head_commit, Some(tar_opts))?;
 
     debug!(
         file_count = tar_result.file_count,
