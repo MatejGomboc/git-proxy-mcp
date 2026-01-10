@@ -327,7 +327,8 @@ pub fn handle_helper_script() -> HelperScriptResult {
         usage: "Save script and use:\n  \
             python git_proxy_helper.py extract <result.json> <output_dir>  # Extract clone/pull\n  \
             python git_proxy_helper.py bundle <repo_dir> <since_commit>    # Create push bundle\n  \
-            python git_proxy_helper.py info <result.json>                  # Show result info".to_string(),
+            python git_proxy_helper.py info <result.json>                  # Show result info"
+            .to_string(),
         version: "1.0.0".to_string(),
     }
 }
