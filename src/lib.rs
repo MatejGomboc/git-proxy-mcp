@@ -40,6 +40,7 @@
 //! - [`git2_ops`] — git2 library operations (Tier 1 credential relay)
 //! - [`mcp`] — MCP protocol implementation
 //! - [`security`] — Security guards and audit logging
+//! - [`session`] — Session management for tracking cloned repositories
 //! - [`streaming`] — In-memory tar/bundle streaming
 
 pub mod config;
@@ -48,4 +49,5 @@ pub mod git;
 pub mod git2_ops;
 pub mod mcp;
 pub mod security;
+pub mod session;
 pub mod streaming;
