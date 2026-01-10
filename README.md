@@ -24,16 +24,30 @@ Cloud-based AI coding assistants face a fundamental dilemma:
 
 git-proxy-mcp acts as an **authenticated streaming proxy** between Git providers and AI workspaces:
 
-```
-┌─────────────────┐      ┌─────────────────┐      ┌─────────────────┐
-│   Git Provider  │      │   YOUR PC       │      │   AI's VM       │
-│                 │      │   MCP Server    │◄────►│   Claude.ai     │
-│ • GitHub        │◄────►│                 │      │                 │
-│ • GitLab        │      │ • Credentials   │      │ /home/claude/   │
-│ • Bitbucket     │      │ • Auth only     │      │   repo/         │
-│ • Azure DevOps  │      │ • NO file copy  │      │   .git/         │
-│ • Self-hosted   │      └─────────────────┘      └─────────────────┘
-└─────────────────┘
+```mermaid
+flowchart LR
+    subgraph providers["Git Providers"]
+        GitHub
+        GitLab
+        Bitbucket
+        Azure["Azure DevOps"]
+        Self["Self-hosted"]
+    end
+
+    subgraph pc["YOUR PC - MCP Server"]
+        MCP["git-proxy-mcp"]
+        Creds["Credentials stay here"]
+    end
+
+    subgraph ai["AI's VM"]
+        Claude["Claude.ai"]
+        Repo["/home/claude/repo/"]
+    end
+
+    providers <--> MCP
+    MCP <--> Claude
+    MCP --- Creds
+    Claude --- Repo
 ```
 
 **Key insight:** The AI has its own VM with full Linux capabilities. It just can't authenticate to your private repos. We solve *only* that problem.
@@ -80,42 +94,38 @@ git-proxy-mcp acts as an **authenticated streaming proxy** between Git providers
 
 ### Security Model
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  YOUR PC (credentials stay here, files don't)                   │
-│                                                                 │
-│  ┌──────────────────┐      ┌─────────────────────────────────┐  │
-│  │ git-proxy-mcp    │      │ Your Git Configuration          │  │
-│  │                  │◄────►│ • ~/.gitconfig                  │  │
-│  │ Using git2 lib:  │      │ • SSH keys (ssh-agent)          │  │
-│  │ • Auth callbacks │      │ • Credential helpers            │  │
-│  │ • Object streaming│      │ • OS credential store           │  │
-│  │ • No file storage│      └─────────────────────────────────┘  │
-│  └────────┬─────────┘                                           │
-│           │                                                     │
-│           │ MCP Protocol (stdio)                                │
-└───────────┼─────────────────────────────────────────────────────┘
-            │
-            │ Streaming: files/patches (NOT credentials)
-            ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  AI's VM (files live here, credentials don't)                   │
-│                                                                 │
-│  ┌──────────────────┐                                           │
-│  │ /home/claude/    │                                           │
-│  │   repo/          │  ◄── Full git repository                  │
-│  │     .git/        │  ◄── Complete history                     │
-│  │     src/         │                                           │
-│  │     Cargo.toml   │                                           │
-│  └──────────────────┘                                           │
-│                                                                 │
-│  AI workflow (all local, no network):                           │
-│  • git checkout -b feature                                      │
-│  • vim src/main.rs                                              │
-│  • cargo test                                                   │
-│  • git commit -m "fix bug"                                      │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph pc["YOUR PC - credentials stay here, files don't"]
+        subgraph mcp["git-proxy-mcp"]
+            Auth["Auth callbacks"]
+            Stream["Object streaming"]
+            NoStore["No file storage"]
+        end
+
+        subgraph config["Git Configuration"]
+            GitConfig["~/.gitconfig"]
+            SSH["SSH keys via ssh-agent"]
+            CredHelper["Credential helpers"]
+            OSStore["OS credential store"]
+        end
+
+        mcp <--> config
+    end
+
+    subgraph aivm["AI's VM - files live here, credentials don't"]
+        subgraph repo["/home/claude/repo/"]
+            Git[".git/"]
+            Src["src/"]
+            Cargo["Cargo.toml"]
+        end
+
+        Workflow["AI workflow: branch, edit, test, commit"]
+        repo --- Workflow
+    end
+
+    mcp -->|"Streaming: files/patches"| aivm
+    aivm -->|"Bundles for push"| mcp
 ```
 
 ### What Flows Where
