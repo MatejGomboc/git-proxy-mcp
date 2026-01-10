@@ -2,179 +2,244 @@
 
 ## Overview
 
-**Goal:** Build a secure, AI-agnostic Git proxy MCP server in Rust that spawns git commands on behalf of AI
-assistants, using the user's existing git credential configuration.
+**Goal:** Build a secure credential proxy that enables cloud-based AI assistants to work with private Git repositories. The AI maintains a full local repo in its VM; the MCP server only handles authentication.
+
+**Target Users:** Cloud AI assistants with compute capability but no credential access:
+- Claude.ai (with computer use)
+- ChatGPT with Code Interpreter
+- Gemini with code execution
+- Any sandboxed AI environment
+
+**Non-Targets:** Local AI tools (Claude Code, Cursor, Aider) — they already have direct Git access.
 
 **Guiding Principles:**
 
-- Security over speed. Take the time to do it right.
-- Work on ONE feature at a time.
-- Follow the style guide in `STYLE.md` and contributor guidelines in `CONTRIBUTING.md`.
-
-**For AI Assistants:** See `.claude/CLAUDE.md` for project context.
+- Credentials NEVER leave the user's machine
+- Files NEVER persist on the user's machine (stream-through only)
+- AI gets a complete local git workflow in its VM
+- Beat GitHub MCP Server in every metric that matters
 
 ---
 
-## Security Architecture
+## Architecture: Pure Credential Proxy
 
-### Credential-Free Proxy Design
+```
+GIT PROVIDER                 YOUR PC                    AI's VM
+(GitHub/GitLab)             (MCP Server)              (Claude.ai)
 
-```mermaid
-flowchart TB
-    subgraph PC[User's PC]
-        subgraph GitConfig[Git Configuration]
-            gitconfig[~/.gitconfig]
-            sshconfig[~/.ssh/config + ssh-agent]
-            oscreds[OS credential store]
-        end
-
-        subgraph Proxy[git-proxy-mcp]
-            validate[Validate command]
-            spawn[Spawn git process]
-            sanitise[Sanitise output]
-        end
-
-        client[Claude Desktop / MCP Client]
-    end
-
-    ai[AI VM]
-
-    GitConfig -->|git uses these| Proxy
-    Proxy -->|stdio| client
-    client -->|TLS| ai
+┌──────────────┐      ┌─────────────────┐      ┌─────────────────┐
+│              │      │ git-proxy-mcp   │      │                 │
+│ repo objects │◄────►│                 │◄────►│ /home/claude/   │
+│              │      │ • Credentials   │      │   repo/         │
+│              │      │ • git2 library  │      │   .git/         │
+│              │      │ • NO storage    │      │   (full repo)   │
+└──────────────┘      └─────────────────┘      └─────────────────┘
+                             │                        │
+                      Credentials stay          Files live
+                      on YOUR machine           in AI's VM
 ```
 
-**Key Security Properties:**
+### Data Flow
 
-1. MCP server stores NO credentials — uses git's native credential system
-2. User configures git once, same as they would for manual use
-3. stdio transport = local process communication, no network exposure
-4. Only git output flows through MCP, sanitised for safety
+| Operation | Flow |
+|-----------|------|
+| Clone | GitHub → (git2 auth) → MCP streams → AI's VM |
+| Push | AI's VM → patches → MCP → (git2 auth) → GitHub |
+| Pull | GitHub → (git2 auth) → MCP streams delta → AI's VM |
 
 ---
 
-## Design Decisions (Locked In)
+## Design Decisions (v2)
 
 | Decision | Choice | Rationale |
 |----------|--------|----------|
-| Credential storage | None | Use git's native credential helpers; no duplication |
-| Config hot-reload | No | Security: config changes require restart |
-| Concurrent operations | Yes | Allow multiple repos to be accessed simultaneously |
-| Transport | stdio only (v1) | Simplest, most secure for local MCP clients |
-| SSH keys | User manages via ssh-agent | Standard tooling, no MCP involvement |
-| Git LFS | Defer to v1.1 | v1.0: detect & warn; v1.1+: implement support |
-| Proxy approach | Pass-through | Spawn git subprocess, return output |
-| Scope | Git CLI only | Web UI features (PRs, issues, etc.) are out of scope |
-| Command scope | Remote-only | Only clone/fetch/pull/push/ls-remote |
+| Git library | `git2` (libgit2) | In-process, streaming, no subprocess overhead |
+| File storage on MCP | None | Pure proxy — stream through only |
+| Transfer format (clone) | tar.gz stream | Simple, fast, one blob |
+| Transfer format (push) | git format-patch | Preserves commit metadata |
+| Session state | Stateful | Track active repos, avoid re-auth |
+| Credential storage | System helpers | Use existing git credential config |
+| Large repo handling | Shallow + sparse | User-configurable limits |
 
 ---
 
-## Phase 8: Robustness & Production Readiness <- CURRENT
+## Phase 1: Foundation Rewrite ← CURRENT
 
-- [ ] Documentation: mention per-repo git config (without `--global`) as alternative
-- [ ] Rust code: add explicit type annotations where types aren't obvious
-- [ ] Crash diagnostics: collect crash logs/traces on end-user machines for easier debugging
-- [ ] Single instance enforcement: prevent running multiple instances of the MCP server
-- [ ] Fix audit logging bug: execution errors log `command_success` instead of failure event
-- [ ] Secure audit log file permissions (0600 on Unix)
-- [ ] Distinguish exit codes: normal exit vs signal termination vs timeout
-- [ ] Validate client protocol version during MCP initialisation (currently ignored)
-- [ ] Add integration tests for full MCP command pipeline
-- [ ] Add tests for concurrent tool calls and thread safety
-- [ ] Document audit log JSON schema with examples of each event type
-- [ ] Add debugging/troubleshooting guide to documentation
-- [ ] Add more credential patterns to sanitiser (AWS keys, generic API keys)
-- [ ] Handle URL edge cases in sanitiser (IPv6 addresses, @ in passwords, ports with auth)
-- [ ] Make default protected branches configurable (currently hardcoded: main, master, develop)
-- [ ] Add config validation (e.g., warn if repo_allowlist and repo_blocklist both set)
-- [ ] Support wildcard patterns in dangerous flags detection
-- [ ] Add structured error codes for all failure modes (for programmatic handling)
-- [ ] Consider pre-compiling wildcard patterns for better performance in guards
-- [ ] Add request ID tracking for correlating audit logs with MCP requests
-- [ ] AI commit author identity: set `GIT_AUTHOR_NAME`/`GIT_AUTHOR_EMAIL` for AI commits (see v1.1+ section for details)
-- [ ] Add `--dry-run` CLI flag to validate config without starting server
-- [ ] Support environment variable overrides for config options (e.g., `GIT_PROXY_TIMEOUT`)
-- [ ] Add version compatibility check between server and MCP protocol
-- [ ] Improve error messages with actionable suggestions (e.g., "Run `git config --global credential.helper ...`")
-- [ ] Add command execution statistics to audit log (commands per session, error rate)
-- [ ] Support custom sanitiser patterns via config file
-- [ ] Add optional JSON output format for logs (structured logging)
-- [ ] Health check endpoint for monitoring
+### 1.1 Add git2 Dependency
 
----
+- [ ] Add `git2 = "0.19"` to Cargo.toml
+- [ ] Create `src/git2/` module structure
+- [ ] Implement credential callback using system helpers
+- [ ] Test basic authentication against GitHub/GitLab
 
-## Phase 9: Cross-Platform Release
+### 1.2 Implement Streaming Clone
 
-- [ ] Binary signing (if applicable)
+- [ ] Create `repo/clone` MCP tool
+- [ ] Use git2 to connect to remote and fetch objects
+- [ ] Stream tree contents directly (no disk write on MCP side)
+- [ ] Package as tar.gz for transport
+- [ ] Handle progress reporting
 
-> **Note:** The repository owner decides when to move from pre-release (v0.x) to stable release (v1.0).
-> This decision should be based on real-world usage, security audits, and feature completeness.
+### 1.3 Implement Push
+
+- [ ] Create `repo/push` MCP tool
+- [ ] Receive patches/diff from AI
+- [ ] Use git2 to create commits in memory
+- [ ] Push to remote with authentication
+- [ ] Return commit URLs
+
+### 1.4 Basic Session Management
+
+- [ ] Track active repo sessions (URL, branch, last commit)
+- [ ] Session cleanup on disconnect
+- [ ] Concurrent session support
 
 ---
 
-## Future Considerations (v1.1+)
+## Phase 2: Full Workflow Support
 
-### AI Commit Author Identity
+### 2.1 Incremental Sync (Pull)
 
-Allow AI commits to show a separate contributor identity on GitHub while still using the
-human's credentials for push authentication. This provides clear audit trail of human vs
-AI contributions.
+- [ ] Create `repo/pull` MCP tool
+- [ ] Fetch new commits since last known
+- [ ] Stream only changed files (delta)
+- [ ] Handle merge conflicts gracefully
 
-**How it works:**
+### 2.2 Shallow Clone Support
 
-| Aspect | Who | How |
-|--------|-----|-----|
-| Push authentication | Human user | OS credential store / SSH agent (unchanged) |
-| Commit author | AI bot account | `GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL` env vars |
+- [ ] Add `depth` parameter to clone
+- [ ] Implement shallow fetch with git2
+- [ ] Document limitations of shallow repos
 
-**Workflow:**
+### 2.3 Sparse Checkout Support
 
-1. Human clones repo (as `MatejGomboc`)
-2. AI codes & commits via git-proxy-mcp (as `MatejGomboc-Claude-MCP`)
-3. AI creates PR via GitHub MCP server
-4. Human reviews & approves
-
-**Configuration:**
-
-```json
-{
-  "ai_identity": {
-    "author_name": "MatejGomboc-Claude-MCP",
-    "author_email": "matejgomboc-claude-mcp@users.noreply.github.com"
-  }
-}
-```
-
-**Benefits:**
-
-- Clear audit trail — anyone can see which code is AI-generated
-- Clean GitHub contributor stats — human vs AI contributions separated
-- Accountability — human approves all AI code before merge
-- **Still credential-free** — only sets author metadata, no tokens stored
-
-**Implementation notes:**
-
-- Set `GIT_AUTHOR_NAME` and `GIT_AUTHOR_EMAIL` before spawning git
-- `GIT_COMMITTER_*` stays as user's identity (from git config)
-- Author email must match a GitHub account for avatar/link to appear
-- Feature should be optional and disabled by default
+- [ ] Add `sparse` parameter (path patterns)
+- [ ] Filter tree walk to only requested paths
+- [ ] Significant performance gain for large repos
 
 ---
 
-### Other Future Features
+## Phase 3: Production Hardening
 
-- Git LFS support (currently detect & warn only)
+### 3.1 Chunked Transfer
+
+- [ ] Handle repos larger than MCP message limits
+- [ ] Implement chunked streaming
+- [ ] Resume support for interrupted transfers
+
+### 3.2 Error Handling
+
+- [ ] Graceful handling of network failures
+- [ ] Auth failure messages (don't leak credential details)
+- [ ] Timeout handling for large operations
+
+### 3.3 Security Audit
+
+- [ ] Ensure no credential leakage in any code path
+- [ ] Audit git2 callback handling
+- [ ] Review streaming for memory safety
+- [ ] Rate limiting for abuse prevention
+
+### 3.4 Logging & Audit
+
+- [ ] Audit log all operations (repo, branch, success/fail)
+- [ ] Structured logging for debugging
+- [ ] No credentials in any log output
+
+---
+
+## Phase 4: Provider Support
+
+### 4.1 GitHub
+
+- [ ] HTTPS with PAT authentication
+- [ ] SSH key authentication
+- [ ] GitHub-specific error messages
+
+### 4.2 GitLab
+
+- [ ] HTTPS with PAT authentication
+- [ ] SSH key authentication
+- [ ] Self-hosted GitLab support
+
+### 4.3 Other Providers
+
+- [ ] Bitbucket (if demand)
+- [ ] Azure DevOps (if demand)
+- [ ] Generic Git server support
+
+---
+
+## Phase 5: Advanced Features
+
+### 5.1 Branch Operations
+
+- [ ] Create branch on remote
+- [ ] Delete branch on remote
+- [ ] List remote branches
+
+### 5.2 PR/MR Integration
+
+- [ ] Create pull request (via provider API)
+- [ ] This may need provider-specific MCP tools
+
+### 5.3 Submodule Support
+
+- [ ] Detect submodules
+- [ ] Optional recursive clone
+- [ ] Document limitations
+
+### 5.4 LFS Support
+
+- [ ] Detect LFS files
+- [ ] Stream LFS objects
+- [ ] May require separate handling
+
+---
+
+## Migration from v1
+
+The v1 implementation (git CLI proxy) will be deprecated:
+
+| v1 Component | v2 Status |
+|--------------|----------|
+| `src/git/command.rs` | Remove — no longer spawning CLI |
+| `src/git/executor.rs` | Remove — using git2 instead |
+| `src/git/sanitiser.rs` | Keep — still useful for output |
+| `src/security/*` | Keep — guards still apply |
+| `src/mcp/*` | Refactor — new tool definitions |
+| `src/config/*` | Keep — extend for new options |
+
+---
+
+## Success Metrics
+
+| Metric | Target |
+|--------|--------|
+| Clone 100 files | < 5 seconds |
+| Push 10 commits | < 3 seconds |
+| Incremental pull | < 1 second |
+| Memory usage (MCP server) | < 50 MB (streaming, not buffering) |
+| GitHub MCP comparison | 10x+ faster for typical workflows |
+
+---
+
+## Out of Scope
+
+- Web UI features (GitHub issues, PRs via web) — use GitHub MCP for that
+- Local AI tools — they don't need this
+- Credential storage — always use system helpers
+- File persistence on MCP server — pure proxy only
 
 ---
 
 ## References
 
-- **MCP Specification:** <https://modelcontextprotocol.io/>
-- **Open Source Guides:** <https://opensource.guide/>
-- **Claude Code Docs:** <https://docs.anthropic.com/en/docs/claude-code>
-- **Swatinem/rust-cache:** <https://github.com/Swatinem/rust-cache>
-- **EditorConfig:** <https://editorconfig.org/>
+- [git2 (libgit2 Rust bindings)](https://crates.io/crates/git2)
+- [libgit2 documentation](https://libgit2.org/)
+- [MCP Specification](https://modelcontextprotocol.io/)
+- [Git transfer protocols](https://git-scm.com/book/en/v2/Git-Internals-Transfer-Protocols)
 
 ---
 
-*Last updated: 2026-01-01*
+*Last updated: 2026-01-10*

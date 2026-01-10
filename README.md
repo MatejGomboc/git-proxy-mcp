@@ -1,81 +1,75 @@
 # git-proxy-mcp
 
-**Your Git credentials stay on your machine. Always.**
+**Your Git credentials stay on your machine. Your repo lives in the AI's workspace.**
 
-A secure MCP server that lets AI assistants work with Git repositories using your existing Git configuration.
-
----
-
-## Who Is This For?
-
-- **Security-conscious developers** who want explicit control over credential flow
-- **Enterprise/regulated environments** where compliance requires credentials to stay in-house
-- **Self-hosters** already running local AI tooling who want the same control for Git
-- **Anyone** who prefers "trust but verify" over "just trust"
+A secure MCP server that lets cloud-based AI assistants (Claude.ai, ChatGPT, Gemini, etc.) work with private Git repositories using your existing Git credentials — without those credentials ever leaving your machine.
 
 ---
 
 ## The Problem
 
-**Credential exposure:** When AI coding assistants access your Git repositories, your credentials (PATs, SSH keys,
-tokens) flow through layers you don't fully control. Even with trusted providers, that's a wider attack surface than
-necessary.
+Cloud-based AI coding assistants face a fundamental dilemma:
 
-**Workflow friction:** Existing solutions like GitHub's MCP server require AI assistants to work with files through
-API calls. But AI assistants work better when they can transport repository files to their own environment, work on
-them there, and push changes back. That's the natural Git workflow — clone, edit, commit, push — not file-by-file API
-manipulation.
+| Approach | Problem |
+|----------|--------|
+| **GitHub MCP Server** | File-by-file API calls. 50 files = 50 calls. Can't run tests. Painfully slow. |
+| **Give AI your credentials** | Security nightmare. Your PATs/SSH keys in someone else's cloud. |
+| **Only use public repos** | Most real work is on private repositories. |
+
+**The result:** AI assistants that can write code but can't actually work on your projects like a real developer would.
 
 ## The Solution
 
-git-proxy-mcp acts as a local proxy between your AI assistant and Git hosting services. It:
+git-proxy-mcp acts as an **authenticated streaming proxy** between Git providers and AI workspaces:
 
-- **Uses your existing Git setup** — No separate credential configuration; works with your credential helpers and SSH agent
-- **Keeps credentials local** — Credentials never flow through MCP responses
-- **Enables native Git workflow** — Clone, edit, commit, push. AI assistants work with full repo copies, not API calls
-- **Runs locally** — stdio transport means no network exposure between the MCP server and client
-
-```mermaid
-flowchart TB
-    subgraph PC[User's PC]
-        subgraph GitConfig[Your Git Configuration]
-            gitconfig[~/.gitconfig]
-            sshconfig[~/.ssh/config + ssh-agent]
-            oscreds[OS Credential Store]
-        end
-
-        subgraph Proxy[git-proxy-mcp]
-            validate[Validate command]
-            spawn[Spawn git process]
-            sanitise[Sanitise output]
-        end
-
-        client[Claude Desktop / MCP Client]
-    end
-
-    ai[AI VM]
-
-    GitConfig -->|git uses these| Proxy
-    Proxy -->|stdio| client
-    client -->|TLS| ai
 ```
+┌─────────────────┐      ┌─────────────────┐      ┌─────────────────┐
+│   Git Provider  │      │   YOUR PC       │      │   AI's VM       │
+│   (GitHub, etc) │◄────►│   MCP Server    │◄────►│   Claude.ai     │
+│                 │      │                 │      │                 │
+│   repo objects  │      │ • Credentials   │      │ /home/claude/   │
+│                 │      │ • Auth only     │      │   repo/         │
+│                 │      │ • NO file copy  │      │   .git/         │
+└─────────────────┘      └─────────────────┘      └─────────────────┘
+```
+
+**Key insight:** The AI has its own VM with full Linux capabilities. It just can't authenticate to your private repos. We solve *only* that problem.
+
+### How It Works
+
+1. **Clone:** AI requests a repo → MCP server authenticates → streams files directly to AI's VM
+2. **Work:** AI has a complete local git repo. Branch, edit, test, commit — all native.
+3. **Push:** AI sends commits → MCP server authenticates → pushes to remote
+
+**Credentials never leave your machine. Files never touch your machine.**
 
 ---
 
-## Supported Commands
+## Who Is This For?
 
-Only remote Git operations are proxied:
+| Environment | Local Git? | Needs This? | Why |
+|-------------|------------|-------------|-----|
+| **Claude.ai** | ❌ Cloud VM | ✅ **YES** | Has compute, lacks credentials |
+| **ChatGPT + Code Interpreter** | ❌ Sandboxed | ✅ **YES** | Same situation |
+| **Gemini + code execution** | ❌ Sandboxed | ✅ **YES** | Same situation |
+| **Any cloud AI with VM** | ❌ | ✅ **YES** | Universal solution |
+| Claude Code | ✅ Local | ❌ No | Already has direct access |
+| Cursor | ✅ Local | ❌ No | Runs on your machine |
+| GitHub Copilot | ✅ Local | ❌ No | IDE extension |
 
-| Command | Description |
-|---------|-------------|
-| `clone` | Clone a repository |
-| `fetch` | Download objects and refs from a remote |
-| `pull` | Fetch and integrate with a remote |
-| `push` | Update remote refs |
-| `ls-remote` | List references in a remote repository |
+---
 
-**Local commands** (`status`, `log`, `diff`, `add`, `commit`, `branch`, etc.) are intentionally **not supported**.
-AI assistants can run these directly — they don't need to be proxied.
+## Comparison: GitHub MCP vs git-proxy-mcp
+
+| Operation | GitHub MCP Server | git-proxy-mcp |
+|-----------|-------------------|---------------|
+| Clone 100 files | 100 API calls, minutes | 1 streaming call, seconds |
+| Run `cargo test` | ❌ Impossible | ✅ Native in AI's VM |
+| Interactive rebase | ❌ Impossible | ✅ `git rebase -i` |
+| Branch + edit + commit + push | 4+ API calls | Work locally, 1 push |
+| View git log/diff | API calls | Instant local commands |
+| Large repositories | Timeout hell | Shallow clone, sparse checkout |
+| Rate limits | Hit constantly | Just auth, minimal API use |
 
 ---
 
@@ -83,277 +77,200 @@ AI assistants can run these directly — they don't need to be proxied.
 
 | Feature | Status |
 |---------|--------|
-| Credential-free proxy | Complete |
-| GitHub/GitLab support | Complete |
-| Remote-only command proxy | Complete |
-| SSH key support (via ssh-agent) | Complete |
-| Audit logging | Complete |
-| Protected branch guardrails | Complete |
-| Rate limiting | Complete |
-| Git LFS support | Future |
+| Streaming clone (repo → AI's VM) | 🚧 In Development |
+| Streaming push (AI's VM → repo) | 🚧 In Development |
+| Incremental sync (pull new changes) | 🚧 Planned |
+| Shallow clone support | 🚧 Planned |
+| Sparse checkout | 🚧 Planned |
+| GitHub authentication | 🚧 Planned |
+| GitLab authentication | 🚧 Planned |
+| SSH key support | 🚧 Planned |
+| Credential-free design | ✅ Core principle |
+| Audit logging | ✅ From v1 |
+| Rate limiting | ✅ From v1 |
 
-> See [TODO.md](TODO.md) for the full roadmap.
+> See [TODO.md](TODO.md) for the full development roadmap.
+
+---
+
+## Architecture
+
+### Security Model
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  YOUR PC (credentials stay here, files don't)                   │
+│                                                                 │
+│  ┌──────────────────┐      ┌─────────────────────────────────┐  │
+│  │ git-proxy-mcp    │      │ Your Git Configuration          │  │
+│  │                  │◄────►│ • ~/.gitconfig                  │  │
+│  │ Using git2 lib:  │      │ • SSH keys (ssh-agent)          │  │
+│  │ • Auth callbacks │      │ • Credential helpers            │  │
+│  │ • Object streaming│      │ • OS credential store           │  │
+│  │ • No file storage│      └─────────────────────────────────┘  │
+│  └────────┬─────────┘                                           │
+│           │                                                     │
+│           │ MCP Protocol (stdio)                                │
+└───────────┼─────────────────────────────────────────────────────┘
+            │
+            │ Streaming: files/patches (NOT credentials)
+            ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  AI's VM (files live here, credentials don't)                   │
+│                                                                 │
+│  ┌──────────────────┐                                           │
+│  │ /home/claude/    │                                           │
+│  │   repo/          │  ◄── Full git repository                  │
+│  │     .git/        │  ◄── Complete history                     │
+│  │     src/         │                                           │
+│  │     Cargo.toml   │                                           │
+│  └──────────────────┘                                           │
+│                                                                 │
+│  AI workflow (all local, no network):                           │
+│  • git checkout -b feature                                      │
+│  • vim src/main.rs                                              │
+│  • cargo test                                                   │
+│  • git commit -m "fix bug"                                      │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### What Flows Where
+
+| Data | Your PC | Network | AI's VM |
+|------|---------|---------|--------|
+| Credentials (PAT, SSH keys) | ✅ Stays | ❌ Never | ❌ Never |
+| Repository files | ❌ Never stored | Streamed | ✅ Lives here |
+| Git objects/history | ❌ Never stored | Streamed | ✅ Lives here |
+| Commits/patches | ❌ Temporary only | Streamed | ✅ Created here |
+
+---
+
+## MCP Tools
+
+### `repo/clone`
+
+Stream a repository to the AI's workspace.
+
+```json
+{
+  "name": "repo/clone",
+  "arguments": {
+    "url": "https://github.com/user/private-repo",
+    "branch": "main",
+    "depth": 1,
+    "sparse": ["src/", "Cargo.toml"]
+  }
+}
+```
+
+**Response:** Streamed tar.gz of repository contents.
+
+### `repo/push`
+
+Push commits from AI's workspace to remote.
+
+```json
+{
+  "name": "repo/push",
+  "arguments": {
+    "url": "https://github.com/user/private-repo",
+    "branch": "feature/fix-bug",
+    "base": "main",
+    "commits": [
+      { "message": "Fix the bug", "patch": "<diff>" },
+      { "message": "Add tests", "patch": "<diff>" }
+    ]
+  }
+}
+```
+
+**Response:** Commit URLs on remote.
+
+### `repo/pull`
+
+Sync new changes from remote to AI's workspace.
+
+```json
+{
+  "name": "repo/pull",
+  "arguments": {
+    "url": "https://github.com/user/private-repo",
+    "branch": "main",
+    "since_commit": "abc123"
+  }
+}
+```
+
+**Response:** Streamed delta of changed files.
 
 ---
 
 ## Installation
 
-### Download Pre-built Binaries
+> ⚠️ **v2 is under development.** See [Releases](https://github.com/MatejGomboc/git-proxy-mcp/releases) for current builds.
 
-Download the latest release for your platform from the
-[Releases page](https://github.com/MatejGomboc/git-proxy-mcp/releases):
+### Prerequisites
 
-| Platform | Download |
-|----------|----------|
-| Linux (x64) | `git-proxy-mcp-linux-x86_64.tar.gz` |
-| macOS (Intel) | `git-proxy-mcp-macos-x86_64.tar.gz` |
-| macOS (Apple Silicon) | `git-proxy-mcp-macos-aarch64.tar.gz` |
-| Windows (x64) | `git-proxy-mcp-windows-x86_64.zip` |
-
-#### Linux / macOS
+Configure Git to authenticate without prompting:
 
 ```bash
-# Download and extract (example for Linux x64)
-curl -LO https://github.com/MatejGomboc/git-proxy-mcp/releases/latest/download/git-proxy-mcp-linux-x86_64.tar.gz
-tar -xzf git-proxy-mcp-linux-x86_64.tar.gz
-
-# Move to a directory in your PATH
-sudo mv git-proxy-mcp /usr/local/bin/
-
-# Verify installation
-git-proxy-mcp --version
-```
-
-#### Windows
-
-1. Download `git-proxy-mcp-windows-x86_64.zip`
-2. Extract to a folder (e.g., `C:\Program Files\git-proxy-mcp\`)
-3. Add the folder to your PATH environment variable
-4. Open a new terminal and run `git-proxy-mcp --version`
-
-### Build from Source
-
-Requires Rust 1.75+ and Git 2.x.
-
-```bash
-# Clone the repository
-git clone https://github.com/MatejGomboc/git-proxy-mcp.git
-cd git-proxy-mcp
-
-# Build
-cargo build --release
-
-# The binary is at target/release/git-proxy-mcp (or .exe on Windows)
-./target/release/git-proxy-mcp --version
-```
-
-### Verify Checksums
-
-Each release includes a `SHA256SUMS.txt` file. Verify your download:
-
-```bash
-# Linux/macOS
-sha256sum -c SHA256SUMS.txt --ignore-missing
-
-# Windows (PowerShell)
-Get-FileHash git-proxy-mcp-windows-x86_64.zip -Algorithm SHA256
-```
-
----
-
-## Prerequisites: Configure Git
-
-**git-proxy-mcp does not store credentials.** It uses your existing Git configuration.
-
-Before using git-proxy-mcp, ensure Git is configured to authenticate without prompting:
-
-### For HTTPS (GitHub, GitLab, etc.)
-
-Configure a credential helper to cache your tokens:
-
-```bash
-# macOS - use Keychain
+# macOS
 git config --global credential.helper osxkeychain
 
-# Windows - use Credential Manager
+# Windows
 git config --global credential.helper manager
 
-# Linux - use libsecret (GNOME) or cache
+# Linux
 git config --global credential.helper libsecret
-# or: git config --global credential.helper cache --timeout=3600
 ```
 
-Then authenticate once (e.g., `git clone` a private repo). Your token will be stored securely.
-
-### For SSH
-
-Add your SSH key to the ssh-agent:
+For SSH, ensure your key is in ssh-agent:
 
 ```bash
-# Start ssh-agent (if not already running)
 eval "$(ssh-agent -s)"
-
-# Add your key (you'll be prompted for passphrase once)
 ssh-add ~/.ssh/id_ed25519
-
-# macOS: store passphrase in Keychain
-ssh-add --apple-use-keychain ~/.ssh/id_ed25519
 ```
 
-On Windows with OpenSSH, the ssh-agent service handles key caching automatically.
+### Usage with Claude Desktop
 
-### Verify Setup
+Add to your Claude Desktop MCP configuration:
 
-Test that Git can authenticate without prompting:
-
-```bash
-# Should work without password prompt
-git ls-remote https://github.com/your-private-repo.git
-
-# Or for SSH
-git ls-remote git@github.com:your-private-repo.git
+```json
+{
+  "mcpServers": {
+    "git-proxy": {
+      "command": "git-proxy-mcp",
+      "args": []
+    }
+  }
+}
 ```
-
-If prompted for credentials, the MCP server will fail (it sets `GIT_TERMINAL_PROMPT=0` to prevent hanging).
 
 ---
 
 ## Configuration
 
-The MCP server uses a minimal configuration file for security settings. The default location is:
-
-- **Linux/macOS:** `~/.git-proxy-mcp/config.json`
-- **Windows:** `%USERPROFILE%\.git-proxy-mcp\config.json`
-
-Or specify a custom path with `--config /path/to/config.json`.
-
-### Example Configuration
+Minimal configuration file at `~/.git-proxy-mcp/config.json`:
 
 ```json
 {
-    "security": {
-        "allow_force_push": false,
-        "protected_branches": ["main", "master", "develop"]
-    },
-    "logging": {
-        "level": "warn"
-    },
-    "timeouts": {
-        "request_timeout_secs": 300
-    }
+  "security": {
+    "allow_force_push": false,
+    "protected_branches": ["main", "master"]
+  },
+  "logging": {
+    "level": "warn",
+    "audit_log_path": "~/.git-proxy-mcp/audit.log"
+  }
 }
 ```
-
-### Configuration Options
-
-| Option | Description | Default |
-|--------|-------------|---------|
-| `security.allow_force_push` | Allow force push operations | `false` |
-| `security.protected_branches` | Branches that cannot be force-pushed or deleted | `[]` |
-| `security.repo_allowlist` | Only allow these repository patterns (glob) | `null` (all allowed) |
-| `security.repo_blocklist` | Block these repository patterns (glob) | `null` (none blocked) |
-| `logging.level` | Log level: trace, debug, info, warn, error | `warn` |
-| `logging.audit_log_path` | Path to audit log file | `null` (disabled) |
-| `timeouts.request_timeout_secs` | Timeout for git command execution in seconds | `300` (5 minutes) |
-
-See [config/example-config.json](config/example-config.json) for a complete example.
-
----
-
-## Usage with MCP Clients
-
-### Claude Desktop
-
-Add to your Claude Desktop MCP configuration file:
-
-- **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
-- **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
-
-```json
-{
-    "mcpServers": {
-        "git-proxy": {
-            "command": "git-proxy-mcp",
-            "args": []
-        }
-    }
-}
-```
-
-#### Platform-Specific Examples
-
-**macOS / Linux:**
-
-```json
-{
-    "mcpServers": {
-        "git-proxy": {
-            "command": "/usr/local/bin/git-proxy-mcp",
-            "args": []
-        }
-    }
-}
-```
-
-**Windows:**
-
-```json
-{
-    "mcpServers": {
-        "git-proxy": {
-            "command": "C:\\Program Files\\git-proxy-mcp\\git-proxy-mcp.exe",
-            "args": []
-        }
-    }
-}
-```
-
-### Other MCP Clients
-
-git-proxy-mcp uses stdio transport, compatible with any MCP client that supports local server processes.
-
-The server exposes a `git` tool that accepts Git commands as arguments. Example tool call:
-
-```json
-{
-    "name": "git",
-    "arguments": {
-        "command": "clone",
-        "args": ["https://github.com/user/repo.git", "/tmp/repo"]
-    }
-}
-```
-
----
-
-## Security Model
-
-**Core guarantee:** The MCP server spawns git as a subprocess using your existing configuration. Credentials are
-never stored in the MCP server or transmitted through MCP responses.
-
-### What flows to the AI
-
-- Repository file contents
-- Commit history and metadata
-- Branch and tag information
-- Operation status (success/failure)
-
-### What stays local
-
-- Personal Access Tokens (in your OS credential store)
-- SSH private keys (in ssh-agent)
-- Any authentication secrets
-- Output is sanitised to remove any accidentally leaked credentials
-
-### Audit it yourself
-
-This project is open source under GPL-3.0. Review the code, verify the credential handling, and build from source if you prefer.
 
 ---
 
 ## Contributing
 
-Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 - Follow the style guide in [STYLE.md](STYLE.md)
 - Security issues: see [SECURITY.md](SECURITY.md)
@@ -364,22 +281,13 @@ Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for gu
 
 Copyright (C) 2025 Matej Gomboc <https://github.com/MatejGomboc/git-proxy-mcp>.
 
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU General Public License for more details.
-
-See the attached [LICENCE](LICENCE) file for more info.
+GNU General Public License v3.0 — see [LICENCE](LICENCE).
 
 ---
 
 ## Links
 
 - [MCP Specification](https://modelcontextprotocol.io/)
-- [Error Reference](docs/errors.md)
+- [git2 (libgit2 Rust bindings)](https://crates.io/crates/git2)
+- [Development Roadmap](TODO.md)
 - [Report an Issue](https://github.com/MatejGomboc/git-proxy-mcp/issues)
