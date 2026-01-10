@@ -82,7 +82,7 @@ src/
 │   ├── repo_clone.rs   # Stream tar to AI
 │   └── repo_push.rs    # Receive bundle from AI
 ├── session.rs          # Session tracking
-└── security/           # Guards from v1
+└── security/           # Security guards
 ```
 
 ## Off Limits
