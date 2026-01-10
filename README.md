@@ -246,7 +246,7 @@ Cancel a streaming session (optional, auto-expires after 1 hour).
 }
 ```
 
-### Future Tools (Planned)
+### Other Tools
 
 #### `repo/pull`
 
@@ -264,6 +264,38 @@ Sync new changes from remote to AI's workspace.
 ```
 
 **Response:** Streamed delta of changed files.
+
+#### `repo/diff`
+
+Get diff between two commits.
+
+```json
+{
+  "name": "repo/diff",
+  "arguments": {
+    "url": "https://github.com/user/private-repo",
+    "base": "abc123",
+    "head": "def456"
+  }
+}
+```
+
+**Response:** Diff content with stats.
+
+#### `repo/refs`
+
+List remote branches and tags.
+
+```json
+{
+  "name": "repo/refs",
+  "arguments": {
+    "url": "https://github.com/user/private-repo"
+  }
+}
+```
+
+**Response:** List of refs with commit SHAs.
 
 ---
 

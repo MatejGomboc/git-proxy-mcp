@@ -188,8 +188,8 @@ GitHub ──► MCP (small chunks) ──► AI
 | 3 | Push via bundle reception | ✅ Complete |
 | 4 | Chunked streaming for large repos | ✅ Complete |
 | 5 | Shallow clone, sparse checkout, multi-provider | ✅ Complete |
-| 6 | Incremental sync (`repo/pull`) | 🚧 Planned |
-| 7 | LFS support, submodules | 🚧 Planned |
+| 6 | Incremental sync (`repo/pull`) | ✅ Complete |
+| 7 | LFS support, submodules | ✅ Complete |
 
 ---
 

@@ -62,27 +62,33 @@ git2 uses for HTTPS Basic auth
 
 ### 2. Files Never Persist on MCP Server
 
-Cloned repositories are temporary:
+Repository files are never written to disk. We use bare repositories and stream directly from git objects:
 
 ```rust
 async fn clone_and_stream(url: &str) -> Result<Archive> {
     // TempDir auto-deletes when dropped
     let temp_dir = TempDir::new()?;
-    
-    // Clone to temp
-    clone_repo(url, temp_dir.path())?;
-    
-    // Create archive in memory
-    let archive = create_tar_gz(temp_dir.path())?;
-    
-    // temp_dir drops here → files deleted
+
+    // Init BARE repo (no working tree)
+    let repo = Repository::init_bare(temp_dir.path())?;
+
+    // Fetch objects from remote (pack files only)
+    fetch_remote(&repo, url)?;
+
+    // Stream tree directly to tar (from object DB, not disk)
+    let tree = repo.find_commit(head)?.tree()?;
+    let archive = create_tar_from_tree(&repo, &tree)?;
+
+    // temp_dir drops here → pack files deleted
+    // Source files were NEVER on disk
     Ok(archive)
 }
 ```
 
 **Security benefits:**
 
-- No persistent copy of user's private code
+- Source files NEVER written to user's disk
+- Only git pack files in temp (compressed, deduplicated objects)
 - No risk of leftover files after disconnect
 - Temp directory permissions are 0700 (owner only)
 
