@@ -176,6 +176,7 @@ GitHub ──► MCP (small chunks) ──► AI
 | `repo/pull` | Stream delta of changes since last sync |
 | `repo/diff` | Get diff between commits |
 | `repo/refs` | List branches and tags |
+| `helper_script` | Get Python utility script for processing results |
 
 ---
 

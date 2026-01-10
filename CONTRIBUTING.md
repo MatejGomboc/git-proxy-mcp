@@ -120,7 +120,7 @@ When submitting:
 
 ### Prerequisites
 
-- Rust 1.75+ (see `rust-toolchain.toml` for exact version)
+- Rust 1.75+ (see `Cargo.toml` for minimum version, `rust-toolchain.toml` for channel)
 - Git 2.x (must be in PATH)
 
 ### Setup

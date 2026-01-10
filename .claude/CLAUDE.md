@@ -71,9 +71,16 @@ pub fn create_tar_from_tree(repo: &Repository, commit_id: Oid) -> Vec<u8> {
 
 ```
 src/
+├── lib.rs              # Library crate root
+├── main.rs             # CLI entry point
+├── error.rs            # Top-level error types
+├── session.rs          # Session tracking
 ├── config/             # Configuration
+│   ├── mod.rs          # Module exports
 │   └── settings.rs     # Config file parsing
 ├── git2_ops/           # git2 library operations
+│   ├── mod.rs          # Module exports
+│   ├── error.rs        # Git2 error types (sanitised)
 │   ├── auth.rs         # Credential callbacks
 │   ├── clone.rs        # Bare fetch + tree streaming
 │   ├── push.rs         # Bundle processing
@@ -83,21 +90,31 @@ src/
 │   ├── lfs.rs          # Git LFS support
 │   └── submodule.rs    # Submodule handling
 ├── streaming/          # Transfer formats
+│   ├── mod.rs          # Module exports
 │   ├── tar.rs          # Tree → tar.gz (in memory)
 │   ├── bundle.rs       # Git bundle handling
 │   └── chunked.rs      # Tier 2 chunked streaming
 ├── mcp/                # MCP server
+│   ├── mod.rs          # Module exports
 │   ├── server.rs       # JSON-RPC server
+│   ├── protocol.rs     # MCP protocol types
+│   ├── transport.rs    # Stdio transport
+│   ├── progress.rs     # Progress notifications
 │   └── tools/          # MCP tool handlers
+│       ├── mod.rs              # Module exports
 │       ├── repo_clone.rs       # Tier 1: repo/clone
 │       ├── repo_push.rs        # Tier 1: repo/push
 │       ├── repo_clone_start.rs # Tier 2: repo/clone_start
-│       ├── repo_clone_chunk.rs # Tier 2: repo/clone_chunk
+│       ├── repo_clone_chunk.rs # Tier 2: repo/clone_chunk + cancel
 │       ├── repo_pull.rs        # repo/pull
 │       ├── repo_diff.rs        # repo/diff
-│       └── repo_refs.rs        # repo/refs
-├── session.rs          # Session tracking
+│       ├── repo_refs.rs        # repo/refs
+│       └── helper_script.rs    # helper_script utility
 └── security/           # Security guards
+    ├── mod.rs          # Module exports
+    ├── guards.rs       # Branch + push guards + repo filter
+    ├── audit.rs        # Operation audit logging
+    └── rate_limit.rs   # Token bucket rate limiting
 ```
 
 ## Off Limits
