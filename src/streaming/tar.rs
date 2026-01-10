@@ -30,6 +30,7 @@ use tracing::{debug, trace, warn};
 
 use crate::git2_ops::error::Git2Error;
 use crate::git2_ops::lfs::{is_lfs_pointer, parse_lfs_pointer, LfsClient};
+use crate::git2_ops::submodule::fetch_all_submodules;
 
 /// Options for tar creation.
 #[derive(Debug, Clone, Default)]
@@ -57,6 +58,11 @@ pub struct TarOptions {
     /// LFS credentials (username, password) for authentication.
     /// If None, public LFS servers are accessed without auth.
     pub lfs_credentials: Option<(String, String)>,
+
+    /// Include submodule contents in the archive.
+    /// When enabled, submodules are fetched and their files are included
+    /// at their respective paths in the archive.
+    pub include_submodules: Option<bool>,
 }
 
 /// Compiled sparse patterns for efficient matching.
@@ -155,6 +161,10 @@ pub struct TarResult {
     pub lfs_resolved: usize,
     /// Number of LFS pointers that failed to resolve
     pub lfs_failed: usize,
+    /// Number of submodules successfully included (when `include_submodules` is true)
+    pub submodules_included: usize,
+    /// Number of submodules that failed to fetch
+    pub submodules_failed: usize,
 }
 
 /// Create a tar.gz archive from a git tree.
@@ -229,6 +239,7 @@ pub fn create_tar_from_tree_with_options(
         exclude_binary = ?options.exclude_binary,
         max_file_size = ?options.max_file_size,
         resolve_lfs = ?options.resolve_lfs,
+        include_submodules = ?options.include_submodules,
         "creating tar from tree"
     );
 
@@ -269,6 +280,9 @@ pub fn create_tar_from_tree_with_options(
         None
     };
 
+    // Get submodule option
+    let include_submodules = options.include_submodules.unwrap_or(false);
+
     let mut archive_buffer = Vec::new();
     let mut file_count = 0usize;
     let mut uncompressed_size = 0u64;
@@ -277,6 +291,8 @@ pub fn create_tar_from_tree_with_options(
     let mut skipped_too_large = 0usize;
     let mut lfs_resolved = 0usize;
     let mut lfs_failed = 0usize;
+    let mut submodules_included = 0usize;
+    let mut submodules_failed = 0usize;
 
     {
         let encoder = GzEncoder::new(&mut archive_buffer, Compression::fast());
@@ -390,6 +406,145 @@ pub fn create_tar_from_tree_with_options(
         })
         .map_err(|e| Git2Error::Git2(format!("tree walk failed: {e}")))?;
 
+        // Process submodules if enabled
+        if include_submodules {
+            debug!("fetching submodules");
+            match fetch_all_submodules(repo, commit_id) {
+                Ok(submodules) => {
+                    let total_submodules = submodules.len();
+                    for submodule in submodules {
+                        let submodule_path = &submodule.entry.path;
+                        let submodule_commit = submodule.entry.commit;
+                        let submodule_repo = &submodule.fetch_result.repo;
+
+                        debug!(
+                            path = %submodule_path,
+                            commit = %submodule_commit,
+                            "adding submodule contents to tar"
+                        );
+
+                        // Get the submodule's tree
+                        let submodule_tree = match submodule_repo.find_commit(submodule_commit) {
+                            Ok(commit) => match commit.tree() {
+                                Ok(tree) => tree,
+                                Err(e) => {
+                                    warn!(path = %submodule_path, error = %e, "failed to get submodule tree");
+                                    submodules_failed += 1;
+                                    continue;
+                                }
+                            },
+                            Err(e) => {
+                                warn!(path = %submodule_path, error = %e, "failed to find submodule commit");
+                                submodules_failed += 1;
+                                continue;
+                            }
+                        };
+
+                        // Walk the submodule tree and add files
+                        let submodule_prefix = format!("{submodule_path}/");
+                        let mut submodule_files = 0usize;
+
+                        let walk_result = submodule_tree.walk(TreeWalkMode::PreOrder, |dir, entry| {
+                            let Some(name) = entry.name() else {
+                                return TreeWalkResult::Skip;
+                            };
+
+                            // Build the full path with submodule prefix
+                            let relative_path = if dir.is_empty() {
+                                name.to_string()
+                            } else {
+                                format!("{dir}{name}")
+                            };
+                            let full_path = format!("{submodule_prefix}{relative_path}");
+
+                            // Only process blobs (files)
+                            if entry.kind() == Some(ObjectType::Blob) {
+                                // Check sparse filter
+                                if let Some(ref f) = filter {
+                                    if !f.matches(&full_path) {
+                                        trace!(path = %full_path, "submodule file skipped by sparse filter");
+                                        skipped_by_filter += 1;
+                                        return TreeWalkResult::Ok;
+                                    }
+                                }
+
+                                match submodule_repo.find_blob(entry.id()) {
+                                    Ok(blob) => {
+                                        let content = blob.content();
+
+                                        // Check file size limit
+                                        if let Some(max_size) = max_file_size {
+                                            if content.len() > max_size {
+                                                trace!(path = %full_path, size = content.len(), "submodule file too large");
+                                                skipped_too_large += 1;
+                                                return TreeWalkResult::Ok;
+                                            }
+                                        }
+
+                                        // Check if binary
+                                        if exclude_binary && is_binary(content) {
+                                            trace!(path = %full_path, "submodule binary file skipped");
+                                            skipped_binary += 1;
+                                            return TreeWalkResult::Ok;
+                                        }
+
+                                        trace!(path = %full_path, size = content.len(), "adding submodule file to tar");
+
+                                        // Create tar header
+                                        let mut header = tar::Header::new_gnu();
+                                        if header.set_path(&full_path).is_err() {
+                                            debug!(path = %full_path, "submodule path too long for tar");
+                                            return TreeWalkResult::Ok;
+                                        }
+                                        header.set_size(content.len() as u64);
+                                        #[allow(clippy::cast_sign_loss)]
+                                        header.set_mode(entry.filemode() as u32);
+                                        header.set_cksum();
+
+                                        if tar_builder.append(&header, content).is_err() {
+                                            debug!(path = %full_path, "failed to append submodule file");
+                                            return TreeWalkResult::Ok;
+                                        }
+
+                                        submodule_files += 1;
+                                        file_count += 1;
+                                        uncompressed_size += content.len() as u64;
+                                    }
+                                    Err(e) => {
+                                        debug!(path = %full_path, error = %e, "failed to read submodule blob");
+                                    }
+                                }
+                            }
+
+                            TreeWalkResult::Ok
+                        });
+
+                        if walk_result.is_ok() && submodule_files > 0 {
+                            debug!(
+                                path = %submodule_path,
+                                files = submodule_files,
+                                "submodule added to tar"
+                            );
+                            submodules_included += 1;
+                        } else if walk_result.is_err() {
+                            warn!(path = %submodule_path, "failed to walk submodule tree");
+                            submodules_failed += 1;
+                        }
+                    }
+
+                    debug!(
+                        total = total_submodules,
+                        included = submodules_included,
+                        failed = submodules_failed,
+                        "submodule processing complete"
+                    );
+                }
+                Err(e) => {
+                    warn!(error = %e, "failed to fetch submodules");
+                }
+            }
+        }
+
         // Finish the tar archive
         tar_builder
             .finish()
@@ -403,6 +558,8 @@ pub fn create_tar_from_tree_with_options(
         skipped_too_large = skipped_too_large,
         lfs_resolved = lfs_resolved,
         lfs_failed = lfs_failed,
+        submodules_included = submodules_included,
+        submodules_failed = submodules_failed,
         uncompressed_size = uncompressed_size,
         compressed_size = archive_buffer.len(),
         "tar creation complete"
@@ -417,6 +574,8 @@ pub fn create_tar_from_tree_with_options(
         skipped_too_large,
         lfs_resolved,
         lfs_failed,
+        submodules_included,
+        submodules_failed,
     })
 }
 

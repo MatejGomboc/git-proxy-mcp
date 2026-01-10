@@ -60,6 +60,12 @@ pub struct RepoCloneArgs {
     /// When enabled, LFS pointer files are replaced with their actual content.
     #[serde(default)]
     pub resolve_lfs: Option<bool>,
+
+    /// Include submodule contents in the archive.
+    /// When enabled, submodules are fetched and their files are included
+    /// at their respective paths.
+    #[serde(default)]
+    pub include_submodules: Option<bool>,
 }
 
 /// Result of a successful `repo/clone` operation.
@@ -99,6 +105,14 @@ pub struct RepoCloneResult {
     /// Number of LFS pointers that failed to resolve
     #[serde(skip_serializing_if = "is_zero")]
     pub lfs_failed: usize,
+
+    /// Number of submodules successfully included (when `include_submodules` is true)
+    #[serde(skip_serializing_if = "is_zero")]
+    pub submodules_included: usize,
+
+    /// Number of submodules that failed to fetch
+    #[serde(skip_serializing_if = "is_zero")]
+    pub submodules_failed: usize,
 }
 
 /// Helper for `skip_serializing_if` — skip if value is zero.
@@ -180,6 +194,9 @@ pub fn handle_repo_clone(args: RepoCloneArgs) -> Result<RepoCloneResult, RepoClo
     if args.resolve_lfs == Some(true) {
         debug!("LFS resolution enabled");
     }
+    if args.include_submodules == Some(true) {
+        debug!("submodule inclusion enabled");
+    }
 
     // Fetch into bare repository
     let fetch_opts = FetchOptions2 {
@@ -203,6 +220,7 @@ pub fn handle_repo_clone(args: RepoCloneArgs) -> Result<RepoCloneResult, RepoClo
         resolve_lfs: args.resolve_lfs,
         repo_url: Some(args.url),
         lfs_credentials: None, // TODO: Support LFS credentials from git credential helper
+        include_submodules: args.include_submodules,
     };
 
     let tar_result =
@@ -217,6 +235,8 @@ pub fn handle_repo_clone(args: RepoCloneArgs) -> Result<RepoCloneResult, RepoClo
         skipped_too_large = tar_result.skipped_too_large,
         lfs_resolved = tar_result.lfs_resolved,
         lfs_failed = tar_result.lfs_failed,
+        submodules_included = tar_result.submodules_included,
+        submodules_failed = tar_result.submodules_failed,
         "tar creation complete"
     );
 
@@ -242,6 +262,8 @@ pub fn handle_repo_clone(args: RepoCloneArgs) -> Result<RepoCloneResult, RepoClo
         skipped_too_large: tar_result.skipped_too_large,
         lfs_resolved: tar_result.lfs_resolved,
         lfs_failed: tar_result.lfs_failed,
+        submodules_included: tar_result.submodules_included,
+        submodules_failed: tar_result.submodules_failed,
     })
 }
 
@@ -279,6 +301,8 @@ mod tests {
             skipped_too_large: 0,
             lfs_resolved: 0,
             lfs_failed: 0,
+            submodules_included: 0,
+            submodules_failed: 0,
         };
         let json = serde_json::to_string(&result).unwrap();
         assert!(json.contains("\"archive\":\"SGVsbG8=\""));
@@ -286,6 +310,7 @@ mod tests {
         // Zero skipped counts should not be serialized
         assert!(!json.contains("skipped"));
         assert!(!json.contains("lfs"));
+        assert!(!json.contains("submodules"));
     }
 
     #[test]
@@ -301,6 +326,8 @@ mod tests {
             skipped_too_large: 2,
             lfs_resolved: 0,
             lfs_failed: 0,
+            submodules_included: 0,
+            submodules_failed: 0,
         };
         let json = serde_json::to_string(&result).unwrap();
         assert!(json.contains("\"skipped_by_filter\":5"));
@@ -321,10 +348,43 @@ mod tests {
             skipped_too_large: 0,
             lfs_resolved: 3,
             lfs_failed: 1,
+            submodules_included: 0,
+            submodules_failed: 0,
         };
         let json = serde_json::to_string(&result).unwrap();
         assert!(json.contains("\"lfs_resolved\":3"));
         assert!(json.contains("\"lfs_failed\":1"));
+    }
+
+    #[test]
+    fn repo_clone_result_serializes_submodule_counts() {
+        let result = RepoCloneResult {
+            archive: "SGVsbG8=".to_string(),
+            commit: "abc123".to_string(),
+            branch: "main".to_string(),
+            file_count: 10,
+            archive_size: 1024,
+            skipped_by_filter: 0,
+            skipped_binary: 0,
+            skipped_too_large: 0,
+            lfs_resolved: 0,
+            lfs_failed: 0,
+            submodules_included: 2,
+            submodules_failed: 1,
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("\"submodules_included\":2"));
+        assert!(json.contains("\"submodules_failed\":1"));
+    }
+
+    #[test]
+    fn repo_clone_args_with_submodules() {
+        let json = r#"{
+            "url": "https://github.com/owner/repo.git",
+            "include_submodules": true
+        }"#;
+        let args: RepoCloneArgs = serde_json::from_str(json).unwrap();
+        assert_eq!(args.include_submodules, Some(true));
     }
 
     #[test]

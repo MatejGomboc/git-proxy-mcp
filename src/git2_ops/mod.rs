@@ -22,6 +22,7 @@
 //! - [`pull`] — Incremental sync (delta since known commit)
 //! - [`push`] — Bundle processing and authenticated push
 //! - [`refs`] — Remote reference listing (branches/tags)
+//! - [`submodule`] — Submodule detection and fetching
 //! - [`error`] — Error types for git2 operations
 
 pub mod auth;
@@ -32,3 +33,4 @@ pub mod lfs;
 pub mod pull;
 pub mod push;
 pub mod refs;
+pub mod submodule;

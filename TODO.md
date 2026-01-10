@@ -505,15 +505,35 @@ pub struct RepoCloneResult {
 
 ---
 
-### 5.3 Submodule Support
+### 5.3 Submodule Support ✅ IMPLEMENTED
 
 **Goal:** Clone repositories with submodules.
 
-**Implementation approach:**
+```rust
+#[derive(Deserialize)]
+pub struct RepoCloneArgs {
+    // ... existing fields ...
+    pub include_submodules: Option<bool>,  // Include submodule contents in archive
+}
 
-- [ ] Detect `.gitmodules` in tree
-- [ ] Recursively fetch submodule repos
-- [ ] Include submodule contents in tar at correct paths
+#[derive(Serialize)]
+pub struct RepoCloneResult {
+    // ... existing fields ...
+    pub submodules_included: usize,   // Submodules successfully included
+    pub submodules_failed: usize,     // Submodules that failed to fetch
+}
+```
+
+**Tool:** `repo/clone` (enhanced)
+
+**Implementation:**
+
+- [x] Parse `.gitmodules` to get submodule URLs and paths
+- [x] Detect submodule entries in tree (mode `160000`)
+- [x] Recursively fetch each submodule as bare repo
+- [x] Include submodule contents in tar at correct paths
+- [x] Apply same filtering options (sparse, binary, max_size) to submodules
+- [x] Track included/failed statistics in response
 
 ---
 

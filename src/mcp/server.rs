@@ -674,6 +674,10 @@ impl McpServer {
                         "resolve_lfs": {
                             "type": "boolean",
                             "description": "Resolve Git LFS pointers to actual content. When enabled, LFS pointer files are replaced with their actual content."
+                        },
+                        "include_submodules": {
+                            "type": "boolean",
+                            "description": "Include submodule contents in the archive. When enabled, submodules are fetched and their files are included at their respective paths."
                         }
                     },
                     "required": ["url"]
