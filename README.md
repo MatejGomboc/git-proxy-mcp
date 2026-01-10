@@ -263,6 +263,21 @@ List remote branches and tags.
 
 **Response:** List of refs with commit SHAs.
 
+### Utilities
+
+#### `helper_script`
+
+Get a Python helper script for processing results (decoding base64, extracting tar.gz).
+
+```json
+{
+  "name": "helper_script",
+  "arguments": {}
+}
+```
+
+**Response:** Python script source code.
+
 ---
 
 ## Installation

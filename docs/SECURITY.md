@@ -65,7 +65,7 @@ git2 uses for HTTPS Basic auth
 Repository files are never written to disk. We use bare repositories and stream directly from git objects:
 
 ```rust
-async fn clone_and_stream(url: &str) -> Result<Archive> {
+fn clone_and_stream(url: &str) -> Result<Archive> {
     // TempDir auto-deletes when dropped
     let temp_dir = TempDir::new()?;
 
