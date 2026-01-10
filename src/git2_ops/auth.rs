@@ -7,6 +7,16 @@
 //! - **HTTPS tokens**: Via system credential helpers (macOS Keychain,
 //!   Windows Credential Manager, libsecret, etc.)
 //!
+//! # Supported Providers
+//!
+//! Works with any Git hosting provider that supports standard protocols:
+//!
+//! - **GitHub** (github.com)
+//! - **GitLab** (gitlab.com and self-hosted)
+//! - **Bitbucket** (bitbucket.org)
+//! - **Azure DevOps** (dev.azure.com)
+//! - **Any self-hosted Git server** (Gitea, Gogs, etc.)
+//!
 //! # Security Guarantees
 //!
 //! - Credentials are NEVER logged
@@ -212,5 +222,54 @@ mod tests {
     #[test]
     fn validate_url_rejects_no_scheme() {
         assert!(validate_url("/some/local/path").is_err());
+    }
+
+    // Multi-provider support tests
+    #[test]
+    fn validate_url_accepts_gitlab_https() {
+        assert!(validate_url("https://gitlab.com/owner/repo.git").is_ok());
+    }
+
+    #[test]
+    fn validate_url_accepts_gitlab_ssh() {
+        assert!(validate_url("git@gitlab.com:owner/repo.git").is_ok());
+    }
+
+    #[test]
+    fn validate_url_accepts_bitbucket_https() {
+        assert!(validate_url("https://bitbucket.org/owner/repo.git").is_ok());
+    }
+
+    #[test]
+    fn validate_url_accepts_bitbucket_ssh() {
+        assert!(validate_url("git@bitbucket.org:owner/repo.git").is_ok());
+    }
+
+    #[test]
+    fn validate_url_accepts_self_hosted_gitlab() {
+        assert!(validate_url("https://gitlab.example.com/group/project.git").is_ok());
+        assert!(validate_url("git@gitlab.example.com:group/project.git").is_ok());
+    }
+
+    #[test]
+    fn validate_url_accepts_azure_devops() {
+        assert!(validate_url("https://dev.azure.com/org/project/_git/repo").is_ok());
+        assert!(validate_url("git@ssh.dev.azure.com:v3/org/project/repo").is_ok());
+    }
+
+    #[test]
+    fn sanitize_url_handles_gitlab_credentials() {
+        let url = "https://oauth2:token@gitlab.com/owner/repo.git";
+        let sanitized = sanitize_url_for_logging(url);
+        assert!(!sanitized.contains("token"));
+        assert!(sanitized.contains("***@gitlab.com"));
+    }
+
+    #[test]
+    fn sanitize_url_handles_bitbucket_credentials() {
+        let url = "https://username:app_password@bitbucket.org/owner/repo.git";
+        let sanitized = sanitize_url_for_logging(url);
+        assert!(!sanitized.contains("app_password"));
+        assert!(sanitized.contains("***@bitbucket.org"));
     }
 }
