@@ -217,7 +217,7 @@ Credentials never stored, git2 callbacks only.
 
 All operations logged (without credentials), showing:
 
-- Repository URL (sanitized)
+- Repository URL (sanitised)
 - Branch
 - Commit SHA
 - Operation success/failure
@@ -227,10 +227,23 @@ All operations logged (without credentials), showing:
 
 ```
 src/
-├── git2_ops/                    # git2 operations
+├── lib.rs                       # Library crate root
+├── main.rs                      # CLI entry point
+├── error.rs                     # Top-level error types
+├── session.rs                   # Session tracking (no files!)
+│
+├── config/                      # Configuration
+│   └── settings.rs              # Config file parsing + defaults
+│
+├── git2_ops/                    # git2 library operations
 │   ├── auth.rs                  # Credential callbacks (multi-provider)
 │   ├── clone.rs                 # Bare fetch + tree streaming
 │   ├── push.rs                  # Bundle processing + push
+│   ├── pull.rs                  # Incremental sync operations
+│   ├── diff.rs                  # Diff generation between commits
+│   ├── refs.rs                  # Remote reference listing
+│   ├── lfs.rs                   # Git LFS support
+│   ├── submodule.rs             # Submodule detection + fetching
 │   └── error.rs                 # Error types with credential sanitisation
 │
 ├── streaming/                   # Transfer formats
@@ -238,15 +251,21 @@ src/
 │   ├── bundle.rs                # Git bundle handling
 │   └── chunked.rs               # Tier 2: Session manager + chunking
 │
-├── mcp/tools/                   # MCP tool handlers
-│   ├── repo_clone.rs            # Tier 1: repo/clone
-│   ├── repo_push.rs             # Tier 1: repo/push
-│   ├── repo_clone_start.rs      # Tier 2: repo/clone_start
-│   └── repo_clone_chunk.rs      # Tier 2: repo/clone_chunk + cancel
+├── mcp/                         # MCP server implementation
+│   ├── server.rs                # JSON-RPC server + tool dispatch
+│   ├── protocol.rs              # MCP protocol types
+│   ├── transport.rs             # stdio transport
+│   ├── progress.rs              # Progress notifications
+│   └── tools/                   # MCP tool handlers
+│       ├── repo_clone.rs        # Tier 1: repo/clone
+│       ├── repo_push.rs         # Tier 1: repo/push
+│       ├── repo_clone_start.rs  # Tier 2: repo/clone_start
+│       ├── repo_clone_chunk.rs  # Tier 2: repo/clone_chunk + cancel
+│       ├── repo_pull.rs         # repo/pull (incremental sync)
+│       ├── repo_diff.rs         # repo/diff (commit comparison)
+│       └── repo_refs.rs         # repo/refs (list branches/tags)
 │
-├── session.rs                   # Session tracking (no files!)
-│
-└── security/                    # Guards
+└── security/                    # Security guards
     ├── audit.rs                 # Operation audit logging
     ├── guards.rs                # Branch + push guards + repo filter
     └── rate_limit.rs            # Token bucket rate limiting

@@ -71,16 +71,31 @@ pub fn create_tar_from_tree(repo: &Repository, commit_id: Oid) -> Vec<u8> {
 
 ```
 src/
+├── config/             # Configuration
+│   └── settings.rs     # Config file parsing
 ├── git2_ops/           # git2 library operations
 │   ├── auth.rs         # Credential callbacks
 │   ├── clone.rs        # Bare fetch + tree streaming
-│   └── push.rs         # Bundle processing
+│   ├── push.rs         # Bundle processing
+│   ├── pull.rs         # Incremental sync
+│   ├── diff.rs         # Commit comparison
+│   ├── refs.rs         # Remote ref listing
+│   ├── lfs.rs          # Git LFS support
+│   └── submodule.rs    # Submodule handling
 ├── streaming/          # Transfer formats
 │   ├── tar.rs          # Tree → tar.gz (in memory)
-│   └── bundle.rs       # Git bundle handling
-├── mcp/tools/          # MCP tool handlers
-│   ├── repo_clone.rs   # Stream tar to AI
-│   └── repo_push.rs    # Receive bundle from AI
+│   ├── bundle.rs       # Git bundle handling
+│   └── chunked.rs      # Tier 2 chunked streaming
+├── mcp/                # MCP server
+│   ├── server.rs       # JSON-RPC server
+│   └── tools/          # MCP tool handlers
+│       ├── repo_clone.rs       # Tier 1: repo/clone
+│       ├── repo_push.rs        # Tier 1: repo/push
+│       ├── repo_clone_start.rs # Tier 2: repo/clone_start
+│       ├── repo_clone_chunk.rs # Tier 2: repo/clone_chunk
+│       ├── repo_pull.rs        # repo/pull
+│       ├── repo_diff.rs        # repo/diff
+│       └── repo_refs.rs        # repo/refs
 ├── session.rs          # Session tracking
 └── security/           # Security guards
 ```
