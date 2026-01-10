@@ -26,14 +26,15 @@ git-proxy-mcp acts as an **authenticated streaming proxy** between Git providers
 
 ```
 ┌─────────────────┐      ┌─────────────────┐      ┌─────────────────┐
-│   Git Provider  │      │   YOUR PC       │      │   AI's VM       │
-│                 │      │   MCP Server    │◄────►│   Claude.ai     │
-│ • GitHub        │◄────►│                 │      │                 │
-│ • GitLab        │      │ • Credentials   │      │ /home/claude/   │
-│ • Bitbucket     │      │ • Auth only     │      │   repo/         │
-│ • Azure DevOps  │      │ • NO file copy  │      │   .git/         │
-│ • Self-hosted   │      └─────────────────┘      └─────────────────┘
-└─────────────────┘
+│  Git Providers  │      │    YOUR PC      │      │    AI's VM      │
+│                 │      │                 │      │                 │
+│  GitHub         │◄────►│  git-proxy-mcp  │◄────►│  Claude.ai      │
+│  GitLab         │      │                 │      │                 │
+│  Bitbucket      │      │  (credentials   │      │  /home/claude/  │
+│  Azure DevOps   │      │   stay here)    │      │    repo/        │
+│  Self-hosted    │      │                 │      │  (files live    │
+│                 │      │                 │      │   here)         │
+└─────────────────┘      └─────────────────┘      └─────────────────┘
 ```
 
 **Key insight:** The AI has its own VM with full Linux capabilities. It just can't authenticate to your private repos. We solve *only* that problem.
@@ -86,14 +87,12 @@ git-proxy-mcp acts as an **authenticated streaming proxy** between Git providers
 │                                                                 │
 │  ┌──────────────────┐      ┌─────────────────────────────────┐  │
 │  │ git-proxy-mcp    │      │ Your Git Configuration          │  │
-│  │                  │◄────►│ • ~/.gitconfig                  │  │
-│  │ Using git2 lib:  │      │ • SSH keys (ssh-agent)          │  │
-│  │ • Auth callbacks │      │ • Credential helpers            │  │
-│  │ • Object streaming│      │ • OS credential store           │  │
-│  │ • No file storage│      └─────────────────────────────────┘  │
-│  └────────┬─────────┘                                           │
+│  │                  │◄────►│                                 │  │
+│  │ • Auth callbacks │      │ • ~/.gitconfig                  │
+│  │ • Object stream  │      │ • SSH keys (ssh-agent)          │  │
+│  │ • No file storage│      │ • Credential helpers            │  │
+│  └────────┬─────────┘      └─────────────────────────────────┘  │
 │           │                                                     │
-│           │ MCP Protocol (stdio)                                │
 └───────────┼─────────────────────────────────────────────────────┘
             │
             │ Streaming: files/patches (NOT credentials)
@@ -102,19 +101,12 @@ git-proxy-mcp acts as an **authenticated streaming proxy** between Git providers
 │  AI's VM (files live here, credentials don't)                   │
 │                                                                 │
 │  ┌──────────────────┐                                           │
-│  │ /home/claude/    │                                           │
-│  │   repo/          │  ◄── Full git repository                  │
-│  │     .git/        │  ◄── Complete history                     │
-│  │     src/         │                                           │
-│  │     Cargo.toml   │                                           │
+│  │ /home/claude/    │  AI workflow (all local, no network):     │
+│  │   repo/          │  • git checkout -b feature                │
+│  │     .git/        │  • vim src/main.rs                        │
+│  │     src/         │  • cargo test                             │
+│  │     Cargo.toml   │  • git commit -m "fix bug"                │
 │  └──────────────────┘                                           │
-│                                                                 │
-│  AI workflow (all local, no network):                           │
-│  • git checkout -b feature                                      │
-│  • vim src/main.rs                                              │
-│  • cargo test                                                   │
-│  • git commit -m "fix bug"                                      │
-│                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -248,8 +240,8 @@ Get diff between two commits.
   "name": "repo/diff",
   "arguments": {
     "url": "https://github.com/user/private-repo",
-    "base": "abc123",
-    "head": "def456"
+    "base_commit": "abc123",
+    "head_commit": "def456"
   }
 }
 ```
@@ -316,7 +308,10 @@ Add to your Claude Desktop MCP configuration:
 
 ## Configuration
 
-Minimal configuration file at `~/.git-proxy-mcp/config.json`:
+Minimal configuration file:
+
+- **Linux/macOS:** `~/.git-proxy-mcp/config.json`
+- **Windows:** `%USERPROFILE%\.git-proxy-mcp\config.json`
 
 ```json
 {
@@ -344,7 +339,7 @@ Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## Licence
 
-Copyright (C) 2025 Matej Gomboc <https://github.com/MatejGomboc/git-proxy-mcp>.
+Copyright (C) 2026 Matej Gomboc <https://github.com/MatejGomboc/git-proxy-mcp>.
 
 GNU General Public License v3.0 — see [LICENCE](LICENCE).
 

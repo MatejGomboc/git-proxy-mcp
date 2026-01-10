@@ -5,14 +5,14 @@
 **git-proxy-mcp** is a security-focused project designed to let AI assistants work with private
 Git repositories while keeping your credentials safe on your machine. We take security vulnerabilities extremely seriously.
 
-**Key security property:** The MCP server does NOT store credentials. It spawns git as a subprocess
-and relies on your existing Git configuration (credential helpers, SSH agent).
+**Key security property:** The MCP server does NOT store credentials. It uses the git2 library
+with credential callbacks that delegate to your existing Git configuration (credential helpers, SSH agent).
 
 ## Supported Versions
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 0.x.x   | :white_check_mark: (development) |
+| Version | Supported              |
+| ------- | ---------------------- |
+| 0.x.x   | ✅ Yes (development) |
 
 Once we reach v1.0, we will maintain security updates for the current major version and one previous major version.
 
@@ -107,16 +107,23 @@ ssh-add --apple-use-keychain ~/.ssh/id_ed25519
 
 ### MCP Server Configuration
 
-The `config.json` file only contains security settings (protected branches, repo filters) — no credentials.
-It can safely be committed to version control if desired.
+The configuration file contains security settings, logging, timeouts, limits, and rate limits — never credentials.
+
+**Config file location:**
+
+- **Linux/macOS:** `~/.git-proxy-mcp/config.json`
+- **Windows:** `%USERPROFILE%\.git-proxy-mcp\config.json`
+
+See `config/example-config.json` for the full structure.
 
 ### Audit Logging
 
-When enabled, audit logs record all git operations. Configure via:
+When enabled, audit logs record all git operations. Configure in your `config.json`:
 
 ```json
 {
     "logging": {
+        "level": "info",
         "audit_log_path": "/path/to/audit.log"
     }
 }
@@ -130,8 +137,8 @@ This project follows these security principles:
 
 1. **No credential storage:** The MCP server never stores credentials — it uses git's native credential system
 2. **Credential isolation:** Credentials never leave the user's machine and are never included in MCP responses
-3. **Output sanitisation:** All git output is sanitised to remove accidentally leaked credentials
-4. **Defence in depth:** Multiple layers of protection (command validation, security guards, audit logging)
+3. **URL sanitisation:** All URLs are sanitised before logging to remove embedded credentials
+4. **Defence in depth:** Multiple layers of protection (security guards, repo filters, audit logging)
 5. **Secure defaults:** Force push disabled, protected branches enforced by default
 6. **Transparency:** Open source code for community review
 7. **Industry standard:** Uses the same credential approach as VS Code, TortoiseGit, and other Git tools
@@ -142,4 +149,4 @@ We thank the security researchers and community members who help keep this proje
 
 ---
 
-*This security policy was last updated on 2026-01-01.*
+*This security policy was last updated on 2026-01-10.*
