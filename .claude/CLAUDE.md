@@ -1,74 +1,97 @@
-# git-proxy-mcp
+# git-proxy-mcp — AI Assistant Context
 
-Secure Git proxy MCP server in Rust. Uses your existing Git credential configuration — no credentials stored.
+## The Vision (Read First!)
+
+See `docs/VISION.md` for the full architecture:
+
+| Tier | Data Flow | Status |
+|------|-----------|--------|
+| **Tier 1** | GitHub → MCP (RAM) → AI | Current focus |
+| **Tier 2** | GitHub → MCP (chunks) → AI | Target |
+
+**Core principle:** Credentials NEVER leave user's PC. Files stream through MCP to AI's VM.
+
+## What Is This Project?
+
+A secure credential relay for cloud-based AI assistants (Claude.ai, ChatGPT, Gemini) to work with private Git repositories.
+
+**Tier 1:** Stream Git data through memory on user's PC.
+**Tier 2:** Chunked streaming for large repos (production-ready).
 
 ## Quick Reference
 
-| What | Where |
-|------|-------|
-| Build commands | `CONTRIBUTING.md` § Development Setup |
-| Coding standards | `CONTRIBUTING.md` § Coding Standards |
-| Style guide | `STYLE.md` |
-| Commit conventions | `CONTRIBUTING.md` § Commit Messages |
-| PR requirements | `CONTRIBUTING.md` § Pull Requests |
-| Development roadmap | `TODO.md` |
-
-## Architecture
-
-The MCP server is a **credential-free proxy** that spawns git commands:
-
-```
-User's Git Config (credential helpers, ssh-agent)
-          ↓ git uses these automatically
-git-proxy-mcp (validates command, spawns git, sanitises output)
-          ↓ stdio
-MCP Client (Claude Desktop, etc.)
-          ↓ TLS
-AI (Claude, GPT, etc.)
-```
-
-**Key point:** No credentials in config.json — just security settings.
+| Resource | Location |
+|----------|----------|
+| Vision | `docs/VISION.md` |
+| Battle plan | `TODO.md` |
+| Architecture | `docs/ARCHITECTURE.md` |
 
 ## Critical Rules
 
-### Git Workflow — MANDATORY
+### NEVER Do These
 
-> **WARNING: NEVER push directly to main. NEVER bypass branch protection.**
->
-> Even if `git push` succeeds with a bypass warning, this is a violation.
-> Always create a feature branch and open a pull request.
-> If you accidentally push to main, immediately inform the user.
+1. **NEVER store credentials**
+2. **NEVER log credentials**
+3. **NEVER checkout working tree** (use bare repos)
+4. **NEVER write source files to disk**
+5. **NEVER push to main**
+6. **NEVER send credentials to AI** (not even short-lived tokens)
 
-### Security
+### ALWAYS Do These
 
-- The MCP server does NOT store credentials
-- All git output is sanitised for credential leaks
-- See `CONTRIBUTING.md` § Security-Conscious Coding
+1. **Use `Repository::init_bare()`**
+2. **Use `repo.find_blob().content()`** (read from object DB)
+3. **Use `tar::Builder::new(Vec::new())`** (build in memory)
+4. **Use git2 credential callbacks**
+5. **Use `TempDir`** (auto-cleanup)
 
-### Before Committing
+## Implementation Pattern
 
-Clean up stale branches:
+```rust
+// CORRECT: Bare repo, walk tree, stream blobs
+pub fn create_tar_from_tree(repo: &Repository, commit_id: Oid) -> Vec<u8> {
+    let tree = repo.find_commit(commit_id)?.tree()?;
 
-```bash
-git fetch --prune origin
-git branch -vv | grep ': gone]' | awk '{print $1}' | xargs -r git branch -d
+    let mut buffer = Vec::new();
+    let encoder = GzEncoder::new(&mut buffer, Compression::fast());
+    let mut tar = tar::Builder::new(encoder);
+
+    tree.walk(TreeWalkMode::PreOrder, |dir, entry| {
+        if entry.kind() == Some(ObjectType::Blob) {
+            let blob = repo.find_blob(entry.id())?;
+            tar.append_data(&mut header, path, blob.content())?;
+        }
+        TreeWalkResult::Ok
+    })?;
+
+    buffer
+}
 ```
-
-### Task Management
-
-**Remove completed items from `TODO.md`** after finishing a task. Keep the roadmap current.
-
-## Off Limits
-
-**`CODE_OF_CONDUCT.md`** — Do not modify. Owned by repository owner.
 
 ## Project Structure
 
 ```
 src/
-├── config/      # Configuration loading (security settings only)
-├── error.rs     # Error types
-├── git/         # Git command parsing, execution, output sanitisation
-├── mcp/         # MCP protocol, transport, server
-└── security/    # Guards (branch, push, repo filter), audit, rate limiting
+├── git2_ops/           # git2 library operations
+│   ├── auth.rs         # Credential callbacks
+│   ├── clone.rs        # Bare fetch + tree streaming
+│   └── push.rs         # Bundle processing
+├── streaming/          # Transfer formats
+│   ├── tar.rs          # Tree → tar.gz (in memory)
+│   └── bundle.rs       # Git bundle handling
+├── mcp/tools/          # MCP tool handlers
+│   ├── repo_clone.rs   # Stream tar to AI
+│   └── repo_push.rs    # Receive bundle from AI
+├── session.rs          # Session tracking
+└── security/           # Guards from v1
 ```
+
+## Current Phase
+
+**Phase 1: Tier 1 Foundation** <- WE ARE HERE
+
+See `TODO.md` for detailed steps.
+
+## Off Limits
+
+**`CODE_OF_CONDUCT.md`** — Do not modify.

@@ -1,0 +1,197 @@
+# Vision: Credential Relay for Cloud AI
+
+This document describes the architectural vision for git-proxy-mcp.
+
+## The Problem
+
+Cloud-based AI assistants (Claude.ai, ChatGPT, Gemini) have:
+
+- Full Linux VMs with compute capability
+- Ability to run git, build code, run tests
+- **No access to user's credentials for private repos**
+
+## The Solution: Credential Relay
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│  CREDENTIAL RELAY ARCHITECTURE                                          │
+│                                                                         │
+│  GitHub                User's PC                      AI's VM           │
+│    │                      │                              │              │
+│    │◄──── credentials ────┤                              │              │
+│    │      (SSH/PAT)       │                              │              │
+│    │                      │                              │              │
+│    │── repo contents ────►│──── repo contents ──────────►│              │
+│    │   (authenticated)    │    (NO credentials!)         │              │
+│    │                      │                              │              │
+│    │                      │◄─── changes ─────────────────┤              │
+│    │◄── push (with creds)─┤    (patches, no creds)       │              │
+│    │                      │                              │              │
+└─────────────────────────────────────────────────────────────────────────┘
+
+Credentials: NEVER leave user's PC
+Repo files:  Stream through MCP → land in AI's VM
+```
+
+**Key Principle:** The MCP server acts as an authenticated relay. Credentials stay local. Only file contents flow to the AI.
+
+---
+
+## Two Implementation Tiers
+
+### Tier 1: Memory Buffer (First Implementation)
+
+```
+GitHub ──► MCP (buffer in RAM) ──► AI
+```
+
+| Property | Value |
+|----------|-------|
+| Files on user's disk | No |
+| Memory usage | O(repo size) |
+| Large repo support | Limited |
+| Complexity | Low |
+
+**Use case:** Small to medium repos, initial implementation.
+
+### Tier 2: Chunked Streaming (Target Architecture)
+
+```
+GitHub ──► MCP (small chunks) ──► AI
+```
+
+| Property | Value |
+|----------|-------|
+| Files on user's disk | No |
+| Memory usage | O(chunk size) — constant |
+| Large repo support | Yes |
+| Complexity | Medium |
+
+**Use case:** Any repo size, production-ready.
+
+---
+
+## Security Model
+
+### What Stays on User's PC
+
+- Personal Access Tokens (in OS credential store)
+- SSH private keys (in ssh-agent)
+- All authentication secrets
+- Git credential helper configuration
+
+### What Flows to AI's VM
+
+- Repository file contents
+- Git object data (commits, trees, blobs)
+- Branch and tag metadata
+- Diff/patch data for pushes
+
+### What NEVER Flows to AI
+
+- Credentials of any kind
+- Tokens (even short-lived ones)
+- SSH keys or signatures
+- Authentication headers
+
+---
+
+## Data Flow: Clone Operation
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ CLONE: Authenticated fetch → stream to AI                                   │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  GitHub                 User's PC                        AI's VM            │
+│    │                       │                                │               │
+│    │  git2 fetch           │                                │               │
+│    │  (with credentials)   │                                │               │
+│    ├──────────────────────►│                                │               │
+│    │                       │                                │               │
+│    │                       │  Objects stored in             │               │
+│    │                       │  BARE REPO (temp, no checkout) │               │
+│    │                       │                                │               │
+│    │                       │  Stream tree to tar.gz         │               │
+│    │                       │  (in memory or chunked)        │               │
+│    │                       │                                │               │
+│    │                       │  MCP response                  │               │
+│    │                       ├───────────────────────────────►│               │
+│    │                       │  (file contents only)          │               │
+│    │                       │                                │               │
+│    │                       │                                │  Extract      │
+│    │                       │                                │  git init     │
+│    │                       │                                │  Full repo!   │
+│    │                       │                                │               │
+│    │                       │  Clean up temp                 │               │
+│    │                       │                                │               │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+## Data Flow: Push Operation
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ PUSH: Receive changes from AI → authenticated push                          │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  AI's VM                   User's PC                        GitHub          │
+│    │                          │                                │            │
+│    │  Create git bundle       │                                │            │
+│    │  (commits to push)       │                                │            │
+│    │                          │                                │            │
+│    │  MCP request             │                                │            │
+│    ├─────────────────────────►│                                │            │
+│    │  (bundle, no creds)      │                                │            │
+│    │                          │                                │            │
+│    │                          │  Unbundle to temp repo         │            │
+│    │                          │  Validate (guards, security)   │            │
+│    │                          │                                │            │
+│    │                          │  git2 push                     │            │
+│    │                          ├───────────────────────────────►│            │
+│    │                          │  (with credentials)            │            │
+│    │                          │                                │            │
+│    │                          │  Clean up temp                 │            │
+│    │                          │                                │            │
+│    │  MCP response            │                                │            │
+│    │◄─────────────────────────┤                                │            │
+│    │  (commit URL)            │                                │            │
+│    │                          │                                │            │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## MCP Tools
+
+| Tool | Description |
+|------|-------------|
+| `repo/clone` | Authenticated fetch, stream repo as tar.gz |
+| `repo/push` | Receive bundle from AI, authenticated push |
+| `repo/pull` | Stream delta of changes since last sync |
+
+---
+
+## Implementation Roadmap
+
+| Phase | Focus | Tier |
+|-------|-------|------|
+| 1 | git2 integration, credential callbacks | - |
+| 2 | Bare repo fetch, in-memory tar streaming | Tier 1 |
+| 3 | Push via bundle reception | Tier 1 |
+| 4 | Chunked streaming for large repos | Tier 2 |
+| 5 | Shallow clone, sparse checkout | Tier 2 |
+
+---
+
+## Design Principles
+
+1. **Credentials never leave** — Not even "safe" short-lived tokens
+2. **No file storage** — Temp bare repos only, cleaned immediately
+3. **Stream, don't buffer** — Chunked transfer for large repos (Tier 2)
+4. **Validate everything** — Security guards on push operations
+5. **Audit everything** — Log all operations (without credentials)
+
+---
+
+*Tier 1 gets us working. Tier 2 gets us production-ready.*

@@ -1,180 +1,452 @@
 # TODO — Development Battle Plan
 
+## The Vision: Credential Relay
+
+See `docs/VISION.md` for the full architectural vision. Summary:
+
+| Tier | Description | Data Flow |
+|------|-------------|----------|
+| **Tier 1** | Memory buffer | GitHub → MCP (RAM) → AI |
+| **Tier 2** | Chunked streaming | GitHub → MCP (chunks) → AI |
+
+**Current focus:** Tier 1 (get it working), then Tier 2 (production-ready).
+
+---
+
 ## Overview
 
-**Goal:** Build a secure, AI-agnostic Git proxy MCP server in Rust that spawns git commands on behalf of AI
-assistants, using the user's existing git credential configuration.
+**Goal:** Build a secure credential relay that enables cloud-based AI assistants to work with private Git repositories. Credentials never leave the user's PC.
 
-**Guiding Principles:**
+**Target Users:**
 
-- Security over speed. Take the time to do it right.
-- Work on ONE feature at a time.
-- Follow the style guide in `STYLE.md` and contributor guidelines in `CONTRIBUTING.md`.
+- Claude.ai (with computer use)
+- ChatGPT with Code Interpreter
+- Gemini with code execution
+- Any sandboxed AI environment
 
-**For AI Assistants:** See `.claude/CLAUDE.md` for project context.
+**Non-Targets:** Local AI tools (Claude Code, Cursor, Aider) — they already have direct Git access.
 
 ---
 
-## Security Architecture
+## Architecture: Credential Relay
 
-### Credential-Free Proxy Design
-
-```mermaid
-flowchart TB
-    subgraph PC[User's PC]
-        subgraph GitConfig[Git Configuration]
-            gitconfig[~/.gitconfig]
-            sshconfig[~/.ssh/config + ssh-agent]
-            oscreds[OS credential store]
-        end
-
-        subgraph Proxy[git-proxy-mcp]
-            validate[Validate command]
-            spawn[Spawn git process]
-            sanitise[Sanitise output]
-        end
-
-        client[Claude Desktop / MCP Client]
-    end
-
-    ai[AI VM]
-
-    GitConfig -->|git uses these| Proxy
-    Proxy -->|stdio| client
-    client -->|TLS| ai
+```
+GitHub                     User's PC                    AI's VM
+   │                          │                           │
+   │◄──── credentials ────────┤                           │
+   │      (SSH/PAT)           │                           │
+   │                          │                           │
+   │  git2 fetch (bare)       │                           │
+   ├─────────────────────────►│                           │
+   │                          │                           │
+   │                     Stream blobs to                  │
+   │                     tar (in memory)                  │
+   │                          │                           │
+   │                          │  MCP response             │
+   │                          ├─────────────────────────►│
+   │                          │  (file contents only)     │
+   │                          │                           │
+   │                     CREDENTIALS stay here            │
+   │                     FILES flow to AI                 │
 ```
 
-**Key Security Properties:**
-
-1. MCP server stores NO credentials — uses git's native credential system
-2. User configures git once, same as they would for manual use
-3. stdio transport = local process communication, no network exposure
-4. Only git output flows through MCP, sanitised for safety
+**Key constraint:** No credentials leave user's PC. No source files written to user's disk.
 
 ---
 
-## Design Decisions (Locked In)
+## Phase 1: Foundation (Tier 1) <- CURRENT
 
-| Decision | Choice | Rationale |
-|----------|--------|----------|
-| Credential storage | None | Use git's native credential helpers; no duplication |
-| Config hot-reload | No | Security: config changes require restart |
-| Concurrent operations | Yes | Allow multiple repos to be accessed simultaneously |
-| Transport | stdio only (v1) | Simplest, most secure for local MCP clients |
-| SSH keys | User manages via ssh-agent | Standard tooling, no MCP involvement |
-| Git LFS | Defer to v1.1 | v1.0: detect & warn; v1.1+: implement support |
-| Proxy approach | Pass-through | Spawn git subprocess, return output |
-| Scope | Git CLI only | Web UI features (PRs, issues, etc.) are out of scope |
-| Command scope | Remote-only | Only clone/fetch/pull/push/ls-remote |
+### 1.1 Add git2 Dependency and Module Structure
 
----
+**Goal:** Set up git2 and create the module skeleton.
 
-## Phase 8: Robustness & Production Readiness <- CURRENT
+**Files to create/modify:**
 
-- [ ] Documentation: mention per-repo git config (without `--global`) as alternative
-- [ ] Rust code: add explicit type annotations where types aren't obvious
-- [ ] Crash diagnostics: collect crash logs/traces on end-user machines for easier debugging
-- [ ] Single instance enforcement: prevent running multiple instances of the MCP server
-- [ ] Fix audit logging bug: execution errors log `command_success` instead of failure event
-- [ ] Secure audit log file permissions (0600 on Unix)
-- [ ] Distinguish exit codes: normal exit vs signal termination vs timeout
-- [ ] Validate client protocol version during MCP initialisation (currently ignored)
-- [ ] Add integration tests for full MCP command pipeline
-- [ ] Add tests for concurrent tool calls and thread safety
-- [ ] Document audit log JSON schema with examples of each event type
-- [ ] Add debugging/troubleshooting guide to documentation
-- [ ] Add more credential patterns to sanitiser (AWS keys, generic API keys)
-- [ ] Handle URL edge cases in sanitiser (IPv6 addresses, @ in passwords, ports with auth)
-- [ ] Make default protected branches configurable (currently hardcoded: main, master, develop)
-- [ ] Add config validation (e.g., warn if repo_allowlist and repo_blocklist both set)
-- [ ] Support wildcard patterns in dangerous flags detection
-- [ ] Add structured error codes for all failure modes (for programmatic handling)
-- [ ] Consider pre-compiling wildcard patterns for better performance in guards
-- [ ] Add request ID tracking for correlating audit logs with MCP requests
-- [ ] AI commit author identity: set `GIT_AUTHOR_NAME`/`GIT_AUTHOR_EMAIL` for AI commits (see v1.1+ section for details)
-- [ ] Add `--dry-run` CLI flag to validate config without starting server
-- [ ] Support environment variable overrides for config options (e.g., `GIT_PROXY_TIMEOUT`)
-- [ ] Add version compatibility check between server and MCP protocol
-- [ ] Improve error messages with actionable suggestions (e.g., "Run `git config --global credential.helper ...`")
-- [ ] Add command execution statistics to audit log (commands per session, error rate)
-- [ ] Support custom sanitiser patterns via config file
-- [ ] Add optional JSON output format for logs (structured logging)
-- [ ] Health check endpoint for monitoring
+```
+Cargo.toml                 # Add dependencies
+src/
+├── git2_ops/              # git2 operations
+│   ├── mod.rs
+│   ├── auth.rs            # Credential callbacks
+│   ├── clone.rs           # Bare fetch + tree streaming
+│   ├── push.rs            # Bundle processing + push
+│   └── error.rs
+└── streaming/             # In-memory transfer handling
+    ├── mod.rs
+    ├── tar.rs             # Tree → tar.gz (in memory)
+    └── bundle.rs          # Git bundle handling
+```
+
+**Cargo.toml additions:**
+
+```toml
+[dependencies]
+git2 = "0.19"
+flate2 = "1.0"
+tar = "0.4"
+base64 = "0.21"
+tempfile = "3.10"
+```
+
+**Acceptance criteria:**
+
+- [ ] `cargo build` succeeds
+- [ ] Module structure in place
+- [ ] Smoke test: can create `git2::Repository`
 
 ---
 
-## Phase 9: Cross-Platform Release
+### 1.2 Implement Credential Callbacks
 
-- [ ] Binary signing (if applicable)
+**File:** `src/git2_ops/auth.rs`
 
-> **Note:** The repository owner decides when to move from pre-release (v0.x) to stable release (v1.0).
-> This decision should be based on real-world usage, security audits, and feature completeness.
+```rust
+use git2::{Cred, CredentialType, RemoteCallbacks};
 
----
+pub fn create_callbacks() -> RemoteCallbacks<'static> {
+    let mut callbacks = RemoteCallbacks::new();
 
-## Future Considerations (v1.1+)
+    callbacks.credentials(|url, username_from_url, allowed_types| {
+        // SSH agent (key never leaves agent)
+        if allowed_types.contains(CredentialType::SSH_KEY) {
+            if let Some(username) = username_from_url {
+                return Cred::ssh_key_from_agent(username);
+            }
+        }
 
-### AI Commit Author Identity
+        // Credential helper (system keychain)
+        if allowed_types.contains(CredentialType::USER_PASS_PLAINTEXT) {
+            let config = git2::Config::open_default()?;
+            return Cred::credential_helper(&config, url, username_from_url);
+        }
 
-Allow AI commits to show a separate contributor identity on GitHub while still using the
-human's credentials for push authentication. This provides clear audit trail of human vs
-AI contributions.
+        Err(git2::Error::from_str("no suitable credential method"))
+    });
 
-**How it works:**
-
-| Aspect | Who | How |
-|--------|-----|-----|
-| Push authentication | Human user | OS credential store / SSH agent (unchanged) |
-| Commit author | AI bot account | `GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL` env vars |
-
-**Workflow:**
-
-1. Human clones repo (as `MatejGomboc`)
-2. AI codes & commits via git-proxy-mcp (as `MatejGomboc-Claude-MCP`)
-3. AI creates PR via GitHub MCP server
-4. Human reviews & approves
-
-**Configuration:**
-
-```json
-{
-  "ai_identity": {
-    "author_name": "MatejGomboc-Claude-MCP",
-    "author_email": "matejgomboc-claude-mcp@users.noreply.github.com"
-  }
+    callbacks
 }
 ```
 
-**Benefits:**
+**Security rules:**
 
-- Clear audit trail — anyone can see which code is AI-generated
-- Clean GitHub contributor stats — human vs AI contributions separated
-- Accountability — human approves all AI code before merge
-- **Still credential-free** — only sets author metadata, no tokens stored
+- NEVER log `Cred` objects
+- NEVER store credentials
+- NEVER include credentials in error messages
 
-**Implementation notes:**
+**Acceptance criteria:**
 
-- Set `GIT_AUTHOR_NAME` and `GIT_AUTHOR_EMAIL` before spawning git
-- `GIT_COMMITTER_*` stays as user's identity (from git config)
-- Author email must match a GitHub account for avatar/link to appear
-- Feature should be optional and disabled by default
+- [ ] Compiles
+- [ ] SSH agent path implemented
+- [ ] Credential helper path implemented
+- [ ] Code audit: no credential leakage
 
 ---
 
-### Other Future Features
+### 1.3 Implement Streaming Clone
 
-- Git LFS support (currently detect & warn only)
+**Goal:** Fetch repo and stream contents as tar.gz WITHOUT writing source files to disk.
+
+#### 1.3.1 Bare Fetch
+
+**File:** `src/git2_ops/clone.rs`
+
+```rust
+use git2::{Repository, FetchOptions, Oid};
+use tempfile::TempDir;
+
+pub struct FetchResult {
+    pub repo: Repository,
+    pub head_commit: Oid,
+    pub branch: String,
+    pub _temp_dir: TempDir,  // Prevent cleanup until we're done
+}
+
+pub fn fetch_repo(
+    url: &str,
+    branch: Option<&str>,
+    callbacks: RemoteCallbacks,
+) -> Result<FetchResult, git2::Error> {
+    // Create BARE repo - no working tree!
+    let temp_dir = TempDir::new()?;
+    let repo = Repository::init_bare(temp_dir.path())?;
+
+    // Add remote and fetch
+    let mut remote = repo.remote_anonymous(url)?;
+    let mut fetch_opts = FetchOptions::new();
+    fetch_opts.remote_callbacks(callbacks);
+
+    let branch_name = branch.unwrap_or("main");
+    let refspec = format!("refs/heads/{branch_name}:refs/heads/{branch_name}");
+
+    remote.fetch(&[&refspec], Some(&mut fetch_opts), None)?;
+
+    let reference = repo.find_reference(&format!("refs/heads/{branch_name}"))?;
+    let head_commit = reference.peel_to_commit()?.id();
+
+    Ok(FetchResult {
+        repo,
+        head_commit,
+        branch: branch_name.to_string(),
+        _temp_dir: temp_dir,
+    })
+}
+```
+
+**Key:** `Repository::init_bare()` — NO working tree, NO source files!
+
+#### 1.3.2 Stream Tree to Tar
+
+**File:** `src/streaming/tar.rs`
+
+```rust
+use flate2::write::GzEncoder;
+use flate2::Compression;
+use git2::{Repository, Oid, ObjectType, TreeWalkMode, TreeWalkResult};
+use std::io::Write;
+
+pub fn create_tar_from_tree(
+    repo: &Repository,
+    commit_id: Oid,
+) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    let commit = repo.find_commit(commit_id)?;
+    let tree = commit.tree()?;
+
+    let mut archive_buffer = Vec::new();
+    {
+        let encoder = GzEncoder::new(&mut archive_buffer, Compression::fast());
+        let mut tar = tar::Builder::new(encoder);
+
+        tree.walk(TreeWalkMode::PreOrder, |dir, entry| {
+            let name = match entry.name() {
+                Some(n) => n,
+                None => return TreeWalkResult::Skip,
+            };
+
+            let path = if dir.is_empty() {
+                name.to_string()
+            } else {
+                format!("{dir}{name}")
+            };
+
+            if entry.kind() == Some(ObjectType::Blob) {
+                if let Ok(blob) = repo.find_blob(entry.id()) {
+                    let content = blob.content();
+
+                    let mut header = tar::Header::new_gnu();
+                    let _ = header.set_path(&path);
+                    header.set_size(content.len() as u64);
+                    header.set_mode(entry.filemode() as u32);
+                    header.set_cksum();
+
+                    let _ = tar.append(&header, content);
+                }
+            }
+
+            TreeWalkResult::Ok
+        })?;
+
+        tar.finish()?;
+    }
+
+    Ok(archive_buffer)
+}
+```
+
+**Key insight:**
+
+- `repo.find_blob(id)` reads from git object database
+- `blob.content()` gives raw bytes — never written to disk
+- `tar::Builder::new(Vec::new())` builds archive in memory
+
+#### 1.3.3 MCP Tool Handler
+
+**File:** `src/mcp/tools/repo_clone.rs`
+
+```rust
+#[derive(Deserialize)]
+pub struct RepoCloneArgs {
+    pub url: String,
+    pub branch: Option<String>,
+    pub depth: Option<u32>,
+    pub sparse: Option<Vec<String>>,
+}
+
+#[derive(Serialize)]
+pub struct RepoCloneResult {
+    pub archive: String,  // Base64 tar.gz
+    pub commit: String,
+    pub branch: String,
+    pub file_count: usize,
+    pub archive_size: usize,
+}
+
+pub async fn handle_repo_clone(args: RepoCloneArgs) -> Result<RepoCloneResult, ToolError> {
+    let callbacks = crate::git2_ops::auth::create_callbacks();
+
+    let fetch_result = crate::git2_ops::clone::fetch_repo(
+        &args.url,
+        args.branch.as_deref(),
+        callbacks,
+    )?;
+
+    let archive_data = crate::streaming::tar::create_tar_from_tree(
+        &fetch_result.repo,
+        fetch_result.head_commit,
+    )?;
+
+    let archive_base64 = base64::engine::general_purpose::STANDARD.encode(&archive_data);
+
+    Ok(RepoCloneResult {
+        archive: archive_base64,
+        commit: fetch_result.head_commit.to_string(),
+        branch: fetch_result.branch,
+        file_count: count_files(&archive_data)?,
+        archive_size: archive_data.len(),
+    })
+}
+```
+
+**Acceptance criteria:**
+
+- [ ] `repo/clone` tool works
+- [ ] Public repos clone without auth
+- [ ] Private repos clone with credential helper
+- [ ] Private repos clone with SSH agent
+- [ ] **NO source files on disk** (verify!)
+- [ ] Valid tar.gz output
+- [ ] Temp bare repo cleaned up
+
+---
+
+### 1.4 Implement Push
+
+**File:** `src/streaming/bundle.rs`
+
+```rust
+pub fn process_bundle_and_push(
+    bundle_data: &[u8],
+    remote_url: &str,
+    target_branch: &str,
+    callbacks: RemoteCallbacks,
+) -> Result<PushResult, Error> {
+    let temp_dir = TempDir::new()?;
+    let repo = Repository::init_bare(temp_dir.path())?;
+
+    // Write bundle to temp (just the bundle, not source files)
+    let bundle_path = temp_dir.path().join("input.bundle");
+    std::fs::write(&bundle_path, bundle_data)?;
+
+    // Unbundle (adds objects to bare repo)
+    let mut remote = repo.remote_anonymous(bundle_path.to_str().unwrap())?;
+    remote.fetch(&["refs/heads/*:refs/heads/*"], None, None)?;
+
+    // Push to real remote with auth
+    let mut real_remote = repo.remote_anonymous(remote_url)?;
+    let mut push_opts = git2::PushOptions::new();
+    push_opts.remote_callbacks(callbacks);
+
+    real_remote.push(
+        &[&format!("refs/heads/{target_branch}")],
+        Some(&mut push_opts),
+    )?;
+
+    let reference = repo.find_reference(&format!("refs/heads/{target_branch}"))?;
+    let commit = reference.peel_to_commit()?.id();
+
+    Ok(PushResult {
+        branch: target_branch.to_string(),
+        commit: commit.to_string(),
+    })
+}
+```
+
+**Acceptance criteria:**
+
+- [ ] `repo/push` tool works
+- [ ] Push to existing branch
+- [ ] Create and push to new branch
+- [ ] Protected branch guard works
+- [ ] Bundle temp file cleaned up
+
+---
+
+### 1.5 Session Management
+
+**File:** `src/session.rs`
+
+```rust
+pub struct RepoSession {
+    pub url: String,
+    pub branch: String,
+    pub last_commit: String,
+    // NO file paths - we don't store files!
+}
+
+pub struct SessionManager {
+    sessions: Arc<RwLock<HashMap<String, RepoSession>>>,
+}
+```
+
+---
+
+### 1.6 Integration Testing
+
+```bash
+# Verify no disk writes (Linux)
+strace -f -e write cargo run 2>&1 | grep -v /tmp
+```
+
+---
+
+## Phase 2: Tier 1 Hardening
+
+- [ ] Comprehensive error handling
+- [ ] Shallow clone support (`depth` parameter)
+- [ ] Sparse checkout support (`sparse` parameter)
+- [ ] Audit logging for all operations
+- [ ] Rate limiting integration
+- [ ] Security guards (branch protection, force push)
+
+---
+
+## Phase 3: Tier 2 (Chunked Streaming) <- TARGET
+
+- [ ] Stream tar in chunks instead of buffering entire repo
+- [ ] Handle repos larger than available RAM
+- [ ] Resume interrupted transfers
+- [ ] Progress reporting
+
+**Tier 2 is the production-ready goal.**
+
+---
+
+## Phase 4: Polish & Release
+
+- [ ] Multi-provider support (GitLab, Bitbucket)
+- [ ] Comprehensive documentation
+- [ ] Performance benchmarks
+- [ ] Security audit
+
+---
+
+## Success Metrics
+
+| Metric | Tier 1 | Tier 2 |
+|--------|--------|--------|
+| Files on user's disk | None | None |
+| Credentials to AI | **NEVER** | **NEVER** |
+| Data through user's PC | Yes (RAM) | Yes (chunked) |
+| Clone 100 files | < 5s | < 5s |
+| Memory for large repo | O(repo) | O(chunk) |
 
 ---
 
 ## References
 
-- **MCP Specification:** <https://modelcontextprotocol.io/>
-- **Open Source Guides:** <https://opensource.guide/>
-- **Claude Code Docs:** <https://docs.anthropic.com/en/docs/claude-code>
-- **Swatinem/rust-cache:** <https://github.com/Swatinem/rust-cache>
-- **EditorConfig:** <https://editorconfig.org/>
+- [git2 crate](https://docs.rs/git2/latest/git2/)
+- [MCP Specification](https://modelcontextprotocol.io/)
+- [libgit2 authentication](https://libgit2.org/docs/guides/authentication/)
 
 ---
 
-*Last updated: 2026-01-01*
+*Tier 1 gets us working. Tier 2 gets us production-ready.*
