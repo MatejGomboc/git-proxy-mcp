@@ -52,7 +52,7 @@ Avoid duplicating information across files. Each piece of information should hav
 Use `rustfmt` with default settings. CI enforces this.
 
 ```bash
-cargo fmt --all        # Format all code
+cargo fmt --all         # Format all code
 cargo fmt --all --check # Check without modifying
 ```
 
@@ -142,6 +142,31 @@ Use **4 spaces from the `-` column** for shell script content inside `run: |` bl
 }
 ```
 
+### Formatter
+
+VS Code uses the built-in JSON formatter (`vscode.json-language-features`).
+
+---
+
+## TOML
+
+### Indentation
+
+**4 spaces**.
+
+```toml
+[package]
+name = "git-proxy-mcp"
+version = "0.1.0"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+```
+
+### Formatter
+
+Use [Even Better TOML](https://marketplace.visualstudio.com/items?itemName=tamasfe.even-better-toml) for VS Code. Column width is set to 170 characters (configured in `.vscode/settings.json`).
+
 ---
 
 ## Markdown
@@ -192,4 +217,4 @@ See `CONTRIBUTING.md` § British Spelling for the full reference table.
 
 ---
 
-*Last updated: 2026-01-01*
+*Last updated: 2026-01-10*
