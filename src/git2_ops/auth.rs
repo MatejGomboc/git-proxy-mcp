@@ -22,10 +22,20 @@
 //! - Credentials are NEVER logged
 //! - Credentials are NEVER stored in memory longer than needed
 //! - Credentials are NEVER included in error messages
+//! - Credentials are NEVER sent to AI (they stay on user's PC)
 //! - Private keys never leave the SSH agent
+//!
+//! # Credential Retrieval for LFS
+//!
+//! The [`get_credentials_for_url`] function retrieves credentials from the OS
+//! credential store using the git credential helper protocol. This allows LFS
+//! operations to authenticate without storing credentials in the MCP server.
 
 use git2::{Cred, CredentialType, RemoteCallbacks};
-use tracing::{debug, warn};
+use std::io::Write;
+use std::process::{Command, Stdio};
+use tracing::{debug, trace, warn};
+use url::Url;
 
 use super::error::Git2Error;
 use crate::mcp::ProgressSender;
@@ -214,6 +224,116 @@ pub fn validate_url(url: &str) -> Result<(), Git2Error> {
     Ok(())
 }
 
+/// Retrieve credentials for a URL from the OS credential store.
+///
+/// This uses the git credential helper protocol to retrieve credentials from
+/// the user's configured credential store (macOS Keychain, Windows Credential
+/// Manager, git-credential-manager, etc.).
+///
+/// # Security
+///
+/// - Credentials are retrieved on-demand from OS-level credential stores
+/// - Credentials NEVER leave the user's PC
+/// - Credentials are NEVER logged or stored persistently by this MCP server
+/// - This function returns the credentials in memory only for immediate use
+///
+/// # Arguments
+///
+/// * `url` - The URL to get credentials for (e.g., `https://github.com/owner/repo.git`)
+///
+/// # Returns
+///
+/// `Some((username, password))` if credentials were found, `None` otherwise.
+///
+/// # Example
+///
+/// ```ignore
+/// let creds = get_credentials_for_url("https://github.com/owner/repo.git");
+/// if let Some((user, pass)) = creds {
+///     // Use credentials for LFS authentication
+/// }
+/// ```
+#[must_use]
+pub fn get_credentials_for_url(url: &str) -> Option<(String, String)> {
+    // Parse the URL to extract protocol and host
+    let parsed = parse_url_for_credentials(url)?;
+
+    trace!(
+        protocol = %parsed.0,
+        host = %parsed.1,
+        "retrieving credentials from git credential helper"
+    );
+
+    // Build the input for git credential fill
+    let input = format!(
+        "protocol={}\nhost={}\n\n",
+        parsed.0, // protocol (https)
+        parsed.1  // host (github.com)
+    );
+
+    // Run git credential fill
+    let output = Command::new("git")
+        .args(["credential", "fill"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()
+        .and_then(|mut child| {
+            // Write input to stdin
+            if let Some(stdin) = child.stdin.as_mut() {
+                stdin.write_all(input.as_bytes()).ok()?;
+            }
+            child.wait_with_output().ok()
+        })?;
+
+    if !output.status.success() {
+        debug!("git credential helper returned non-zero status");
+        return None;
+    }
+
+    // Parse the output
+    let stdout = String::from_utf8(output.stdout).ok()?;
+    parse_credential_output(&stdout)
+}
+
+/// Parse a URL into (protocol, host) for credential lookup.
+fn parse_url_for_credentials(url: &str) -> Option<(String, String)> {
+    // Handle SSH URLs: git@github.com:owner/repo.git
+    if url.starts_with("git@") {
+        // Extract host from git@host:path
+        let without_prefix = url.strip_prefix("git@")?;
+        let host = without_prefix.split(':').next()?;
+        return Some(("https".to_string(), host.to_string()));
+    }
+
+    // Handle standard URLs
+    let parsed = Url::parse(url).ok()?;
+    let protocol = parsed.scheme().to_string();
+    let host = parsed.host_str()?.to_string();
+
+    Some((protocol, host))
+}
+
+/// Parse git credential output into (username, password).
+fn parse_credential_output(output: &str) -> Option<(String, String)> {
+    let mut username = None;
+    let mut password = None;
+
+    for line in output.lines() {
+        if let Some((key, value)) = line.split_once('=') {
+            match key {
+                "username" => username = Some(value.to_string()),
+                "password" => password = Some(value.to_string()),
+                _ => {}
+            }
+        }
+    }
+
+    // Both username and password are required
+    Some((username?, password?))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -310,5 +430,71 @@ mod tests {
         let sanitized = sanitize_url_for_logging(url);
         assert!(!sanitized.contains("app_password"));
         assert!(sanitized.contains("***@bitbucket.org"));
+    }
+
+    // Credential helper URL parsing tests
+    #[test]
+    fn parse_url_for_credentials_https() {
+        let result = parse_url_for_credentials("https://github.com/owner/repo.git");
+        assert_eq!(result, Some(("https".to_string(), "github.com".to_string())));
+    }
+
+    #[test]
+    fn parse_url_for_credentials_http() {
+        let result = parse_url_for_credentials("http://gitlab.example.com/owner/repo.git");
+        assert_eq!(
+            result,
+            Some(("http".to_string(), "gitlab.example.com".to_string()))
+        );
+    }
+
+    #[test]
+    fn parse_url_for_credentials_ssh() {
+        let result = parse_url_for_credentials("git@github.com:owner/repo.git");
+        // SSH URLs use https protocol for credential lookup
+        assert_eq!(result, Some(("https".to_string(), "github.com".to_string())));
+    }
+
+    #[test]
+    fn parse_url_for_credentials_gitlab_ssh() {
+        let result = parse_url_for_credentials("git@gitlab.com:owner/repo.git");
+        assert_eq!(result, Some(("https".to_string(), "gitlab.com".to_string())));
+    }
+
+    #[test]
+    fn parse_url_for_credentials_invalid() {
+        let result = parse_url_for_credentials("not-a-url");
+        assert!(result.is_none());
+    }
+
+    // Credential output parsing tests
+    #[test]
+    fn parse_credential_output_valid() {
+        let output = "protocol=https\nhost=github.com\nusername=myuser\npassword=mytoken\n";
+        let result = parse_credential_output(output);
+        assert_eq!(
+            result,
+            Some(("myuser".to_string(), "mytoken".to_string()))
+        );
+    }
+
+    #[test]
+    fn parse_credential_output_missing_username() {
+        let output = "protocol=https\nhost=github.com\npassword=mytoken\n";
+        let result = parse_credential_output(output);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn parse_credential_output_missing_password() {
+        let output = "protocol=https\nhost=github.com\nusername=myuser\n";
+        let result = parse_credential_output(output);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn parse_credential_output_empty() {
+        let result = parse_credential_output("");
+        assert!(result.is_none());
     }
 }

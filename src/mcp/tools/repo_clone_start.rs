@@ -34,7 +34,7 @@
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 
-use crate::git2_ops::auth::sanitize_url_for_logging;
+use crate::git2_ops::auth::{get_credentials_for_url, sanitize_url_for_logging};
 use crate::git2_ops::clone::{fetch_bare, FetchOptions2};
 use crate::git2_ops::error::Git2Error;
 use crate::streaming::chunked::{
@@ -254,6 +254,16 @@ pub fn handle_repo_clone_start(
         "fetch complete, creating tar"
     );
 
+    // Get LFS credentials from git credential helper if LFS resolution is enabled
+    // Credentials are retrieved on-demand from OS credential stores (macOS Keychain,
+    // Windows Credential Manager, etc.) and NEVER sent to AI - they stay on user's PC.
+    let lfs_credentials = if args.resolve_lfs == Some(true) {
+        debug!("LFS enabled, retrieving credentials from OS credential store");
+        get_credentials_for_url(&args.url)
+    } else {
+        None
+    };
+
     // Create tar.gz from tree (in memory), with optional filtering
     let tar_opts = TarOptions {
         sparse_patterns: args.sparse,
@@ -265,7 +275,7 @@ pub fn handle_repo_clone_start(
         } else {
             None
         },
-        lfs_credentials: None, // TODO: Support LFS credentials from git credential helper
+        lfs_credentials, // From OS credential store, NEVER sent to AI
         include_submodules: args.include_submodules,
         progress: None,
     };

@@ -62,6 +62,9 @@ tar = "0.4"
 # Base64 encoding for MCP responses
 base64 = "0.22"
 
+# URL parsing for credential helper
+url = "2.5"
+
 # Temporary directories for bare repos
 tempfile = "3.10"
 

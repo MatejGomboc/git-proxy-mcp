@@ -508,6 +508,10 @@ pub struct RepoCloneResult {
 - [x] Fetch LFS objects via authenticated Batch API
 - [x] Include real content in tar (not pointers)
 - [x] Track resolved/failed statistics in response
+- [x] **LFS credentials from OS credential store** (macOS Keychain, Windows Credential Manager, git-credential-manager)
+    - Uses `git credential fill` protocol to retrieve credentials on-demand
+    - Credentials NEVER leave user's PC, NEVER sent to AI
+    - Automatic for any host with stored git credentials
 
 ---
 
