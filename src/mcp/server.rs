@@ -518,10 +518,7 @@ impl McpServer {
     }
 
     /// Handles the tools/call request.
-    fn handle_tools_call(
-        &self,
-        req: &JsonRpcRequest,
-    ) -> Result<JsonRpcResponse, JsonRpcError> {
+    fn handle_tools_call(&self, req: &JsonRpcRequest) -> Result<JsonRpcResponse, JsonRpcError> {
         self.require_running(&req.id)?;
 
         let params: ToolCallParams = req
