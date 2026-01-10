@@ -248,8 +248,8 @@ Get diff between two commits.
   "name": "repo/diff",
   "arguments": {
     "url": "https://github.com/user/private-repo",
-    "base": "abc123",
-    "head": "def456"
+    "base_commit": "abc123",
+    "head_commit": "def456"
   }
 }
 ```
@@ -316,7 +316,10 @@ Add to your Claude Desktop MCP configuration:
 
 ## Configuration
 
-Minimal configuration file at `~/.git-proxy-mcp/config.json`:
+Minimal configuration file:
+
+- **Linux/macOS:** `~/.git-proxy-mcp/config.json`
+- **Windows:** `%USERPROFILE%\.git-proxy-mcp\config.json`
 
 ```json
 {
@@ -344,7 +347,7 @@ Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## Licence
 
-Copyright (C) 2025 Matej Gomboc <https://github.com/MatejGomboc/git-proxy-mcp>.
+Copyright (C) 2026 Matej Gomboc <https://github.com/MatejGomboc/git-proxy-mcp>.
 
 GNU General Public License v3.0 — see [LICENCE](LICENCE).
 
