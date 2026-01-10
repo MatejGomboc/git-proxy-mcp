@@ -31,44 +31,6 @@ These are standard JSON-RPC 2.0 error codes returned when there's an issue with 
 
 ---
 
-## Git Command Errors
-
-These errors occur when validating or executing Git commands through the `git` tool.
-
-### Command Validation Errors
-
-| Error | Message Format | Cause |
-|-------|---------------|-------|
-| Empty command | `git command cannot be empty` | The `command` field is missing or empty |
-| Command not allowed | `git command '{command}' is not allowed` | The command is not in the allowlist (only `clone`, `fetch`, `pull`, `push`, `ls-remote` are allowed) |
-| Dangerous flag | `dangerous flag '{flag}' is not allowed` | A blocked flag was detected (see Blocked Flags below) |
-| Invalid working directory | `invalid working directory: {path}` | The `cwd` path is relative (must be absolute) |
-
-### Blocked Flags
-
-The following flags are blocked for security reasons:
-
-| Flag | Reason |
-|------|--------|
-| `--exec` | Arbitrary command execution |
-| `-c` | Can set arbitrary git config including hooks |
-| `--upload-pack` | Custom pack command execution |
-| `--receive-pack` | Custom pack command execution |
-| `--no-verify` | Bypasses security hooks |
-| `--verbose`, `-v` | May leak credentials in output |
-| `--debug` | May contain sensitive information |
-| `--git-dir` | Path traversal risk |
-| `--work-tree` | Path traversal risk |
-
-### Execution Errors
-
-| Error | Message Format | Cause |
-|-------|---------------|-------|
-| Process error | `process error: {message}` | Git process failed to start (e.g., git not installed) |
-| Working directory error | `working directory error: {message}` | The working directory doesn't exist, isn't a directory, or isn't accessible |
-
----
-
 ## Security Guard Errors
 
 These errors occur when security policies block an operation.
@@ -77,7 +39,7 @@ These errors occur when security policies block an operation.
 
 | Error | Message |
 |-------|---------|
-| Rate limit exceeded | `Rate limit exceeded. Please wait before sending more Git commands.` |
+| Rate limit exceeded | `Rate limit exceeded. Please wait before sending more requests.` |
 
 Default rate limits: 20 operations burst, 5 operations per second sustained.
 
@@ -123,7 +85,7 @@ These errors occur when loading or validating the configuration file.
 
 ## Tool Call Results
 
-When a git command is executed, the result is returned in the tool call response. Errors are indicated by `isError: true`:
+Tool call results are returned in the tool call response. Errors are indicated by `isError: true`:
 
 ### Success Response
 
@@ -132,7 +94,7 @@ When a git command is executed, the result is returned in the tool call response
     "content": [
         {
             "type": "text",
-            "text": "Cloning into 'repo'...\nRemote: Counting objects: 100, done."
+            "text": "{\"archive\": \"H4sI...\", \"commit\": \"abc123\", \"file_count\": 47}"
         }
     ]
 }
@@ -145,20 +107,12 @@ When a git command is executed, the result is returned in the tool call response
     "content": [
         {
             "type": "text",
-            "text": "Command failed with exit code 128:\nfatal: repository 'https://github.com/nonexistent/repo.git/' not found"
+            "text": "Repository not found or access denied"
         }
     ],
     "isError": true
 }
 ```
-
-### Common Git Exit Codes
-
-| Exit Code | Meaning |
-|-----------|---------|
-| 0 | Success |
-| 1 | Generic error |
-| 128 | Fatal error (e.g., repository not found, authentication failure) |
 
 ---
 
@@ -175,51 +129,33 @@ These errors occur during the MCP handshake.
 
 ---
 
-## Credential Sanitisation
+## URL Sanitisation
 
-Output is sanitised to prevent credential leakage. When credentials are detected, they are replaced with `[REDACTED]`.
-
-### Detected Patterns
-
-| Pattern | Description |
-|---------|-------------|
-| `ghp_*`, `gho_*`, `ghu_*`, `ghs_*`, `ghr_*` | GitHub tokens |
-| `glpat-*`, `gloas-*`, `gldt-*`, `glrt-*`, `glcbt-*` | GitLab tokens |
-| `ATBB*` | Bitbucket app passwords |
-| `azure://` | Azure DevOps URLs |
-| `https://user:pass@host` | URL-embedded credentials |
-| `Authorization:`, `Bearer` | HTTP auth headers |
-| `-----BEGIN * PRIVATE KEY` | SSH/PGP keys |
+URLs are sanitised before logging to prevent credential leakage:
 
 ### Example
 
 Input:
 
 ```text
-error: https://user:ghp_secret123@github.com failed
+https://user:ghp_secret123@github.com/repo.git
 ```
 
-Output:
+Output (in logs):
 
 ```text
-error: https://[REDACTED]@github.com failed
+https://***@github.com/repo.git
 ```
+
+Credentials embedded in URLs are replaced with `***` before any logging occurs.
 
 ---
 
 ## Troubleshooting
 
-### "git command not found"
-
-Ensure Git is installed and in your PATH:
-
-```bash
-git --version
-```
-
 ### Authentication Failures
 
-git-proxy-mcp uses your existing Git configuration. Test authentication:
+git-proxy-mcp uses your existing Git credential configuration via the git2 library. Test your credentials work:
 
 ```bash
 # For HTTPS
@@ -231,11 +167,9 @@ git ls-remote git@github.com:your-private-repo.git
 
 If prompted for credentials, configure a credential helper or SSH agent.
 
-### "terminal prompts disabled"
+### Credential Helper Setup
 
-This error means Git tried to prompt for credentials interactively. git-proxy-mcp sets `GIT_TERMINAL_PROMPT=0` to prevent hanging.
-
-**Solution:** Configure a credential helper to cache your credentials:
+Configure a credential helper to store your credentials:
 
 ```bash
 # macOS
@@ -246,6 +180,18 @@ git config --global credential.helper manager
 
 # Linux
 git config --global credential.helper libsecret
+```
+
+### SSH Agent Setup
+
+For SSH authentication, ensure your SSH agent is running and has your key loaded:
+
+```bash
+# Start the agent (if not running)
+eval "$(ssh-agent -s)"
+
+# Add your key
+ssh-add ~/.ssh/id_ed25519
 ```
 
 ---

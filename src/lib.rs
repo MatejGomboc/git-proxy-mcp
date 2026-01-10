@@ -40,8 +40,7 @@
 //!
 //! - [`config`] — Configuration loading and validation
 //! - [`error`] — Error types
-//! - [`git`] — Git command parsing and execution (legacy subprocess model)
-//! - [`git2_ops`] — git2 library operations (Tier 1 credential relay)
+//! - [`git2_ops`] — git2 library operations (credential relay)
 //! - [`mcp`] — MCP protocol implementation
 //! - [`security`] — Security guards and audit logging
 //! - [`session`] — Session management for tracking cloned repositories
@@ -49,7 +48,6 @@
 
 pub mod config;
 pub mod error;
-pub mod git;
 pub mod git2_ops;
 pub mod mcp;
 pub mod security;
