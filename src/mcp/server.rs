@@ -590,6 +590,8 @@ impl McpServer {
             "repo_clone_start" => self.call_repo_clone_start_tool(&params.arguments),
             "repo_clone_chunk" => self.call_repo_clone_chunk_tool(&params.arguments),
             "repo_clone_cancel" => self.call_repo_clone_cancel_tool(&params.arguments),
+            // Utility tools
+            "helper_script" => Self::call_helper_script_tool(),
             _ => ToolCallResult::error(format!("Unknown tool: {}", params.name)),
         };
 
@@ -872,6 +874,22 @@ impl McpServer {
                         }
                     },
                     "required": ["url", "branch", "since_commit"]
+                }),
+            },
+            // Utility: Helper script for AI assistants
+            ToolDefinition {
+                name: "helper_script".to_string(),
+                description: Some(
+                    "Get a Python helper script that simplifies working with git-proxy-mcp. \
+                     The script handles JSON parsing, base64 decoding, and archive extraction \
+                     automatically. Save it once per session and use for all operations. \
+                     Commands: extract (for clone/pull results), bundle (for push), info (metadata)."
+                        .to_string(),
+                ),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {},
+                    "required": []
                 }),
             },
         ]
@@ -1384,6 +1402,23 @@ impl McpServer {
                 );
                 ToolCallResult::error(e.to_string())
             }
+        }
+    }
+
+    /// Calls the `helper_script` tool.
+    ///
+    /// This tool returns a Python helper script that simplifies working with
+    /// git-proxy-mcp responses. No arguments required.
+    fn call_helper_script_tool() -> ToolCallResult {
+        use crate::mcp::tools::handle_helper_script;
+
+        let result = handle_helper_script();
+
+        tracing::info!("helper_script tool called");
+
+        match serde_json::to_string_pretty(&result) {
+            Ok(json) => ToolCallResult::text(json),
+            Err(e) => ToolCallResult::error(format!("Failed to serialize result: {e}")),
         }
     }
 }

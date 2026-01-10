@@ -18,6 +18,10 @@
 //! - [`repo_clone_start`] — Start a chunked clone, returns session info
 //! - [`repo_clone_chunk`] — Get a chunk from a streaming session
 //!
+//! ## Utilities
+//!
+//! - [`helper_script`] — Get a Python helper script for easier result handling
+//!
 //! # Security
 //!
 //! All tool handlers follow the security principles:
@@ -25,6 +29,7 @@
 //! - No source files written to disk (bare repos only)
 //! - All responses are sanitized for credential leakage
 
+pub mod helper_script;
 pub mod repo_clone;
 pub mod repo_clone_chunk;
 pub mod repo_clone_start;
@@ -33,6 +38,7 @@ pub mod repo_pull;
 pub mod repo_push;
 pub mod repo_refs;
 
+pub use helper_script::{handle_helper_script, HelperScriptResult};
 pub use repo_clone::{handle_repo_clone, RepoCloneArgs, RepoCloneResult};
 pub use repo_clone_chunk::{
     handle_repo_clone_cancel, handle_repo_clone_chunk, RepoCloneCancelArgs, RepoCloneCancelResult,
