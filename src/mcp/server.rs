@@ -52,8 +52,8 @@ use crate::security::{
 };
 use crate::mcp::tools::{
     handle_repo_clone, handle_repo_clone_cancel, handle_repo_clone_chunk, handle_repo_clone_start,
-    handle_repo_push, RepoCloneCancelArgs, RepoCloneArgs, RepoCloneChunkArgs, RepoCloneStartArgs,
-    RepoPushArgs,
+    handle_repo_push, handle_repo_refs, RepoCloneCancelArgs, RepoCloneArgs, RepoCloneChunkArgs,
+    RepoCloneStartArgs, RepoPushArgs, RepoRefsArgs,
 };
 use crate::streaming::chunked::StreamingSessionManager;
 
@@ -553,6 +553,7 @@ impl McpServer {
             "git" => self.call_git_tool(&params.arguments).await,
             "repo/clone" => self.call_repo_clone_tool(&params.arguments),
             "repo/push" => self.call_repo_push_tool(&params.arguments),
+            "repo/refs" => self.call_repo_refs_tool(&params.arguments),
             // Tier 2: Chunked streaming tools
             "repo/clone_start" => self.call_repo_clone_start_tool(&params.arguments),
             "repo/clone_chunk" => self.call_repo_clone_chunk_tool(&params.arguments),
@@ -775,6 +776,27 @@ impl McpServer {
                         }
                     },
                     "required": ["session_id"]
+                }),
+            },
+            // List remote refs without cloning
+            ToolDefinition {
+                name: "repo/refs".to_string(),
+                description: Some(
+                    "List branches and tags from a remote repository without cloning. \
+                     Returns structured information about available branches, tags, and \
+                     the default branch. Use this to explore a repository before cloning. \
+                     Equivalent to 'git ls-remote' but with structured output."
+                        .to_string(),
+                ),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "url": {
+                            "type": "string",
+                            "description": "Repository URL (https:// or git@)"
+                        }
+                    },
+                    "required": ["url"]
                 }),
             },
         ]
@@ -1246,6 +1268,75 @@ impl McpServer {
                 }
             }
             Err(e) => ToolCallResult::error(e.to_string()),
+        }
+    }
+
+    /// Calls the `repo/refs` tool.
+    ///
+    /// Lists branches and tags from a remote repository without cloning.
+    fn call_repo_refs_tool(&self, arguments: &Value) -> ToolCallResult {
+        use crate::git2_ops::auth::sanitize_url_for_logging;
+
+        // Parse arguments
+        let args: RepoRefsArgs = match serde_json::from_value(arguments.clone()) {
+            Ok(a) => a,
+            Err(e) => {
+                return ToolCallResult::error(format!("Invalid arguments: {e}"));
+            }
+        };
+
+        let sanitized_url = sanitize_url_for_logging(&args.url);
+
+        // Check rate limiter
+        if !self.rate_limiter.try_acquire() {
+            self.audit_logger.log_silent(&AuditEvent::repo_clone_blocked(
+                &sanitized_url,
+                "rate limit exceeded",
+            ));
+            return ToolCallResult::error(
+                "Rate limit exceeded. Please wait before sending more requests.",
+            );
+        }
+
+        // Check repo filter
+        if let Some(reason) = self
+            .repo_filter
+            .check("ls-remote", std::slice::from_ref(&args.url))
+            .reason()
+        {
+            self.audit_logger
+                .log_silent(&AuditEvent::repo_clone_blocked(&sanitized_url, reason));
+            return ToolCallResult::error(reason.to_string());
+        }
+
+        // Execute the refs listing
+        let start = Instant::now();
+        match handle_repo_refs(args) {
+            Ok(result) => {
+                let duration = start.elapsed();
+                tracing::info!(
+                    url = %sanitized_url,
+                    branches = result.branches.len(),
+                    tags = result.tags.len(),
+                    default_branch = %result.default_branch,
+                    duration_ms = duration.as_millis(),
+                    "repo/refs complete"
+                );
+
+                // Return the result as JSON text
+                match serde_json::to_string_pretty(&result) {
+                    Ok(json) => ToolCallResult::text(json),
+                    Err(e) => ToolCallResult::error(format!("Failed to serialize result: {e}")),
+                }
+            }
+            Err(e) => {
+                tracing::warn!(
+                    url = %sanitized_url,
+                    error = %e,
+                    "repo/refs failed"
+                );
+                ToolCallResult::error(e.to_string())
+            }
         }
     }
 }

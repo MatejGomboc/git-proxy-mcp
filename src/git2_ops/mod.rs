@@ -18,9 +18,11 @@
 //! - [`auth`] — Credential callback setup
 //! - [`clone`] — Bare repository fetch operations
 //! - [`push`] — Bundle processing and authenticated push
+//! - [`refs`] — Remote reference listing (branches/tags)
 //! - [`error`] — Error types for git2 operations
 
 pub mod auth;
 pub mod clone;
 pub mod error;
 pub mod push;
+pub mod refs;

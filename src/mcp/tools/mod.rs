@@ -9,6 +9,7 @@
 //!
 //! - [`repo_clone`] — Clone a repository and stream as tar.gz
 //! - [`repo_push`] — Push a git bundle to a remote repository
+//! - [`repo_refs`] — List branches and tags without cloning
 //!
 //! ## Tier 2 (Chunked Streaming)
 //!
@@ -26,6 +27,7 @@ pub mod repo_clone;
 pub mod repo_clone_chunk;
 pub mod repo_clone_start;
 pub mod repo_push;
+pub mod repo_refs;
 
 pub use repo_clone::{handle_repo_clone, RepoCloneArgs, RepoCloneResult};
 pub use repo_clone_chunk::{
@@ -34,3 +36,4 @@ pub use repo_clone_chunk::{
 };
 pub use repo_clone_start::{handle_repo_clone_start, RepoCloneStartArgs, RepoCloneStartResult};
 pub use repo_push::{handle_repo_push, RepoPushArgs, RepoPushResult};
+pub use repo_refs::{handle_repo_refs, RepoRefsArgs, RepoRefsResult};

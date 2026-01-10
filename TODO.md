@@ -571,7 +571,7 @@ pub struct RepoDiffResult {
 
 ---
 
-### 5.8 Branch/Tag Listing
+### 5.8 Branch/Tag Listing ✅ IMPLEMENTED
 
 **Goal:** List branches and tags without full clone.
 
@@ -586,8 +586,11 @@ pub struct RepoRefsResult {
     pub branches: Vec<RefInfo>,
     pub tags: Vec<RefInfo>,
     pub default_branch: String,
+    pub total_refs: usize,
 }
 ```
+
+**Tool:** `repo/refs`
 
 **Use case:** AI wants to know available branches before cloning.
 
