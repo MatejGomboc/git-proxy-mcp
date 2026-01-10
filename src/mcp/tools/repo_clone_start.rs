@@ -1,4 +1,4 @@
-//! Handler for the `repo/clone_start` MCP tool (Tier 2).
+//! Handler for the `repo_clone_start` MCP tool (Tier 2).
 //!
 //! This tool initiates a chunked clone operation for large repositories.
 //! It fetches the repository and creates a streaming session, returning
@@ -7,15 +7,15 @@
 //! # Protocol
 //!
 //! ```text
-//! 1. AI calls repo/clone_start with URL, branch, chunk_size, and options
+//! 1. AI calls repo_clone_start with URL, branch, chunk_size, and options
 //! 2. Server fetches repo, creates tar.gz, creates streaming session
 //! 3. Server returns session_id, total_chunks, total_size, and statistics
-//! 4. AI calls repo/clone_chunk repeatedly to get data
+//! 4. AI calls repo_clone_chunk repeatedly to get data
 //! ```
 //!
 //! # Features
 //!
-//! This tool supports all the same options as `repo/clone`:
+//! This tool supports all the same options as `repo_clone`:
 //! - Sparse checkout patterns (`sparse`)
 //! - Binary file exclusion (`exclude_binary`)
 //! - File size limits (`max_file_size`)
@@ -42,7 +42,7 @@ use crate::streaming::chunked::{
 };
 use crate::streaming::tar::{create_tar_from_tree_with_options, TarOptions};
 
-/// Arguments for the `repo/clone_start` tool.
+/// Arguments for the `repo_clone_start` tool.
 #[derive(Debug, Clone, Deserialize)]
 pub struct RepoCloneStartArgs {
     /// Repository URL (https:// or git@)
@@ -86,7 +86,7 @@ pub struct RepoCloneStartArgs {
     pub include_submodules: Option<bool>,
 }
 
-/// Result of a successful `repo/clone_start` operation.
+/// Result of a successful `repo_clone_start` operation.
 #[derive(Debug, Clone, Serialize)]
 pub struct RepoCloneStartResult {
     /// Session ID for subsequent chunk requests
@@ -146,7 +146,7 @@ fn is_zero(n: &usize) -> bool {
     *n == 0
 }
 
-/// Error from `repo/clone_start` operation (safe for display).
+/// Error from `repo_clone_start` operation (safe for display).
 #[derive(Debug)]
 pub struct RepoCloneStartError {
     /// Error message (credential-safe)
@@ -175,7 +175,7 @@ impl From<StreamingError> for RepoCloneStartError {
     }
 }
 
-/// Handle the `repo/clone_start` tool call.
+/// Handle the `repo_clone_start` tool call.
 ///
 /// This function:
 /// 1. Validates the URL
@@ -211,7 +211,7 @@ pub fn handle_repo_clone_start(
         url = %sanitized_url,
         branch = ?args.branch,
         chunk_size = ?args.chunk_size,
-        "repo/clone_start tool called"
+        "repo_clone_start tool called"
     );
 
     // Log info about optional features
@@ -315,7 +315,7 @@ pub fn handle_repo_clone_start(
         total_size = session_info.total_size,
         chunk_size = session_info.chunk_size,
         file_count = tar_result.file_count,
-        "repo/clone_start complete"
+        "repo_clone_start complete"
     );
 
     Ok(RepoCloneStartResult {

@@ -581,15 +581,15 @@ impl McpServer {
             })?;
 
         let result = match params.name.as_str() {
-            "repo/clone" => self.call_repo_clone_tool(&params.arguments),
-            "repo/push" => self.call_repo_push_tool(&params.arguments),
-            "repo/refs" => self.call_repo_refs_tool(&params.arguments),
-            "repo/diff" => self.call_repo_diff_tool(&params.arguments),
-            "repo/pull" => self.call_repo_pull_tool(&params.arguments),
+            "repo_clone" => self.call_repo_clone_tool(&params.arguments),
+            "repo_push" => self.call_repo_push_tool(&params.arguments),
+            "repo_refs" => self.call_repo_refs_tool(&params.arguments),
+            "repo_diff" => self.call_repo_diff_tool(&params.arguments),
+            "repo_pull" => self.call_repo_pull_tool(&params.arguments),
             // Tier 2: Chunked streaming tools
-            "repo/clone_start" => self.call_repo_clone_start_tool(&params.arguments),
-            "repo/clone_chunk" => self.call_repo_clone_chunk_tool(&params.arguments),
-            "repo/clone_cancel" => self.call_repo_clone_cancel_tool(&params.arguments),
+            "repo_clone_start" => self.call_repo_clone_start_tool(&params.arguments),
+            "repo_clone_chunk" => self.call_repo_clone_chunk_tool(&params.arguments),
+            "repo_clone_cancel" => self.call_repo_clone_cancel_tool(&params.arguments),
             _ => ToolCallResult::error(format!("Unknown tool: {}", params.name)),
         };
 
@@ -632,7 +632,7 @@ impl McpServer {
         vec![
             // Tier 1: Stream repository as tar.gz
             ToolDefinition {
-                name: "repo/clone".to_string(),
+                name: "repo_clone".to_string(),
                 description: Some(
                     "Clone a repository and return it as a base64-encoded tar.gz archive. \
                      The repository is fetched using your local Git credentials (SSH agent or \
@@ -683,7 +683,7 @@ impl McpServer {
             },
             // Tier 1: Push a git bundle to remote
             ToolDefinition {
-                name: "repo/push".to_string(),
+                name: "repo_push".to_string(),
                 description: Some(
                     "Push a git bundle to a remote repository. The AI creates a bundle using \
                      'git bundle create' and sends it base64-encoded. The MCP server unbundles \
@@ -715,11 +715,11 @@ impl McpServer {
             },
             // Tier 2: Start chunked clone
             ToolDefinition {
-                name: "repo/clone_start".to_string(),
+                name: "repo_clone_start".to_string(),
                 description: Some(
                     "Start a chunked clone for large repositories. Returns a session ID that \
-                     can be used with repo/clone_chunk to retrieve the data in pieces. \
-                     Use this instead of repo/clone when working with large repositories \
+                     can be used with repo_clone_chunk to retrieve the data in pieces. \
+                     Use this instead of repo_clone when working with large repositories \
                      to get progress updates and enable resume on failure."
                         .to_string(),
                 ),
@@ -753,7 +753,7 @@ impl McpServer {
             },
             // Tier 2: Get a chunk from streaming session
             ToolDefinition {
-                name: "repo/clone_chunk".to_string(),
+                name: "repo_clone_chunk".to_string(),
                 description: Some(
                     "Get a chunk from a streaming clone session. Call repeatedly with \
                      incrementing chunk_index (starting from 0) until is_last is true. \
@@ -765,7 +765,7 @@ impl McpServer {
                     "properties": {
                         "session_id": {
                             "type": "string",
-                            "description": "Session ID from repo/clone_start"
+                            "description": "Session ID from repo_clone_start"
                         },
                         "chunk_index": {
                             "type": "integer",
@@ -777,7 +777,7 @@ impl McpServer {
             },
             // Tier 2: Cancel a streaming session
             ToolDefinition {
-                name: "repo/clone_cancel".to_string(),
+                name: "repo_clone_cancel".to_string(),
                 description: Some(
                     "Cancel a streaming clone session and free resources. Call this if \
                      you no longer need the remaining chunks. Sessions also auto-expire \
@@ -797,7 +797,7 @@ impl McpServer {
             },
             // List remote refs without cloning
             ToolDefinition {
-                name: "repo/refs".to_string(),
+                name: "repo_refs".to_string(),
                 description: Some(
                     "List branches and tags from a remote repository without cloning. \
                      Returns structured information about available branches, tags, and \
@@ -818,7 +818,7 @@ impl McpServer {
             },
             // Generate diff between commits
             ToolDefinition {
-                name: "repo/diff".to_string(),
+                name: "repo_diff".to_string(),
                 description: Some(
                     "Generate a unified diff between two commits from a remote repository. \
                      Returns the diff text and statistics (files changed, insertions, deletions). \
@@ -847,7 +847,7 @@ impl McpServer {
             },
             // Incremental sync (pull changes since known commit)
             ToolDefinition {
-                name: "repo/pull".to_string(),
+                name: "repo_pull".to_string(),
                 description: Some(
                     "Fetch changes since a known commit for incremental sync. Returns a unified \
                      diff, a tar.gz archive of changed/added files, and a list of deleted files. \
@@ -1217,7 +1217,7 @@ impl McpServer {
                     tags = result.tags.len(),
                     default_branch = %result.default_branch,
                     duration_ms = duration.as_millis(),
-                    "repo/refs complete"
+                    "repo_refs complete"
                 );
 
                 // Return the result as JSON text
@@ -1230,7 +1230,7 @@ impl McpServer {
                 tracing::warn!(
                     url = %sanitized_url,
                     error = %e,
-                    "repo/refs failed"
+                    "repo_refs failed"
                 );
                 ToolCallResult::error(e.to_string())
             }
@@ -1287,7 +1287,7 @@ impl McpServer {
                     insertions = result.stats.insertions,
                     deletions = result.stats.deletions,
                     duration_ms = duration.as_millis(),
-                    "repo/diff complete"
+                    "repo_diff complete"
                 );
 
                 // Return the result as JSON text
@@ -1300,7 +1300,7 @@ impl McpServer {
                 tracing::warn!(
                     url = %sanitized_url,
                     error = %e,
-                    "repo/diff failed"
+                    "repo_diff failed"
                 );
                 ToolCallResult::error(e.to_string())
             }
@@ -1355,7 +1355,7 @@ impl McpServer {
                     tracing::info!(
                         url = %sanitized_url,
                         duration_ms = duration.as_millis(),
-                        "repo/pull: already up to date"
+                        "repo_pull: already up to date"
                     );
                 } else {
                     tracing::info!(
@@ -1366,7 +1366,7 @@ impl McpServer {
                         modified = result.stats.files_modified,
                         deleted = result.stats.files_deleted,
                         duration_ms = duration.as_millis(),
-                        "repo/pull complete"
+                        "repo_pull complete"
                     );
                 }
 
@@ -1380,7 +1380,7 @@ impl McpServer {
                 tracing::warn!(
                     url = %sanitized_url,
                     error = %e,
-                    "repo/pull failed"
+                    "repo_pull failed"
                 );
                 ToolCallResult::error(e.to_string())
             }

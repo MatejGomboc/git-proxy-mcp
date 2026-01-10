@@ -1,4 +1,4 @@
-//! Handler for the `repo/refs` MCP tool.
+//! Handler for the `repo_refs` MCP tool.
 //!
 //! This tool lists branches and tags from a remote repository without cloning.
 //! It's equivalent to `git ls-remote` but with structured output.
@@ -25,14 +25,14 @@ use crate::git2_ops::auth::sanitize_url_for_logging;
 use crate::git2_ops::error::Git2Error;
 use crate::git2_ops::refs::{list_remote_refs, RefInfo};
 
-/// Arguments for the `repo/refs` tool.
+/// Arguments for the `repo_refs` tool.
 #[derive(Debug, Clone, Deserialize)]
 pub struct RepoRefsArgs {
     /// Repository URL (https:// or git@)
     pub url: String,
 }
 
-/// Result of a successful `repo/refs` operation.
+/// Result of a successful `repo_refs` operation.
 #[derive(Debug, Clone, Serialize)]
 pub struct RepoRefsResult {
     /// List of branches with their commit SHAs
@@ -48,7 +48,7 @@ pub struct RepoRefsResult {
     pub total_refs: usize,
 }
 
-/// Error from repo/refs operation (safe for display).
+/// Error from repo_refs operation (safe for display).
 #[derive(Debug)]
 pub struct RepoRefsError {
     /// Error message (credential-safe)
@@ -69,7 +69,7 @@ impl From<Git2Error> for RepoRefsError {
     }
 }
 
-/// Handle the `repo/refs` tool call.
+/// Handle the `repo_refs` tool call.
 ///
 /// This function:
 /// 1. Validates the URL
@@ -100,7 +100,7 @@ impl From<Git2Error> for RepoRefsError {
 pub fn handle_repo_refs(args: RepoRefsArgs) -> Result<RepoRefsResult, RepoRefsError> {
     info!(
         url = %sanitize_url_for_logging(&args.url),
-        "repo/refs tool called"
+        "repo_refs tool called"
     );
 
     let refs_result = list_remote_refs(&args.url)?;
@@ -109,7 +109,7 @@ pub fn handle_repo_refs(args: RepoRefsArgs) -> Result<RepoRefsResult, RepoRefsEr
         branches = refs_result.branches.len(),
         tags = refs_result.tags.len(),
         default_branch = %refs_result.default_branch,
-        "repo/refs complete"
+        "repo_refs complete"
     );
 
     Ok(RepoRefsResult {

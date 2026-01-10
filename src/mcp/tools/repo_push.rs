@@ -1,4 +1,4 @@
-//! Handler for the `repo/push` MCP tool.
+//! Handler for the `repo_push` MCP tool.
 //!
 //! This tool receives a git bundle from the AI and pushes it to a remote
 //! repository using the user's credentials.
@@ -27,7 +27,7 @@ use crate::git2_ops::error::Git2Error;
 use crate::git2_ops::push::{push_bundle, PushOptions2};
 use crate::streaming::bundle::{decode_bundle, validate_bundle};
 
-/// Arguments for the `repo/push` tool.
+/// Arguments for the `repo_push` tool.
 #[derive(Debug, Clone, Deserialize)]
 pub struct RepoPushArgs {
     /// Base64-encoded git bundle
@@ -44,7 +44,7 @@ pub struct RepoPushArgs {
     pub force: bool,
 }
 
-/// Result of a successful `repo/push` operation.
+/// Result of a successful `repo_push` operation.
 #[derive(Debug, Clone, Serialize)]
 pub struct RepoPushResult {
     /// The branch that was pushed to
@@ -60,7 +60,7 @@ pub struct RepoPushResult {
     pub remote_url: String,
 }
 
-/// Error from repo/push operation (safe for display).
+/// Error from repo_push operation (safe for display).
 #[derive(Debug)]
 pub struct RepoPushError {
     /// Error message (credential-safe)
@@ -81,7 +81,7 @@ impl From<Git2Error> for RepoPushError {
     }
 }
 
-/// Handle the `repo/push` tool call.
+/// Handle the `repo_push` tool call.
 ///
 /// This function:
 /// 1. Decodes the base64 bundle
@@ -116,7 +116,7 @@ pub fn handle_repo_push(args: RepoPushArgs) -> Result<RepoPushResult, RepoPushEr
         branch = %args.branch,
         force = args.force,
         bundle_len = args.bundle.len(),
-        "repo/push tool called"
+        "repo_push tool called"
     );
 
     // Decode the bundle
@@ -138,7 +138,7 @@ pub fn handle_repo_push(args: RepoPushArgs) -> Result<RepoPushResult, RepoPushEr
     info!(
         commit = %result.commit,
         branch = %result.branch,
-        "repo/push complete"
+        "repo_push complete"
     );
 
     Ok(RepoPushResult {

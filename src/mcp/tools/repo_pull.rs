@@ -1,4 +1,4 @@
-//! Handler for the `repo/pull` MCP tool.
+//! Handler for the `repo_pull` MCP tool.
 //!
 //! This tool fetches changes since a known commit, providing an incremental
 //! update rather than requiring a full re-clone. Useful for keeping an AI's
@@ -35,7 +35,7 @@ use crate::git2_ops::auth::sanitize_url_for_logging;
 use crate::git2_ops::error::Git2Error;
 use crate::git2_ops::pull::{pull_changes, ChangedFile, PullStats};
 
-/// Arguments for the `repo/pull` tool.
+/// Arguments for the `repo_pull` tool.
 #[derive(Debug, Clone, Deserialize)]
 pub struct RepoPullArgs {
     /// Repository URL (https:// or git@)
@@ -48,7 +48,7 @@ pub struct RepoPullArgs {
     pub since_commit: String,
 }
 
-/// Result of a successful `repo/pull` operation.
+/// Result of a successful `repo_pull` operation.
 #[derive(Debug, Clone, Serialize)]
 pub struct RepoPullResult {
     /// Unified diff of all changes (text format)
@@ -76,7 +76,7 @@ pub struct RepoPullResult {
     pub up_to_date: bool,
 }
 
-/// Error from repo/pull operation (safe for display).
+/// Error from repo_pull operation (safe for display).
 #[derive(Debug)]
 pub struct RepoPullError {
     /// Error message (credential-safe)
@@ -97,7 +97,7 @@ impl From<Git2Error> for RepoPullError {
     }
 }
 
-/// Handle the `repo/pull` tool call.
+/// Handle the `repo_pull` tool call.
 ///
 /// This function:
 /// 1. Validates the URL
@@ -133,13 +133,13 @@ pub fn handle_repo_pull(args: RepoPullArgs) -> Result<RepoPullResult, RepoPullEr
         url = %sanitize_url_for_logging(&args.url),
         branch = %args.branch,
         since = %args.since_commit,
-        "repo/pull tool called"
+        "repo_pull tool called"
     );
 
     let pull_result = pull_changes(&args.url, &args.branch, &args.since_commit)?;
 
     if pull_result.up_to_date {
-        info!("repo/pull: already up to date");
+        info!("repo_pull: already up to date");
     } else {
         info!(
             commits = pull_result.stats.commits,
@@ -147,7 +147,7 @@ pub fn handle_repo_pull(args: RepoPullArgs) -> Result<RepoPullResult, RepoPullEr
             added = pull_result.stats.files_added,
             modified = pull_result.stats.files_modified,
             deleted = pull_result.stats.files_deleted,
-            "repo/pull complete"
+            "repo_pull complete"
         );
     }
 
