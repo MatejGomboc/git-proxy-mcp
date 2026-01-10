@@ -1,292 +1,218 @@
-# Vision: The Three Tiers of git-proxy-mcp
+# Vision: Credential Relay for Cloud AI
 
-This document describes the full vision for git-proxy-mcp, from the initial implementation to the ultimate goal.
+This document describes the architectural vision for git-proxy-mcp.
 
 ## The Problem
 
 Cloud-based AI assistants (Claude.ai, ChatGPT, Gemini) have:
-- ✅ Full Linux VMs with compute capability
-- ✅ Ability to run git, build code, run tests
-- ❌ No access to user's credentials for private repos
 
-## The Three Tiers
+- Full Linux VMs with compute capability
+- Ability to run git, build code, run tests
+- **No access to user's credentials for private repos**
+
+## The Solution: Credential Relay
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│  TIER 1: Memory Buffer (First Draft)                                    │
+│  CREDENTIAL RELAY ARCHITECTURE                                          │
 │                                                                         │
-│  GitHub ──► MCP (buffer in RAM) ──► AI                                  │
-│                                                                         │
-│  • No files on user's DISK                                             │
-│  • File bytes pass through user's RAM                                  │
-│  • Simple to implement                                                 │
-│  • Memory pressure for large repos                                     │
+│  GitHub                User's PC                      AI's VM           │
+│    │                      │                              │              │
+│    │◄──── credentials ────┤                              │              │
+│    │      (SSH/PAT)       │                              │              │
+│    │                      │                              │              │
+│    │── repo contents ────►│──── repo contents ──────────►│              │
+│    │   (authenticated)    │    (NO credentials!)         │              │
+│    │                      │                              │              │
+│    │                      │◄─── changes ─────────────────┤              │
+│    │◄── push (with creds)─┤    (patches, no creds)       │              │
+│    │                      │                              │              │
 └─────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│  TIER 2: Chunked Streaming (Improvement)                                │
-│                                                                         │
-│  GitHub ──► MCP (small chunks) ──► AI                                   │
-│                                                                         │
-│  • No files on disk                                                    │
-│  • Constant memory usage (chunked)                                     │
-│  • Handles large repos                                                 │
-│  • Still passes through user's PC                                      │
-└─────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│  TIER 3: Token Delegation (THE GOLDEN GOAL) ⭐                          │
-│                                                                         │
-│  GitHub ◄──────────── DIRECT ────────────► AI                             │
-│            ▲                                                            │
-│            │                                                            │
-│       MCP provides short-lived token                                   │
-│                                                                         │
-│  • ZERO bytes through user's PC                                        │
-│  • AI connects directly to GitHub                                      │
-│  • MCP only brokers authentication                                     │
-│  • Ultimate security and performance                                   │
-└─────────────────────────────────────────────────────────────────────────┘
+
+Credentials: NEVER leave user's PC
+Repo files:  Stream through MCP → land in AI's VM
 ```
+
+**Key Principle:** The MCP server acts as an authenticated relay. Credentials stay local. Only file contents flow to the AI.
 
 ---
 
-## Tier 3: The Golden Architecture
+## Two Implementation Tiers
 
-### How It Works
+### Tier 1: Memory Buffer (First Implementation)
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│  TOKEN DELEGATION FLOW                                                 │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                         │
-│  1. ONE-TIME SETUP (User does once)                                    │
-│     ──────────────────────────                                          │
-│     User installs "git-proxy-mcp" GitHub App on their repos            │
-│     App gets permission to: read code, write code, create branches     │
-│     MCP server stores App's private key (NOT user's PAT)               │
-│                                                                         │
-│  2. AI REQUESTS ACCESS                                                 │
-│     ─────────────────────                                               │
-│     AI's VM                        User's PC                           │
-│        │                              │                                │
-│        │  MCP: repo/get_token         │                                │
-│        │  { url: "github.com/x/y" }   │                                │
-│        ├─────────────────────────────►│                                │
-│        │                              │                                │
-│                                                                         │
-│  3. MCP GENERATES TOKEN                                                │
-│     ──────────────────────                                              │
-│                              User's PC                    GitHub       │
-│                                 │                            │         │
-│                                 │  App auth + request        │         │
-│                                 │  installation token        │         │
-│                                 ├───────────────────────────►│         │
-│                                 │                            │         │
-│                                 │  Token: ghs_xxxx           │         │
-│                                 │  (1 hour, repo-scoped)     │         │
-│                                 │◄───────────────────────────┤         │
-│                                 │                            │         │
-│                                                                         │
-│  4. TOKEN SENT TO AI                                                   │
-│     ───────────────────                                                  │
-│     AI's VM                        User's PC                           │
-│        │                              │                                │
-│        │  { token: "ghs_xxxx",        │                                │
-│        │    expires: "1 hour",        │                                │
-│        │    clone_url: "https://..." }│                                │
-│        │◄─────────────────────────────┤                                │
-│        │                              │                                │
-│                                                                         │
-│  5. AI CLONES DIRECTLY (!!!)                                           │
-│     ─────────────────────────                                            │
-│     AI's VM                                               GitHub       │
-│        │                                                     │         │
-│        │  git clone https://x-access-token:ghs_xxx@github... │         │
-│        ├────────────────────────────────────────────────────►│         │
-│        │                                                     │         │
-│        │  Full repository contents                           │         │
-│        │◄────────────────────────────────────────────────────┤         │
-│        │                                                     │         │
-│        │         ZERO BYTES through user's PC!               │         │
-│        │                                                     │         │
-└─────────────────────────────────────────────────────────────────────────┘
+GitHub ──► MCP (buffer in RAM) ──► AI
 ```
-
-### Why Token Delegation Is Safe
-
-| Concern | Answer |
-|---------|--------|
-| "You're giving AI a credential!" | Yes, but it's ephemeral, scoped, and revocable |
-| "What if AI's VM is compromised?" | Attacker gets 1-hour token for one repo, not user's PAT |
-| "What about SSH keys?" | Can't delegate SSH signing; HTTPS tokens only |
-| "Audit trail?" | GitHub App has complete audit log |
-
-### Token Properties
 
 | Property | Value |
 |----------|-------|
-| Lifetime | 1 hour (configurable) |
-| Scope | Single repository |
-| Permissions | Configured when App installed |
-| Revocable | Instantly via GitHub UI |
-| Renewable | AI can request new token before expiry |
+| Files on user's disk | No |
+| Memory usage | O(repo size) |
+| Large repo support | Limited |
+| Complexity | Low |
 
-### Comparison: User's PAT vs App Token
+**Use case:** Small to medium repos, initial implementation.
 
-| Aspect | User's PAT | App Installation Token |
-|--------|-----------|----------------------|
-| Lifetime | Months/years | 1 hour |
-| Scope | All repos user can access | Single repo |
-| If leaked | Full account access | Limited damage |
-| Revocation | User must notice & revoke | Auto-expires |
-| Audit | Mixed with user's activity | Separate App audit log |
+### Tier 2: Chunked Streaming (Target Architecture)
+
+```
+GitHub ──► MCP (small chunks) ──► AI
+```
+
+| Property | Value |
+|----------|-------|
+| Files on user's disk | No |
+| Memory usage | O(chunk size) — constant |
+| Large repo support | Yes |
+| Complexity | Medium |
+
+**Use case:** Any repo size, production-ready.
 
 ---
 
-## Implementation Phases
+## Why NOT Token Delegation?
 
-### Phase 1-2: Tier 1 (Memory Buffer)
+An alternative approach would be to generate short-lived tokens and give them to the AI, letting it clone directly from GitHub. We explicitly reject this approach:
 
-```rust
-// MCP streams data through memory
-pub async fn handle_clone(url: &str) -> TarArchive {
-    let repo = fetch_bare(url)?;        // git2 fetch
-    let tar = stream_tree_to_tar(&repo); // In-memory
-    tar
-}
+| Concern | Problem |
+|---------|---------|
+| **Still a credential** | Even a 1-hour token is a credential that can be abused |
+| **VM compromise** | If AI's VM is compromised, attacker gets a working token |
+| **Credential exposure** | Violates our core principle: credentials never leave user's PC |
+| **Attack surface** | Token in transit, token in AI's memory, token in logs... |
+
+**Our position:** Zero credential exposure is safer than "minimal" credential exposure.
+
 ```
-
-**Pros:** Simple, works today  
-**Cons:** Data passes through user's PC
-
-### Phase 3: Tier 2 (Chunked Streaming)
-
-```rust
-// Stream in chunks to handle large repos
-pub async fn handle_clone(url: &str) -> impl Stream<Item = Chunk> {
-    let repo = fetch_bare(url)?;
-    stream_tree_chunked(&repo, CHUNK_SIZE)
-}
+Token delegation:     Credentials ──► AI's VM     ❌ REJECTED
+Credential relay:     Credentials ──► User's PC   ✅ OUR APPROACH
+                      Files only  ──► AI's VM
 ```
-
-**Pros:** Handles large repos, constant memory  
-**Cons:** Still passes through user's PC
-
-### Phase 4+: Tier 3 (Token Delegation) ⭐
-
-```rust
-// Generate token, AI clones directly
-pub async fn handle_get_token(url: &str) -> TokenResponse {
-    let app = GitHubApp::load()?;
-    let installation = app.find_installation(url)?;
-    let token = installation.create_access_token(
-        repos: [url],
-        permissions: { contents: "write" },
-        expires: Duration::hours(1),
-    )?;
-    
-    TokenResponse {
-        token: token.value,
-        expires_at: token.expires_at,
-        clone_url: format!("https://x-access-token:{token}@github.com/..."),
-    }
-}
-```
-
-**Pros:** Zero data through user's PC!  
-**Cons:** Requires GitHub App setup
 
 ---
 
-## MCP Tools by Tier
+## Security Model
 
-### Tier 1-2 Tools
+### What Stays on User's PC
+
+- Personal Access Tokens (in OS credential store)
+- SSH private keys (in ssh-agent)
+- All authentication secrets
+- Git credential helper configuration
+
+### What Flows to AI's VM
+
+- Repository file contents
+- Git object data (commits, trees, blobs)
+- Branch and tag metadata
+- Diff/patch data for pushes
+
+### What NEVER Flows to AI
+
+- Credentials of any kind
+- Tokens (even short-lived ones)
+- SSH keys or signatures
+- Authentication headers
+
+---
+
+## Data Flow: Clone Operation
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ CLONE: Authenticated fetch → stream to AI                                   │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  GitHub                 User's PC                        AI's VM            │
+│    │                       │                                │               │
+│    │  git2 fetch           │                                │               │
+│    │  (with credentials)   │                                │               │
+│    ├──────────────────────►│                                │               │
+│    │                       │                                │               │
+│    │                       │  Objects stored in             │               │
+│    │                       │  BARE REPO (temp, no checkout) │               │
+│    │                       │                                │               │
+│    │                       │  Stream tree to tar.gz         │               │
+│    │                       │  (in memory or chunked)        │               │
+│    │                       │                                │               │
+│    │                       │  MCP response                  │               │
+│    │                       ├───────────────────────────────►│               │
+│    │                       │  (file contents only)          │               │
+│    │                       │                                │               │
+│    │                       │                                │  Extract      │
+│    │                       │                                │  git init     │
+│    │                       │                                │  Full repo!   │
+│    │                       │                                │               │
+│    │                       │  Clean up temp                 │               │
+│    │                       │                                │               │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+## Data Flow: Push Operation
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ PUSH: Receive changes from AI → authenticated push                          │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  AI's VM                   User's PC                        GitHub          │
+│    │                          │                                │            │
+│    │  Create git bundle       │                                │            │
+│    │  (commits to push)       │                                │            │
+│    │                          │                                │            │
+│    │  MCP request             │                                │            │
+│    ├─────────────────────────►│                                │            │
+│    │  (bundle, no creds)      │                                │            │
+│    │                          │                                │            │
+│    │                          │  Unbundle to temp repo         │            │
+│    │                          │  Validate (guards, security)   │            │
+│    │                          │                                │            │
+│    │                          │  git2 push                     │            │
+│    │                          ├───────────────────────────────►│            │
+│    │                          │  (with credentials)            │            │
+│    │                          │                                │            │
+│    │                          │  Clean up temp                 │            │
+│    │                          │                                │            │
+│    │  MCP response            │                                │            │
+│    │◄─────────────────────────┤                                │            │
+│    │  (commit URL)            │                                │            │
+│    │                          │                                │            │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## MCP Tools
 
 | Tool | Description |
 |------|-------------|
-| `repo/clone` | Stream repo contents as tar.gz |
-| `repo/push` | Receive bundle, push with auth |
-| `repo/pull` | Stream delta of changes |
-
-### Tier 3 Tools (Additional)
-
-| Tool | Description |
-|------|-------------|
-| `auth/get_token` | Generate short-lived token for repo |
-| `auth/refresh_token` | Refresh token before expiry |
-| `auth/revoke_token` | Revoke token early |
-| `auth/status` | Check App installation status |
+| `repo/clone` | Authenticated fetch, stream repo as tar.gz |
+| `repo/push` | Receive bundle from AI, authenticated push |
+| `repo/pull` | Stream delta of changes since last sync |
 
 ---
 
-## Provider Support for Tier 3
+## Implementation Roadmap
 
-| Provider | Token Mechanism | Status |
-|----------|-----------------|--------|
-| **GitHub** | GitHub App installation tokens | Primary target |
-| **GitLab** | Project/Group Access Tokens | Planned |
-| **Bitbucket** | Repository Access Tokens | If needed |
-| **Azure DevOps** | PAT delegation | Research needed |
-
-### GitHub App Setup (One-Time)
-
-1. User goes to: `https://github.com/apps/git-proxy-mcp`
-2. Clicks "Install"
-3. Selects repositories to grant access
-4. Done!
-
-The MCP server (published by us) is the App. User just installs it.
+| Phase | Focus | Tier |
+|-------|-------|------|
+| 1 | git2 integration, credential callbacks | - |
+| 2 | Bare repo fetch, in-memory tar streaming | Tier 1 |
+| 3 | Push via bundle reception | Tier 1 |
+| 4 | Chunked streaming for large repos | Tier 2 |
+| 5 | Shallow clone, sparse checkout | Tier 2 |
 
 ---
 
-## Security Model by Tier
+## Design Principles
 
-| Aspect | Tier 1-2 | Tier 3 |
-|--------|----------|--------|
-| User's PAT/SSH key | Used by MCP | NOT used |
-| Data through user's PC | Yes (memory) | No |
-| Token lifetime | N/A | 1 hour |
-| Token scope | N/A | Single repo |
-| Credential storage | Never | App key only |
-| If MCP compromised | User's creds at risk | Only App key |
-| If AI compromised | N/A | 1-hour token only |
+1. **Credentials never leave** — Not even "safe" short-lived tokens
+2. **No file storage** — Temp bare repos only, cleaned immediately
+3. **Stream, don't buffer** — Chunked transfer for large repos (Tier 2)
+4. **Validate everything** — Security guards on push operations
+5. **Audit everything** — Log all operations (without credentials)
 
 ---
 
-## The Ultimate Vision
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│    User's PC is ONLY an authentication broker.                         │
-│                                                                         │
-│    It never sees the code.                                              │
-│    It never stores the code.                                            │
-│    It never transmits the code.                                         │
-│                                                                         │
-│    The code flows directly: GitHub ↔ AI                                │
-│                                                                         │
-│    The PC just says: "Yes, this AI is allowed to access this repo."    │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
-This is the golden goal. Tier 3. True authentication brokering.
-
----
-
-## Roadmap
-
-| Phase | Tier | Focus |
-|-------|------|-------|
-| 1-2 | Tier 1 | Bare repo + memory streaming (first working version) |
-| 3 | Tier 2 | Chunked streaming (large repo support) |
-| 4 | Tier 3 | GitHub App + token delegation (the goal!) |
-| 5 | Tier 3 | GitLab, Bitbucket support |
-
----
-
-*This is where we're going. Tier 1 gets us working. Tier 3 gets us perfect.*
+*Tier 1 gets us working. Tier 2 gets us production-ready. Token delegation is explicitly out of scope.*

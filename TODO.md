@@ -1,6 +1,6 @@
 # TODO — Development Battle Plan
 
-## The Vision: Three Tiers
+## The Vision: Credential Relay
 
 See `docs/VISION.md` for the full architectural vision. Summary:
 
@@ -8,30 +8,35 @@ See `docs/VISION.md` for the full architectural vision. Summary:
 |------|-------------|----------|
 | **Tier 1** | Memory buffer | GitHub → MCP (RAM) → AI |
 | **Tier 2** | Chunked streaming | GitHub → MCP (chunks) → AI |
-| **Tier 3** | Token delegation ⭐ | GitHub ↔ AI directly! |
 
-**Current focus:** Tier 1 (get it working), then evolve toward Tier 3.
+**Current focus:** Tier 1 (get it working), then Tier 2 (production-ready).
+
+**Explicitly out of scope:** Token delegation (giving AI any credentials, even short-lived ones).
 
 ---
 
 ## Overview
 
-**Goal:** Build a secure credential proxy that enables cloud-based AI assistants to work with private Git repositories.
+**Goal:** Build a secure credential relay that enables cloud-based AI assistants to work with private Git repositories. Credentials never leave the user's PC.
 
 **Target Users:**
+
 - Claude.ai (with computer use)
-- ChatGPT with Code Interpreter  
+- ChatGPT with Code Interpreter
 - Gemini with code execution
 - Any sandboxed AI environment
 
-**Non-Targets:** Local AI tools (Claude Code, Cursor, Aider) — already have direct Git access.
+**Non-Targets:** Local AI tools (Claude Code, Cursor, Aider) — they already have direct Git access.
 
 ---
 
-## Architecture: Tier 1 (First Draft)
+## Architecture: Credential Relay
 
 ```
 GitHub                     User's PC                    AI's VM
+   │                          │                           │
+   │◄──── credentials ────────┤                           │
+   │      (SSH/PAT)           │                           │
    │                          │                           │
    │  git2 fetch (bare)       │                           │
    ├─────────────────────────►│                           │
@@ -41,17 +46,17 @@ GitHub                     User's PC                    AI's VM
    │                          │                           │
    │                          │  MCP response             │
    │                          ├─────────────────────────►│
-   │                          │  (base64 tar.gz)          │
+   │                          │  (file contents only)     │
    │                          │                           │
-   │                     NO FILES on disk                 │
-   │                     (objects in temp bare repo)      │
+   │                     CREDENTIALS stay here            │
+   │                     FILES flow to AI                 │
 ```
 
-**Key constraint:** No source files written to user's disk. We use bare repositories and stream blob contents directly from git's object database to an in-memory tar archive.
+**Key constraint:** No credentials leave user's PC. No source files written to user's disk.
 
 ---
 
-## Phase 1: Foundation (Tier 1) ← CURRENT
+## Phase 1: Foundation (Tier 1) <- CURRENT
 
 ### 1.1 Add git2 Dependency and Module Structure
 
@@ -74,7 +79,7 @@ src/
     └── bundle.rs          # Git bundle handling
 ```
 
-**Cargo.toml:**
+**Cargo.toml additions:**
 
 ```toml
 [dependencies]
@@ -86,6 +91,7 @@ tempfile = "3.10"
 ```
 
 **Acceptance criteria:**
+
 - [ ] `cargo build` succeeds
 - [ ] Module structure in place
 - [ ] Smoke test: can create `git2::Repository`
@@ -101,7 +107,7 @@ use git2::{Cred, CredentialType, RemoteCallbacks};
 
 pub fn create_callbacks() -> RemoteCallbacks<'static> {
     let mut callbacks = RemoteCallbacks::new();
-    
+
     callbacks.credentials(|url, username_from_url, allowed_types| {
         // SSH agent (key never leaves agent)
         if allowed_types.contains(CredentialType::SSH_KEY) {
@@ -109,26 +115,28 @@ pub fn create_callbacks() -> RemoteCallbacks<'static> {
                 return Cred::ssh_key_from_agent(username);
             }
         }
-        
+
         // Credential helper (system keychain)
         if allowed_types.contains(CredentialType::USER_PASS_PLAINTEXT) {
             let config = git2::Config::open_default()?;
             return Cred::credential_helper(&config, url, username_from_url);
         }
-        
+
         Err(git2::Error::from_str("no suitable credential method"))
     });
-    
+
     callbacks
 }
 ```
 
 **Security rules:**
+
 - NEVER log `Cred` objects
 - NEVER store credentials
 - NEVER include credentials in error messages
 
 **Acceptance criteria:**
+
 - [ ] Compiles
 - [ ] SSH agent path implemented
 - [ ] Credential helper path implemented
@@ -163,20 +171,20 @@ pub fn fetch_repo(
     // Create BARE repo - no working tree!
     let temp_dir = TempDir::new()?;
     let repo = Repository::init_bare(temp_dir.path())?;
-    
+
     // Add remote and fetch
     let mut remote = repo.remote_anonymous(url)?;
     let mut fetch_opts = FetchOptions::new();
     fetch_opts.remote_callbacks(callbacks);
-    
+
     let branch_name = branch.unwrap_or("main");
     let refspec = format!("refs/heads/{branch_name}:refs/heads/{branch_name}");
-    
+
     remote.fetch(&[&refspec], Some(&mut fetch_opts), None)?;
-    
+
     let reference = repo.find_reference(&format!("refs/heads/{branch_name}"))?;
     let head_commit = reference.peel_to_commit()?.id();
-    
+
     Ok(FetchResult {
         repo,
         head_commit,
@@ -204,49 +212,50 @@ pub fn create_tar_from_tree(
 ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     let commit = repo.find_commit(commit_id)?;
     let tree = commit.tree()?;
-    
+
     let mut archive_buffer = Vec::new();
     {
         let encoder = GzEncoder::new(&mut archive_buffer, Compression::fast());
         let mut tar = tar::Builder::new(encoder);
-        
+
         tree.walk(TreeWalkMode::PreOrder, |dir, entry| {
             let name = match entry.name() {
                 Some(n) => n,
                 None => return TreeWalkResult::Skip,
             };
-            
+
             let path = if dir.is_empty() {
                 name.to_string()
             } else {
                 format!("{dir}{name}")
             };
-            
+
             if entry.kind() == Some(ObjectType::Blob) {
                 if let Ok(blob) = repo.find_blob(entry.id()) {
                     let content = blob.content();
-                    
+
                     let mut header = tar::Header::new_gnu();
                     let _ = header.set_path(&path);
                     header.set_size(content.len() as u64);
                     header.set_mode(entry.filemode() as u32);
                     header.set_cksum();
-                    
+
                     let _ = tar.append(&header, content);
                 }
             }
-            
+
             TreeWalkResult::Ok
         })?;
-        
+
         tar.finish()?;
     }
-    
+
     Ok(archive_buffer)
 }
 ```
 
-**Key insight:** 
+**Key insight:**
+
 - `repo.find_blob(id)` reads from git object database
 - `blob.content()` gives raw bytes — never written to disk
 - `tar::Builder::new(Vec::new())` builds archive in memory
@@ -275,20 +284,20 @@ pub struct RepoCloneResult {
 
 pub async fn handle_repo_clone(args: RepoCloneArgs) -> Result<RepoCloneResult, ToolError> {
     let callbacks = crate::git2_ops::auth::create_callbacks();
-    
+
     let fetch_result = crate::git2_ops::clone::fetch_repo(
         &args.url,
         args.branch.as_deref(),
         callbacks,
     )?;
-    
+
     let archive_data = crate::streaming::tar::create_tar_from_tree(
         &fetch_result.repo,
         fetch_result.head_commit,
     )?;
-    
+
     let archive_base64 = base64::engine::general_purpose::STANDARD.encode(&archive_data);
-    
+
     Ok(RepoCloneResult {
         archive: archive_base64,
         commit: fetch_result.head_commit.to_string(),
@@ -300,6 +309,7 @@ pub async fn handle_repo_clone(args: RepoCloneArgs) -> Result<RepoCloneResult, T
 ```
 
 **Acceptance criteria:**
+
 - [ ] `repo/clone` tool works
 - [ ] Public repos clone without auth
 - [ ] Private repos clone with credential helper
@@ -323,28 +333,28 @@ pub fn process_bundle_and_push(
 ) -> Result<PushResult, Error> {
     let temp_dir = TempDir::new()?;
     let repo = Repository::init_bare(temp_dir.path())?;
-    
+
     // Write bundle to temp (just the bundle, not source files)
     let bundle_path = temp_dir.path().join("input.bundle");
     std::fs::write(&bundle_path, bundle_data)?;
-    
+
     // Unbundle (adds objects to bare repo)
     let mut remote = repo.remote_anonymous(bundle_path.to_str().unwrap())?;
     remote.fetch(&["refs/heads/*:refs/heads/*"], None, None)?;
-    
+
     // Push to real remote with auth
     let mut real_remote = repo.remote_anonymous(remote_url)?;
     let mut push_opts = git2::PushOptions::new();
     push_opts.remote_callbacks(callbacks);
-    
+
     real_remote.push(
         &[&format!("refs/heads/{target_branch}")],
         Some(&mut push_opts),
     )?;
-    
+
     let reference = repo.find_reference(&format!("refs/heads/{target_branch}"))?;
     let commit = reference.peel_to_commit()?.id();
-    
+
     Ok(PushResult {
         branch: target_branch.to_string(),
         commit: commit.to_string(),
@@ -353,6 +363,7 @@ pub fn process_bundle_and_push(
 ```
 
 **Acceptance criteria:**
+
 - [ ] `repo/push` tool works
 - [ ] Push to existing branch
 - [ ] Create and push to new branch
@@ -383,7 +394,7 @@ pub struct SessionManager {
 ### 1.6 Integration Testing
 
 ```bash
-# Verify no disk writes
+# Verify no disk writes (Linux)
 strace -f -e write cargo run 2>&1 | grep -v /tmp
 ```
 
@@ -391,84 +402,65 @@ strace -f -e write cargo run 2>&1 | grep -v /tmp
 
 ## Phase 2: Tier 1 Hardening
 
-- [ ] Error handling matrix
-- [ ] Shallow clone support
-- [ ] Sparse checkout support
-- [ ] Audit logging
+- [ ] Comprehensive error handling
+- [ ] Shallow clone support (`depth` parameter)
+- [ ] Sparse checkout support (`sparse` parameter)
+- [ ] Audit logging for all operations
+- [ ] Rate limiting integration
+- [ ] Security guards (branch protection, force push)
 
 ---
 
-## Phase 3: Tier 2 (Chunked Streaming)
+## Phase 3: Tier 2 (Chunked Streaming) <- TARGET
 
-- [ ] Stream tar in chunks instead of buffering
-- [ ] Handle repos > available RAM
+- [ ] Stream tar in chunks instead of buffering entire repo
+- [ ] Handle repos larger than available RAM
 - [ ] Resume interrupted transfers
+- [ ] Progress reporting
+
+**Tier 2 is the production-ready goal.**
 
 ---
 
-## Phase 4: Tier 3 (Token Delegation) ⭐ THE GOAL
+## Phase 4: Polish & Release
 
-- [ ] Create GitHub App
-- [ ] Implement `auth/get_token` tool
-- [ ] AI clones directly from GitHub
-- [ ] **ZERO bytes through user's PC!**
-
-```rust
-#[derive(Serialize)]
-pub struct TokenResponse {
-    pub token: String,           // ghs_xxxx
-    pub expires_at: DateTime,    // 1 hour from now
-    pub clone_url: String,       // https://x-access-token:TOKEN@github.com/...
-    pub permissions: Vec<String>,
-}
-
-pub async fn handle_get_token(args: GetTokenArgs) -> Result<TokenResponse, ToolError> {
-    let app = GitHubApp::load()?;
-    let installation = app.find_installation(&args.url)?;
-    
-    let token = installation.create_access_token(
-        repos: [&args.url],
-        permissions: { contents: "write" },
-        expires: Duration::hours(1),
-    ).await?;
-    
-    Ok(TokenResponse {
-        token: token.value,
-        expires_at: token.expires_at,
-        clone_url: format!("https://x-access-token:{}@github.com/{}", 
-                          token.value, args.repo_path),
-        permissions: token.permissions,
-    })
-}
-```
-
----
-
-## Phase 5: Multi-Provider
-
-- [ ] GitLab (Project Access Tokens)
-- [ ] Bitbucket (Repository Access Tokens)
-- [ ] Azure DevOps
+- [ ] Multi-provider support (GitLab, Bitbucket)
+- [ ] Comprehensive documentation
+- [ ] Performance benchmarks
+- [ ] Security audit
 
 ---
 
 ## Success Metrics
 
-| Metric | Tier 1 | Tier 2 | Tier 3 |
-|--------|--------|--------|--------|
-| Files on user's disk | None | None | None |
-| Data through user's PC | Yes (RAM) | Yes (chunked) | **NONE** |
-| Clone 100 files | < 5s | < 5s | < 3s |
-| Memory for large repo | O(repo) | O(chunk) | O(1) |
+| Metric | Tier 1 | Tier 2 |
+|--------|--------|--------|
+| Files on user's disk | None | None |
+| Credentials to AI | **NEVER** | **NEVER** |
+| Data through user's PC | Yes (RAM) | Yes (chunked) |
+| Clone 100 files | < 5s | < 5s |
+| Memory for large repo | O(repo) | O(chunk) |
+
+---
+
+## Explicitly Out of Scope
+
+**Token Delegation** — We will NOT implement giving the AI any form of credential (even short-lived tokens). Rationale:
+
+- Even 1-hour tokens can be abused if AI's VM is compromised
+- Violates core principle: credentials never leave user's PC
+- "Minimal exposure" is still exposure
+
+See `docs/VISION.md` § "Why NOT Token Delegation?" for details.
 
 ---
 
 ## References
 
 - [git2 crate](https://docs.rs/git2/latest/git2/)
-- [GitHub Apps](https://docs.github.com/en/apps)
-- [Installation Access Tokens](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-an-installation-access-token-for-a-github-app)
+- [MCP Specification](https://modelcontextprotocol.io/)
+- [libgit2 authentication](https://libgit2.org/docs/guides/authentication/)
 
 ---
 
-*Tier 1 gets us working. Tier 3 gets us perfect.*
+*Tier 1 gets us working. Tier 2 gets us production-ready.*
