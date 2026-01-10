@@ -124,7 +124,12 @@ impl OutgoingNotification {
 
     /// Creates a progress notification.
     #[must_use]
-    pub fn progress(progress_token: &str, progress: u32, total: Option<u32>, message: Option<&str>) -> Self {
+    pub fn progress(
+        progress_token: &str,
+        progress: u32,
+        total: Option<u32>,
+        message: Option<&str>,
+    ) -> Self {
         let params = serde_json::json!({
             "progressToken": progress_token,
             "progress": progress,

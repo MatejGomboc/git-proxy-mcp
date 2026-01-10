@@ -161,7 +161,10 @@ fn audit_safe_urls_accepted() {
     ];
 
     for url in safe_urls {
-        assert!(validate_url(url).is_ok(), "Safe URL should be accepted: {url}");
+        assert!(
+            validate_url(url).is_ok(),
+            "Safe URL should be accepted: {url}"
+        );
     }
 }
 
@@ -292,7 +295,11 @@ fn audit_protected_branches_blocked() {
         // Force push should be blocked (push remote branch format)
         let result = guard.check(
             "push",
-            &["--force".to_string(), "origin".to_string(), branch.to_string()],
+            &[
+                "--force".to_string(),
+                "origin".to_string(),
+                branch.to_string(),
+            ],
         );
         assert!(
             result.is_blocked(),

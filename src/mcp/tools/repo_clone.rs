@@ -262,8 +262,11 @@ pub fn handle_repo_clone_with_progress(
         progress,
     };
 
-    let tar_result =
-        create_tar_from_tree_with_options(&fetch_result.repo, fetch_result.head_commit, Some(tar_opts))?;
+    let tar_result = create_tar_from_tree_with_options(
+        &fetch_result.repo,
+        fetch_result.head_commit,
+        Some(tar_opts),
+    )?;
 
     debug!(
         file_count = tar_result.file_count,

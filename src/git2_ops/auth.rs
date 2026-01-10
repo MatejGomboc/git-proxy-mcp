@@ -74,7 +74,9 @@ pub fn create_callbacks<'a>() -> RemoteCallbacks<'a> {
 /// - Total objects
 /// - Indexed objects
 #[must_use]
-pub fn create_callbacks_with_progress<'a>(progress: Option<&ProgressSender>) -> RemoteCallbacks<'a> {
+pub fn create_callbacks_with_progress<'a>(
+    progress: Option<&ProgressSender>,
+) -> RemoteCallbacks<'a> {
     let mut callbacks = RemoteCallbacks::new();
 
     callbacks.credentials(credentials_callback);
@@ -181,7 +183,9 @@ fn credentials_callback(
         }
     }
 
-    Err(git2::Error::from_str("no suitable credential method available"))
+    Err(git2::Error::from_str(
+        "no suitable credential method available",
+    ))
 }
 
 /// Sanitize a URL for logging by removing any embedded credentials.
@@ -436,7 +440,10 @@ mod tests {
     #[test]
     fn parse_url_for_credentials_https() {
         let result = parse_url_for_credentials("https://github.com/owner/repo.git");
-        assert_eq!(result, Some(("https".to_string(), "github.com".to_string())));
+        assert_eq!(
+            result,
+            Some(("https".to_string(), "github.com".to_string()))
+        );
     }
 
     #[test]
@@ -452,13 +459,19 @@ mod tests {
     fn parse_url_for_credentials_ssh() {
         let result = parse_url_for_credentials("git@github.com:owner/repo.git");
         // SSH URLs use https protocol for credential lookup
-        assert_eq!(result, Some(("https".to_string(), "github.com".to_string())));
+        assert_eq!(
+            result,
+            Some(("https".to_string(), "github.com".to_string()))
+        );
     }
 
     #[test]
     fn parse_url_for_credentials_gitlab_ssh() {
         let result = parse_url_for_credentials("git@gitlab.com:owner/repo.git");
-        assert_eq!(result, Some(("https".to_string(), "gitlab.com".to_string())));
+        assert_eq!(
+            result,
+            Some(("https".to_string(), "gitlab.com".to_string()))
+        );
     }
 
     #[test]
@@ -472,10 +485,7 @@ mod tests {
     fn parse_credential_output_valid() {
         let output = "protocol=https\nhost=github.com\nusername=myuser\npassword=mytoken\n";
         let result = parse_credential_output(output);
-        assert_eq!(
-            result,
-            Some(("myuser".to_string(), "mytoken".to_string()))
-        );
+        assert_eq!(result, Some(("myuser".to_string(), "mytoken".to_string())));
     }
 
     #[test]

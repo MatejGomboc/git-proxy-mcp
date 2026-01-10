@@ -107,9 +107,8 @@ pub fn fetch_bare(url: &str, options: Option<FetchOptions2>) -> Result<FetchResu
     debug!(path = %temp_dir.path().display(), "created temp directory");
 
     // Initialize BARE repository — no working tree!
-    let repo = Repository::init_bare(temp_dir.path()).map_err(|e| {
-        Git2Error::InitFailed(format!("failed to init bare repo: {}", e.message()))
-    })?;
+    let repo = Repository::init_bare(temp_dir.path())
+        .map_err(|e| Git2Error::InitFailed(format!("failed to init bare repo: {}", e.message())))?;
 
     debug!("initialized bare repository");
 
@@ -118,9 +117,9 @@ pub fn fetch_bare(url: &str, options: Option<FetchOptions2>) -> Result<FetchResu
 
     // Scope the remote to ensure it's dropped before we return the repo
     {
-        let mut remote =
-            repo.remote_anonymous(url)
-                .map_err(|e| Git2Error::InitFailed(format!("failed to create remote: {e}")))?;
+        let mut remote = repo
+            .remote_anonymous(url)
+            .map_err(|e| Git2Error::InitFailed(format!("failed to create remote: {e}")))?;
 
         let callbacks = create_callbacks_with_progress(options.progress.as_ref());
 

@@ -115,6 +115,9 @@ mod tests {
     fn sanitize_returns_placeholder_when_all_sensitive() {
         let msg = "password: secret123\ntoken: abc";
         let sanitized = sanitize_error_message(msg);
-        assert_eq!(sanitized, "operation failed (details redacted for security)");
+        assert_eq!(
+            sanitized,
+            "operation failed (details redacted for security)"
+        );
     }
 }

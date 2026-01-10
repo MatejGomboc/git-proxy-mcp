@@ -116,7 +116,9 @@ impl ProgressUpdate {
                     None
                 }
             }
-            Self::FileProcessing { processed, total, .. } => {
+            Self::FileProcessing {
+                processed, total, ..
+            } => {
                 if *total > 0 {
                     Some(((*processed as u64 * 100) / (*total as u64)) as u32)
                 } else {

@@ -145,9 +145,8 @@ pub fn pull_changes(url: &str, branch: &str, since_commit: &str) -> Result<PullR
     debug!(path = %temp_dir.path().display(), "created temp directory");
 
     // Initialize bare repository
-    let repo = Repository::init_bare(temp_dir.path()).map_err(|e| {
-        Git2Error::InitFailed(format!("failed to init bare repo: {}", e.message()))
-    })?;
+    let repo = Repository::init_bare(temp_dir.path())
+        .map_err(|e| Git2Error::InitFailed(format!("failed to init bare repo: {}", e.message())))?;
 
     // Fetch the branch
     let refspec = format!("+refs/heads/{branch}:refs/heads/{branch}");

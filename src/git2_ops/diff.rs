@@ -77,7 +77,11 @@ pub struct DiffResult {
 ///
 /// Credentials are handled via git2 callbacks and never stored or logged.
 /// The temporary bare repository is cleaned up after the operation.
-pub fn generate_diff(url: &str, base_commit: &str, head_commit: &str) -> Result<DiffResult, Git2Error> {
+pub fn generate_diff(
+    url: &str,
+    base_commit: &str,
+    head_commit: &str,
+) -> Result<DiffResult, Git2Error> {
     info!(
         url = %sanitize_url_for_logging(url),
         base = %base_commit,
@@ -94,9 +98,8 @@ pub fn generate_diff(url: &str, base_commit: &str, head_commit: &str) -> Result<
     debug!(path = %temp_dir.path().display(), "created temp directory");
 
     // Initialize bare repository
-    let repo = Repository::init_bare(temp_dir.path()).map_err(|e| {
-        Git2Error::InitFailed(format!("failed to init bare repo: {}", e.message()))
-    })?;
+    let repo = Repository::init_bare(temp_dir.path())
+        .map_err(|e| Git2Error::InitFailed(format!("failed to init bare repo: {}", e.message())))?;
 
     // Fetch all refs to ensure we have both commits
     // Using +refs/*:refs/* to get all branches and tags

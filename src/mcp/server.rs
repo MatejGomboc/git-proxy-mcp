@@ -45,16 +45,16 @@ use crate::mcp::protocol::{
     ErrorCode, IncomingMessage, JsonRpcError, JsonRpcErrorData, JsonRpcNotification,
     JsonRpcRequest, JsonRpcResponse, RequestId, MCP_PROTOCOL_VERSION, SERVER_NAME,
 };
+use crate::mcp::tools::{
+    handle_repo_clone, handle_repo_clone_cancel, handle_repo_clone_chunk, handle_repo_clone_start,
+    handle_repo_diff, handle_repo_pull, handle_repo_push, handle_repo_refs, RepoCloneArgs,
+    RepoCloneCancelArgs, RepoCloneChunkArgs, RepoCloneStartArgs, RepoDiffArgs, RepoPullArgs,
+    RepoPushArgs, RepoRefsArgs,
+};
 use crate::mcp::transport::StdioTransport;
 use crate::security::{
     AuditEvent, AuditLogger, BranchGuard, PushGuard, RateLimiter, RepoFilter, SecurityGuard,
     ShutdownReason,
-};
-use crate::mcp::tools::{
-    handle_repo_clone, handle_repo_clone_cancel, handle_repo_clone_chunk, handle_repo_clone_start,
-    handle_repo_diff, handle_repo_pull, handle_repo_push, handle_repo_refs, RepoCloneCancelArgs,
-    RepoCloneArgs, RepoCloneChunkArgs, RepoCloneStartArgs, RepoDiffArgs, RepoPullArgs, RepoPushArgs,
-    RepoRefsArgs,
 };
 use crate::streaming::chunked::StreamingSessionManager;
 
@@ -1081,10 +1081,11 @@ impl McpServer {
 
         // Check rate limiter
         if !self.rate_limiter.try_acquire() {
-            self.audit_logger.log_silent(&AuditEvent::repo_clone_blocked(
-                &sanitized_url,
-                "rate limit exceeded",
-            ));
+            self.audit_logger
+                .log_silent(&AuditEvent::repo_clone_blocked(
+                    &sanitized_url,
+                    "rate limit exceeded",
+                ));
             return ToolCallResult::error(
                 "Rate limit exceeded. Please wait before sending more requests.",
             );
@@ -1106,14 +1107,15 @@ impl McpServer {
         match handle_repo_clone(args) {
             Ok(result) => {
                 let duration = start.elapsed();
-                self.audit_logger.log_silent(&AuditEvent::repo_clone_success(
-                    &sanitized_url,
-                    &result.branch,
-                    &result.commit,
-                    result.file_count,
-                    result.archive_size,
-                    duration,
-                ));
+                self.audit_logger
+                    .log_silent(&AuditEvent::repo_clone_success(
+                        &sanitized_url,
+                        &result.branch,
+                        &result.commit,
+                        result.file_count,
+                        result.archive_size,
+                        duration,
+                    ));
 
                 // Return the result as JSON text
                 match serde_json::to_string_pretty(&result) {
@@ -1248,10 +1250,11 @@ impl McpServer {
 
         // Check rate limiter
         if !self.rate_limiter.try_acquire() {
-            self.audit_logger.log_silent(&AuditEvent::repo_clone_blocked(
-                &sanitized_url,
-                "rate limit exceeded",
-            ));
+            self.audit_logger
+                .log_silent(&AuditEvent::repo_clone_blocked(
+                    &sanitized_url,
+                    "rate limit exceeded",
+                ));
             return ToolCallResult::error(
                 "Rate limit exceeded. Please wait before sending more requests.",
             );
@@ -1273,14 +1276,15 @@ impl McpServer {
         match handle_repo_clone_start(args, &self.streaming_sessions) {
             Ok(result) => {
                 let duration = start.elapsed();
-                self.audit_logger.log_silent(&AuditEvent::repo_clone_success(
-                    &sanitized_url,
-                    &result.branch,
-                    &result.commit,
-                    0, // file_count not known until all chunks retrieved
-                    result.total_size,
-                    duration,
-                ));
+                self.audit_logger
+                    .log_silent(&AuditEvent::repo_clone_success(
+                        &sanitized_url,
+                        &result.branch,
+                        &result.commit,
+                        0, // file_count not known until all chunks retrieved
+                        result.total_size,
+                        duration,
+                    ));
 
                 // Return the result as JSON text
                 match serde_json::to_string_pretty(&result) {
@@ -1366,10 +1370,11 @@ impl McpServer {
 
         // Check rate limiter
         if !self.rate_limiter.try_acquire() {
-            self.audit_logger.log_silent(&AuditEvent::repo_clone_blocked(
-                &sanitized_url,
-                "rate limit exceeded",
-            ));
+            self.audit_logger
+                .log_silent(&AuditEvent::repo_clone_blocked(
+                    &sanitized_url,
+                    "rate limit exceeded",
+                ));
             return ToolCallResult::error(
                 "Rate limit exceeded. Please wait before sending more requests.",
             );
@@ -1435,10 +1440,11 @@ impl McpServer {
 
         // Check rate limiter
         if !self.rate_limiter.try_acquire() {
-            self.audit_logger.log_silent(&AuditEvent::repo_clone_blocked(
-                &sanitized_url,
-                "rate limit exceeded",
-            ));
+            self.audit_logger
+                .log_silent(&AuditEvent::repo_clone_blocked(
+                    &sanitized_url,
+                    "rate limit exceeded",
+                ));
             return ToolCallResult::error(
                 "Rate limit exceeded. Please wait before sending more requests.",
             );
@@ -1504,10 +1510,11 @@ impl McpServer {
 
         // Check rate limiter
         if !self.rate_limiter.try_acquire() {
-            self.audit_logger.log_silent(&AuditEvent::repo_clone_blocked(
-                &sanitized_url,
-                "rate limit exceeded",
-            ));
+            self.audit_logger
+                .log_silent(&AuditEvent::repo_clone_blocked(
+                    &sanitized_url,
+                    "rate limit exceeded",
+                ));
             return ToolCallResult::error(
                 "Rate limit exceeded. Please wait before sending more requests.",
             );

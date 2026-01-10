@@ -48,7 +48,10 @@ fn perf_base64_encode_1kb() {
     });
     println!("base64 encode 1KB: {} per op", format_duration(avg));
     // Should be well under 1ms
-    assert!(avg < Duration::from_millis(1), "base64 1KB too slow: {avg:?}");
+    assert!(
+        avg < Duration::from_millis(1),
+        "base64 1KB too slow: {avg:?}"
+    );
 }
 
 #[test]
@@ -59,7 +62,10 @@ fn perf_base64_encode_1mb() {
     });
     println!("base64 encode 1MB: {} per op", format_duration(avg));
     // Should be under 50ms
-    assert!(avg < Duration::from_millis(50), "base64 1MB too slow: {avg:?}");
+    assert!(
+        avg < Duration::from_millis(50),
+        "base64 1MB too slow: {avg:?}"
+    );
 }
 
 #[test]
@@ -95,7 +101,10 @@ fn perf_session_create() {
         );
         // Clean up by cancelling
     });
-    println!("session create (100KB data): {} per op", format_duration(avg));
+    println!(
+        "session create (100KB data): {} per op",
+        format_duration(avg)
+    );
     // Should be under 10ms
     assert!(
         avg < Duration::from_millis(10),
@@ -163,7 +172,10 @@ fn perf_chunking_overhead() {
     });
 
     println!("single encode 1MB: {}", format_duration(single_time));
-    println!("chunked encode 1MB (10x100KB): {}", format_duration(chunked_time));
+    println!(
+        "chunked encode 1MB (10x100KB): {}",
+        format_duration(chunked_time)
+    );
 
     // Chunked should be at most 2x slower due to overhead
     assert!(

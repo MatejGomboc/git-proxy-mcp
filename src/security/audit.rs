@@ -672,7 +672,10 @@ mod tests {
 
         assert_eq!(event.event_type, AuditEventType::RepoClone);
         assert_eq!(event.outcome, AuditOutcome::Success);
-        assert_eq!(event.url, Some("https://github.com/owner/repo.git".to_string()));
+        assert_eq!(
+            event.url,
+            Some("https://github.com/owner/repo.git".to_string())
+        );
         assert_eq!(event.branch, Some("main".to_string()));
         assert_eq!(event.commit, Some("abc123def".to_string()));
         assert_eq!(event.file_count, Some(100));
@@ -701,7 +704,10 @@ mod tests {
 
         assert_eq!(event.event_type, AuditEventType::RepoClone);
         assert_eq!(event.outcome, AuditOutcome::Blocked);
-        assert_eq!(event.reason, Some("repository not in allowlist".to_string()));
+        assert_eq!(
+            event.reason,
+            Some("repository not in allowlist".to_string())
+        );
     }
 
     #[test]
@@ -716,7 +722,10 @@ mod tests {
 
         assert_eq!(event.event_type, AuditEventType::RepoPush);
         assert_eq!(event.outcome, AuditOutcome::Success);
-        assert_eq!(event.url, Some("https://github.com/owner/repo.git".to_string()));
+        assert_eq!(
+            event.url,
+            Some("https://github.com/owner/repo.git".to_string())
+        );
         assert_eq!(event.branch, Some("feature".to_string()));
         assert_eq!(event.commit, Some("def456ghi".to_string()));
         assert!(event.reason.is_none()); // No force push
@@ -744,7 +753,10 @@ mod tests {
 
         assert_eq!(event.event_type, AuditEventType::RepoPush);
         assert_eq!(event.outcome, AuditOutcome::Blocked);
-        assert_eq!(event.reason, Some("force push to protected branch".to_string()));
+        assert_eq!(
+            event.reason,
+            Some("force push to protected branch".to_string())
+        );
     }
 
     #[test]

@@ -468,7 +468,10 @@ impl StreamingSessionManager {
     ///
     /// Returns an error if the session doesn't exist.
     #[allow(clippy::significant_drop_tightening)]
-    pub fn get_session_info(&self, session_id: &str) -> Result<StreamingSessionInfo, StreamingError> {
+    pub fn get_session_info(
+        &self,
+        session_id: &str,
+    ) -> Result<StreamingSessionInfo, StreamingError> {
         let sessions = self
             .sessions
             .read()
@@ -598,10 +601,9 @@ impl std::fmt::Display for StreamingError {
             Self::InvalidChunkIndex { index, total } => {
                 write!(f, "invalid chunk index {index} (total chunks: {total})")
             }
-            Self::TooManySessions => write!(
-                f,
-                "too many active streaming sessions (max {MAX_SESSIONS})"
-            ),
+            Self::TooManySessions => {
+                write!(f, "too many active streaming sessions (max {MAX_SESSIONS})")
+            }
             Self::LockPoisoned => write!(f, "internal error: session lock poisoned"),
             Self::IoError(msg) => write!(f, "I/O error: {msg}"),
         }

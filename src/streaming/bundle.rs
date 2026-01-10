@@ -96,7 +96,9 @@ pub fn parse_bundle_info(data: &[u8]) -> Result<BundleInfo, Git2Error> {
     } else if header.starts_with("# v2 bundle") {
         2
     } else {
-        return Err(Git2Error::BundleFailed("unknown bundle version".to_string()));
+        return Err(Git2Error::BundleFailed(
+            "unknown bundle version".to_string(),
+        ));
     };
 
     // Parse references (lines after header, before empty line)
@@ -125,7 +127,11 @@ pub fn parse_bundle_info(data: &[u8]) -> Result<BundleInfo, Git2Error> {
         }
     }
 
-    debug!(version = version, ref_count = refs.len(), "parsed bundle info");
+    debug!(
+        version = version,
+        ref_count = refs.len(),
+        "parsed bundle info"
+    );
 
     Ok(BundleInfo { version, refs })
 }

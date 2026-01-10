@@ -345,10 +345,8 @@ mod tests {
 
     #[test]
     fn session_id_sanitizes_credentials() {
-        let id = SessionManager::session_id(
-            "https://user:secret@github.com/owner/repo.git",
-            "main",
-        );
+        let id =
+            SessionManager::session_id("https://user:secret@github.com/owner/repo.git", "main");
 
         // Should not contain the password
         assert!(!id.contains("secret"));
