@@ -873,6 +873,8 @@ impl McpServer {
     /// This tool clones a repository and returns it as a base64-encoded tar.gz.
     /// Source files are never written to the user's disk.
     fn call_repo_clone_tool(&self, arguments: &Value) -> ToolCallResult {
+        use crate::git2_ops::auth::sanitize_url_for_logging;
+
         // Parse arguments
         let args: RepoCloneArgs = match serde_json::from_value(arguments.clone()) {
             Ok(a) => a,
@@ -881,8 +883,14 @@ impl McpServer {
             }
         };
 
+        let sanitized_url = sanitize_url_for_logging(&args.url);
+
         // Check rate limiter
         if !self.rate_limiter.try_acquire() {
+            self.audit_logger.log_silent(&AuditEvent::repo_clone_blocked(
+                &sanitized_url,
+                "rate limit exceeded",
+            ));
             return ToolCallResult::error(
                 "Rate limit exceeded. Please wait before sending more requests.",
             );
@@ -894,19 +902,38 @@ impl McpServer {
             .check("clone", std::slice::from_ref(&args.url))
             .reason()
         {
+            self.audit_logger
+                .log_silent(&AuditEvent::repo_clone_blocked(&sanitized_url, reason));
             return ToolCallResult::error(reason.to_string());
         }
 
-        // Execute the clone
+        // Execute the clone with timing
+        let start = Instant::now();
         match handle_repo_clone(args) {
             Ok(result) => {
+                let duration = start.elapsed();
+                self.audit_logger.log_silent(&AuditEvent::repo_clone_success(
+                    &sanitized_url,
+                    &result.branch,
+                    &result.commit,
+                    result.file_count,
+                    result.archive_size,
+                    duration,
+                ));
+
                 // Return the result as JSON text
                 match serde_json::to_string_pretty(&result) {
                     Ok(json) => ToolCallResult::text(json),
                     Err(e) => ToolCallResult::error(format!("Failed to serialize result: {e}")),
                 }
             }
-            Err(e) => ToolCallResult::error(e.to_string()),
+            Err(e) => {
+                self.audit_logger.log_silent(&AuditEvent::repo_clone_failed(
+                    &sanitized_url,
+                    e.to_string(),
+                ));
+                ToolCallResult::error(e.to_string())
+            }
         }
     }
 
@@ -915,6 +942,8 @@ impl McpServer {
     /// This tool receives a git bundle and pushes it to a remote repository.
     /// Only the bundle file touches disk (not source files).
     fn call_repo_push_tool(&self, arguments: &Value) -> ToolCallResult {
+        use crate::git2_ops::auth::sanitize_url_for_logging;
+
         // Parse arguments
         let args: RepoPushArgs = match serde_json::from_value(arguments.clone()) {
             Ok(a) => a,
@@ -923,8 +952,14 @@ impl McpServer {
             }
         };
 
+        let sanitized_url = sanitize_url_for_logging(&args.url);
+
         // Check rate limiter
         if !self.rate_limiter.try_acquire() {
+            self.audit_logger.log_silent(&AuditEvent::repo_push_blocked(
+                &sanitized_url,
+                "rate limit exceeded",
+            ));
             return ToolCallResult::error(
                 "Rate limit exceeded. Please wait before sending more requests.",
             );
@@ -936,6 +971,8 @@ impl McpServer {
             .check("push", std::slice::from_ref(&args.url))
             .reason()
         {
+            self.audit_logger
+                .log_silent(&AuditEvent::repo_push_blocked(&sanitized_url, reason));
             return ToolCallResult::error(reason.to_string());
         }
 
@@ -945,6 +982,10 @@ impl McpServer {
             .check("push", &[args.branch.clone()])
             .reason()
         {
+            self.audit_logger.log_silent(&AuditEvent::repo_push_blocked(
+                &sanitized_url,
+                format!("protected branch: {reason}"),
+            ));
             return ToolCallResult::error(reason.to_string());
         }
 
@@ -955,20 +996,43 @@ impl McpServer {
                 .check("push", &["--force".to_string()])
                 .reason()
             {
+                self.audit_logger.log_silent(&AuditEvent::repo_push_blocked(
+                    &sanitized_url,
+                    format!("force push blocked: {reason}"),
+                ));
                 return ToolCallResult::error(reason.to_string());
             }
         }
 
-        // Execute the push
+        // Execute the push with timing
+        let start = Instant::now();
+        let branch = args.branch.clone();
+        let force = args.force;
+
         match handle_repo_push(args) {
             Ok(result) => {
+                let duration = start.elapsed();
+                self.audit_logger.log_silent(&AuditEvent::repo_push_success(
+                    &sanitized_url,
+                    &result.branch,
+                    &result.commit,
+                    force,
+                    duration,
+                ));
+
                 // Return the result as JSON text
                 match serde_json::to_string_pretty(&result) {
                     Ok(json) => ToolCallResult::text(json),
                     Err(e) => ToolCallResult::error(format!("Failed to serialize result: {e}")),
                 }
             }
-            Err(e) => ToolCallResult::error(e.to_string()),
+            Err(e) => {
+                self.audit_logger.log_silent(&AuditEvent::repo_push_failed(
+                    &sanitized_url,
+                    format!("push to {branch} failed: {e}"),
+                ));
+                ToolCallResult::error(e.to_string())
+            }
         }
     }
 }
