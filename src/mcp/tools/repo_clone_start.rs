@@ -188,8 +188,11 @@ pub fn handle_repo_clone_start(
     // Create tar.gz from tree (in memory), with optional filtering
     let tar_opts = TarOptions {
         sparse_patterns: args.sparse,
-        exclude_binary: None, // TODO: Add to RepoCloneStartArgs when needed
-        max_file_size: None,  // TODO: Add to RepoCloneStartArgs when needed
+        exclude_binary: None,    // TODO: Add to RepoCloneStartArgs when needed
+        max_file_size: None,     // TODO: Add to RepoCloneStartArgs when needed
+        resolve_lfs: None,       // TODO: Add to RepoCloneStartArgs when needed
+        repo_url: None,          // TODO: Add to RepoCloneStartArgs when needed
+        lfs_credentials: None,   // TODO: Add to RepoCloneStartArgs when needed
     };
 
     let tar_result = create_tar_from_tree_with_options(

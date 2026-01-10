@@ -55,6 +55,11 @@ pub struct RepoCloneArgs {
     /// Useful for excluding large generated files or assets.
     #[serde(default)]
     pub max_file_size: Option<usize>,
+
+    /// Resolve Git LFS pointers to actual content.
+    /// When enabled, LFS pointer files are replaced with their actual content.
+    #[serde(default)]
+    pub resolve_lfs: Option<bool>,
 }
 
 /// Result of a successful `repo/clone` operation.
@@ -86,6 +91,14 @@ pub struct RepoCloneResult {
     /// Number of files skipped due to size limit (when `max_file_size` is set)
     #[serde(skip_serializing_if = "is_zero")]
     pub skipped_too_large: usize,
+
+    /// Number of LFS pointers resolved (when `resolve_lfs` is true)
+    #[serde(skip_serializing_if = "is_zero")]
+    pub lfs_resolved: usize,
+
+    /// Number of LFS pointers that failed to resolve
+    #[serde(skip_serializing_if = "is_zero")]
+    pub lfs_failed: usize,
 }
 
 /// Helper for `skip_serializing_if` — skip if value is zero.
@@ -164,6 +177,9 @@ pub fn handle_repo_clone(args: RepoCloneArgs) -> Result<RepoCloneResult, RepoClo
     if let Some(max_size) = args.max_file_size {
         debug!(max_size = max_size, "max file size limit set");
     }
+    if args.resolve_lfs == Some(true) {
+        debug!("LFS resolution enabled");
+    }
 
     // Fetch into bare repository
     let fetch_opts = FetchOptions2 {
@@ -184,6 +200,9 @@ pub fn handle_repo_clone(args: RepoCloneArgs) -> Result<RepoCloneResult, RepoClo
         sparse_patterns: args.sparse,
         exclude_binary: args.exclude_binary,
         max_file_size: args.max_file_size,
+        resolve_lfs: args.resolve_lfs,
+        repo_url: Some(args.url),
+        lfs_credentials: None, // TODO: Support LFS credentials from git credential helper
     };
 
     let tar_result =
@@ -196,6 +215,8 @@ pub fn handle_repo_clone(args: RepoCloneArgs) -> Result<RepoCloneResult, RepoClo
         skipped_by_filter = tar_result.skipped_by_filter,
         skipped_binary = tar_result.skipped_binary,
         skipped_too_large = tar_result.skipped_too_large,
+        lfs_resolved = tar_result.lfs_resolved,
+        lfs_failed = tar_result.lfs_failed,
         "tar creation complete"
     );
 
@@ -219,6 +240,8 @@ pub fn handle_repo_clone(args: RepoCloneArgs) -> Result<RepoCloneResult, RepoClo
         skipped_by_filter: tar_result.skipped_by_filter,
         skipped_binary: tar_result.skipped_binary,
         skipped_too_large: tar_result.skipped_too_large,
+        lfs_resolved: tar_result.lfs_resolved,
+        lfs_failed: tar_result.lfs_failed,
     })
 }
 
@@ -254,12 +277,15 @@ mod tests {
             skipped_by_filter: 0,
             skipped_binary: 0,
             skipped_too_large: 0,
+            lfs_resolved: 0,
+            lfs_failed: 0,
         };
         let json = serde_json::to_string(&result).unwrap();
         assert!(json.contains("\"archive\":\"SGVsbG8=\""));
         assert!(json.contains("\"file_count\":10"));
         // Zero skipped counts should not be serialized
         assert!(!json.contains("skipped"));
+        assert!(!json.contains("lfs"));
     }
 
     #[test]
@@ -273,11 +299,32 @@ mod tests {
             skipped_by_filter: 5,
             skipped_binary: 3,
             skipped_too_large: 2,
+            lfs_resolved: 0,
+            lfs_failed: 0,
         };
         let json = serde_json::to_string(&result).unwrap();
         assert!(json.contains("\"skipped_by_filter\":5"));
         assert!(json.contains("\"skipped_binary\":3"));
         assert!(json.contains("\"skipped_too_large\":2"));
+    }
+
+    #[test]
+    fn repo_clone_result_serializes_lfs_counts() {
+        let result = RepoCloneResult {
+            archive: "SGVsbG8=".to_string(),
+            commit: "abc123".to_string(),
+            branch: "main".to_string(),
+            file_count: 10,
+            archive_size: 1024,
+            skipped_by_filter: 0,
+            skipped_binary: 0,
+            skipped_too_large: 0,
+            lfs_resolved: 3,
+            lfs_failed: 1,
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("\"lfs_resolved\":3"));
+        assert!(json.contains("\"lfs_failed\":1"));
     }
 
     #[test]
@@ -289,7 +336,17 @@ mod tests {
         }"#;
         let args: RepoCloneArgs = serde_json::from_str(json).unwrap();
         assert_eq!(args.exclude_binary, Some(true));
-        assert_eq!(args.max_file_size, Some(1048576));
+        assert_eq!(args.max_file_size, Some(1_048_576));
+    }
+
+    #[test]
+    fn repo_clone_args_with_lfs() {
+        let json = r#"{
+            "url": "https://github.com/owner/repo.git",
+            "resolve_lfs": true
+        }"#;
+        let args: RepoCloneArgs = serde_json::from_str(json).unwrap();
+        assert_eq!(args.resolve_lfs, Some(true));
     }
 
     // Integration tests that require network access are in tests/

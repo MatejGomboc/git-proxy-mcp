@@ -670,6 +670,10 @@ impl McpServer {
                         "max_file_size": {
                             "type": "integer",
                             "description": "Maximum file size in bytes. Files larger than this are skipped. Useful for excluding large assets."
+                        },
+                        "resolve_lfs": {
+                            "type": "boolean",
+                            "description": "Resolve Git LFS pointers to actual content. When enabled, LFS pointer files are replaced with their actual content."
                         }
                     },
                     "required": ["url"]

@@ -65,6 +65,9 @@ base64 = "0.22"
 # Temporary directories for bare repos
 tempfile = "3.10"
 
+# HTTP client for LFS API requests (blocking for sync handlers)
+reqwest = { version = "0.12", features = ["json", "rustls-tls", "blocking"], default-features = false }
+
 [dev-dependencies]
 # Async testing utilities
 tokio-test = "0.4"

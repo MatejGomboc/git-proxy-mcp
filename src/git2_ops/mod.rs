@@ -18,6 +18,7 @@
 //! - [`auth`] — Credential callback setup
 //! - [`clone`] — Bare repository fetch operations
 //! - [`diff`] — Diff generation between commits
+//! - [`lfs`] — Git LFS (Large File Storage) support
 //! - [`pull`] — Incremental sync (delta since known commit)
 //! - [`push`] — Bundle processing and authenticated push
 //! - [`refs`] — Remote reference listing (branches/tags)
@@ -27,6 +28,7 @@ pub mod auth;
 pub mod clone;
 pub mod diff;
 pub mod error;
+pub mod lfs;
 pub mod pull;
 pub mod push;
 pub mod refs;

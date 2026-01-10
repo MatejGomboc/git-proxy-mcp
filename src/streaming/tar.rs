@@ -29,6 +29,7 @@ use glob::{MatchOptions, Pattern};
 use tracing::{debug, trace, warn};
 
 use crate::git2_ops::error::Git2Error;
+use crate::git2_ops::lfs::{is_lfs_pointer, parse_lfs_pointer, LfsClient};
 
 /// Options for tar creation.
 #[derive(Debug, Clone, Default)]
@@ -44,6 +45,18 @@ pub struct TarOptions {
     /// Maximum file size in bytes. Files larger than this are skipped.
     /// Useful for excluding large generated files or assets.
     pub max_file_size: Option<usize>,
+
+    /// Resolve Git LFS pointers to actual content.
+    /// When enabled, LFS pointer files are replaced with their actual content.
+    pub resolve_lfs: Option<bool>,
+
+    /// Repository URL for LFS server discovery.
+    /// Required when `resolve_lfs` is true.
+    pub repo_url: Option<String>,
+
+    /// LFS credentials (username, password) for authentication.
+    /// If None, public LFS servers are accessed without auth.
+    pub lfs_credentials: Option<(String, String)>,
 }
 
 /// Compiled sparse patterns for efficient matching.
@@ -138,6 +151,10 @@ pub struct TarResult {
     pub skipped_binary: usize,
     /// Number of files skipped due to size limit
     pub skipped_too_large: usize,
+    /// Number of LFS pointers resolved (when `resolve_lfs` is true)
+    pub lfs_resolved: usize,
+    /// Number of LFS pointers that failed to resolve
+    pub lfs_failed: usize,
 }
 
 /// Create a tar.gz archive from a git tree.
@@ -211,6 +228,7 @@ pub fn create_tar_from_tree_with_options(
         sparse = ?options.sparse_patterns,
         exclude_binary = ?options.exclude_binary,
         max_file_size = ?options.max_file_size,
+        resolve_lfs = ?options.resolve_lfs,
         "creating tar from tree"
     );
 
@@ -231,6 +249,25 @@ pub fn create_tar_from_tree_with_options(
     // Get filtering options
     let exclude_binary = options.exclude_binary.unwrap_or(false);
     let max_file_size = options.max_file_size;
+    let resolve_lfs = options.resolve_lfs.unwrap_or(false);
+
+    // Create LFS client if needed
+    let lfs_client = if resolve_lfs {
+        if let Some(ref url) = options.repo_url {
+            match LfsClient::new(url, options.lfs_credentials.clone()) {
+                Ok(client) => Some(client),
+                Err(e) => {
+                    warn!(error = %e, "failed to create LFS client, LFS files won't be resolved");
+                    None
+                }
+            }
+        } else {
+            warn!("resolve_lfs is true but no repo_url provided");
+            None
+        }
+    } else {
+        None
+    };
 
     let mut archive_buffer = Vec::new();
     let mut file_count = 0usize;
@@ -238,6 +275,8 @@ pub fn create_tar_from_tree_with_options(
     let mut skipped_by_filter = 0usize;
     let mut skipped_binary = 0usize;
     let mut skipped_too_large = 0usize;
+    let mut lfs_resolved = 0usize;
+    let mut lfs_failed = 0usize;
 
     {
         let encoder = GzEncoder::new(&mut archive_buffer, Compression::fast());
@@ -269,9 +308,39 @@ pub fn create_tar_from_tree_with_options(
 
                 match repo.find_blob(entry.id()) {
                     Ok(blob) => {
-                        let content = blob.content();
+                        let raw_content = blob.content();
 
-                        // Check file size limit
+                        // Check if this is an LFS pointer and resolve if enabled
+                        // The nested if-let structure is clearer than map_or for this logic
+                        #[allow(clippy::option_if_let_else)]
+                        let (content, is_lfs): (std::borrow::Cow<'_, [u8]>, bool) =
+                            if let Some(ref client) = lfs_client {
+                                if is_lfs_pointer(raw_content) {
+                                    if let Some(pointer) = parse_lfs_pointer(raw_content) {
+                                        trace!(path = %path, oid = %pointer.oid, "resolving LFS pointer");
+                                        match client.fetch_content(&pointer) {
+                                            Ok(lfs_content) => {
+                                                lfs_resolved += 1;
+                                                (std::borrow::Cow::Owned(lfs_content), true)
+                                            }
+                                            Err(e) => {
+                                                warn!(path = %path, error = %e, "failed to fetch LFS content");
+                                                lfs_failed += 1;
+                                                // Include the pointer file as-is
+                                                (std::borrow::Cow::Borrowed(raw_content), false)
+                                            }
+                                        }
+                                    } else {
+                                        (std::borrow::Cow::Borrowed(raw_content), false)
+                                    }
+                                } else {
+                                    (std::borrow::Cow::Borrowed(raw_content), false)
+                                }
+                            } else {
+                                (std::borrow::Cow::Borrowed(raw_content), false)
+                            };
+
+                        // Check file size limit (use resolved size for LFS)
                         if let Some(max_size) = max_file_size {
                             if content.len() > max_size {
                                 trace!(path = %path, size = content.len(), max = max_size, "skipped: too large");
@@ -280,14 +349,14 @@ pub fn create_tar_from_tree_with_options(
                             }
                         }
 
-                        // Check if binary
-                        if exclude_binary && is_binary(content) {
+                        // Check if binary (skip for LFS since we already fetched it)
+                        if exclude_binary && !is_lfs && is_binary(&content) {
                             trace!(path = %path, "skipped: binary file");
                             skipped_binary += 1;
                             return TreeWalkResult::Ok;
                         }
 
-                        trace!(path = %path, size = content.len(), "adding file to tar");
+                        trace!(path = %path, size = content.len(), lfs = is_lfs, "adding file to tar");
 
                         // Create tar header
                         let mut header = tar::Header::new_gnu();
@@ -303,7 +372,7 @@ pub fn create_tar_from_tree_with_options(
                         header.set_cksum();
 
                         // Append to tar
-                        if tar_builder.append(&header, content).is_err() {
+                        if tar_builder.append(&header, content.as_ref()).is_err() {
                             debug!(path = %path, "failed to append to tar, skipping");
                             return TreeWalkResult::Ok;
                         }
@@ -332,6 +401,8 @@ pub fn create_tar_from_tree_with_options(
         skipped_by_filter = skipped_by_filter,
         skipped_binary = skipped_binary,
         skipped_too_large = skipped_too_large,
+        lfs_resolved = lfs_resolved,
+        lfs_failed = lfs_failed,
         uncompressed_size = uncompressed_size,
         compressed_size = archive_buffer.len(),
         "tar creation complete"
@@ -344,6 +415,8 @@ pub fn create_tar_from_tree_with_options(
         skipped_by_filter,
         skipped_binary,
         skipped_too_large,
+        lfs_resolved,
+        lfs_failed,
     })
 }
 
