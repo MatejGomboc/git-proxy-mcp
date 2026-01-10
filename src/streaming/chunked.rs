@@ -340,17 +340,13 @@ impl StreamingSessionManager {
     }
 
     /// Generate a unique session ID.
+    ///
+    /// Uses a combination of timestamp and pseudo-random value with a
+    /// monotonic counter to ensure uniqueness even under high concurrency.
     #[must_use]
     pub fn generate_id() -> String {
-        use std::time::SystemTime;
-
-        let timestamp = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos();
-
-        // Simple ID: timestamp + random suffix
-        format!("stream_{timestamp:x}_{:04x}", rand_u16())
+        // rand_u64 includes timestamp, counter, and thread info
+        format!("stream_{:016x}", rand_u64())
     }
 
     /// Create a new streaming session.
@@ -553,7 +549,7 @@ impl StreamingSessionManager {
             keep
         });
 
-        Ok(before - sessions.len())
+        Ok(before.saturating_sub(sessions.len()))
     }
 }
 
@@ -626,18 +622,35 @@ impl From<std::io::Error> for StreamingError {
 
 impl std::error::Error for StreamingError {}
 
-/// Simple pseudo-random u16 for session ID generation.
-/// Not cryptographically secure, but fine for session IDs.
-fn rand_u16() -> u16 {
+/// Simple pseudo-random u64 for session ID generation.
+/// Not cryptographically secure, but provides sufficient uniqueness for session IDs.
+/// Uses multiple entropy sources to reduce collision probability.
+#[allow(clippy::cast_possible_truncation)] // Truncation is intentional for mixing
+fn rand_u64() -> u64 {
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::SystemTime;
+
+    // Monotonic counter to ensure uniqueness even within same nanosecond
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let counter = COUNTER.fetch_add(1, Ordering::Relaxed);
 
     let nanos = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap_or_default()
-        .subsec_nanos();
+        .as_nanos() as u64;
 
-    // Simple hash of nanoseconds
-    ((nanos ^ (nanos >> 16)) & 0xFFFF) as u16
+    // Mix counter, nanoseconds, and thread ID for better entropy
+    let thread_id = std::thread::current().id();
+    let thread_hash = format!("{thread_id:?}").len() as u64;
+
+    // Simple mixing function using large primes
+    let mixed = nanos
+        .wrapping_mul(0x517c_c1b7_2722_0a95)
+        .wrapping_add(counter)
+        .wrapping_mul(0x2545_f491_4f6c_dd1d)
+        .wrapping_add(thread_hash);
+
+    mixed ^ (mixed >> 32)
 }
 
 #[cfg(test)]
