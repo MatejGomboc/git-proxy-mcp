@@ -74,6 +74,9 @@ pub struct RepoPullResult {
 
     /// Whether the repository is up to date (no changes)
     pub up_to_date: bool,
+
+    /// Hint for AI assistants on how to extract the archive
+    pub hint: String,
 }
 
 /// Error from `repo_pull` operation (safe for display).
@@ -160,6 +163,7 @@ pub fn handle_repo_pull(args: RepoPullArgs) -> Result<RepoPullResult, RepoPullEr
         new_commit: pull_result.new_commit,
         stats: pull_result.stats,
         up_to_date: pull_result.up_to_date,
+        hint: "Use helper_script tool to get git_proxy_helper.py, then: python git_proxy_helper.py extract <result.json> <output_dir>".to_string(),
     })
 }
 
@@ -195,6 +199,7 @@ mod tests {
             new_commit: "def456".to_string(),
             stats: PullStats::default(),
             up_to_date: false,
+            hint: "test hint".to_string(),
         };
         let json = serde_json::to_string(&result).unwrap();
         assert!(json.contains("\"diff\":"));

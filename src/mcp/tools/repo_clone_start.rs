@@ -137,6 +137,9 @@ pub struct RepoCloneStartResult {
     /// Number of submodules that failed to fetch
     #[serde(skip_serializing_if = "is_zero")]
     pub submodules_failed: usize,
+
+    /// Hint for AI assistants on how to handle chunked results
+    pub hint: String,
 }
 
 /// Helper for `skip_serializing_if` — skip if value is zero.
@@ -333,6 +336,7 @@ pub fn handle_repo_clone_start(
         lfs_failed: tar_result.lfs_failed,
         submodules_included: tar_result.submodules_included,
         submodules_failed: tar_result.submodules_failed,
+        hint: "Use repo_clone_chunk to get all chunks, concatenate, then use helper_script tool for extraction".to_string(),
     })
 }
 
@@ -403,6 +407,7 @@ mod tests {
             lfs_failed: 0,
             submodules_included: 0,
             submodules_failed: 0,
+            hint: "test hint".to_string(),
         };
         let json = serde_json::to_string(&result).unwrap();
         assert!(json.contains("\"session_id\":\"stream_abc123\""));
@@ -431,6 +436,7 @@ mod tests {
             lfs_failed: 1,
             submodules_included: 2,
             submodules_failed: 1,
+            hint: "test hint".to_string(),
         };
         let json = serde_json::to_string(&result).unwrap();
         assert!(json.contains("\"skipped_by_filter\":5"));
