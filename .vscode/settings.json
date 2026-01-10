@@ -12,9 +12,6 @@
         "editor.defaultFormatter": "DavidAnson.vscode-markdownlint",
         "files.trimTrailingWhitespace": false
     },
-    "[shellscript]": {
-        "files.eol": "\n"
-    },
     "[rust]": {
         "editor.defaultFormatter": "rust-lang.rust-analyzer",
         "editor.formatOnSave": true
