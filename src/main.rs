@@ -12,7 +12,7 @@ use tracing::{error, info, Level};
 use tracing_subscriber::EnvFilter;
 
 use git_proxy_mcp::config;
-use git_proxy_mcp::mcp::server::{McpServer, SecurityConfig};
+use git_proxy_mcp::mcp::server::{GitIdentity, McpServer, SecurityConfig};
 use git_proxy_mcp::security::{AuditEvent, AuditLogger};
 
 /// Secure Git proxy MCP server for AI assistants.
@@ -127,16 +127,23 @@ fn main() -> ExitCode {
         rate_limit_refill_rate: cfg.rate_limits.refill_rate_per_sec,
     };
 
+    // Build git identity for AI-assisted commits
+    let git_identity = GitIdentity {
+        name: cfg.git_identity.name,
+        email: cfg.git_identity.email,
+    };
+
     info!(
         force_push = security_config.allow_force_push,
         protected_branches = ?security_config.protected_branches,
+        git_identity_configured = git_identity.is_configured(),
         request_timeout_secs = cfg.timeouts.request_timeout_secs,
         max_output_bytes = cfg.limits.max_output_bytes,
         "Configuration loaded"
     );
 
     // Create MCP server
-    let mut server = McpServer::new(security_config, audit_logger);
+    let mut server = McpServer::new(security_config, git_identity, audit_logger);
 
     info!("MCP server ready, waiting for client connection...");
     info!("Note: Authentication uses your existing Git credential configuration");

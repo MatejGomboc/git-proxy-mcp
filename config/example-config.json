@@ -2,6 +2,10 @@
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "_comment": "Example configuration for git-proxy-mcp. Copy to ~/.git-proxy-mcp/config.json and customise.",
     "_note": "This MCP server does NOT store credentials. Configure Git directly using credential helpers and SSH agent.",
+    "git_identity": {
+        "name": "Claude AI",
+        "email": "ai-assistant@your-domain.com"
+    },
     "security": {
         "allow_force_push": false,
         "protected_branches": [

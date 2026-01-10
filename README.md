@@ -308,13 +308,17 @@ Add to your Claude Desktop MCP configuration:
 
 ## Configuration
 
-Minimal configuration file:
+Configuration file location:
 
 - **Linux/macOS:** `~/.git-proxy-mcp/config.json`
 - **Windows:** `%USERPROFILE%\.git-proxy-mcp\config.json`
 
 ```json
 {
+  "git_identity": {
+    "name": "Claude AI",
+    "email": "ai-assistant@your-domain.com"
+  },
   "security": {
     "allow_force_push": false,
     "protected_branches": ["main", "master"]
@@ -325,6 +329,22 @@ Minimal configuration file:
   }
 }
 ```
+
+### Configuration Options
+
+| Section | Option | Description |
+|---------|--------|-------------|
+| `git_identity` | `name` | Name for AI-assisted commits (e.g., "Claude AI") |
+| `git_identity` | `email` | Email for AI-assisted commits |
+| `security` | `allow_force_push` | Allow force pushes (default: false) |
+| `security` | `protected_branches` | Branches that block force push |
+| `security` | `repo_allowlist` | Only allow these repo patterns |
+| `security` | `repo_blocklist` | Block these repo patterns |
+| `logging` | `level` | Log level: trace, debug, info, warn, error |
+| `logging` | `audit_log_path` | Path to audit log file |
+| `timeouts` | `request_timeout_secs` | Git operation timeout (default: 300) |
+| `rate_limits` | `max_burst` | Max burst operations (default: 20) |
+| `rate_limits` | `refill_rate_per_sec` | Sustained rate limit (default: 5.0) |
 
 ---
 

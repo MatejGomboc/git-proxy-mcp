@@ -221,6 +221,36 @@ pub struct SecurityConfig {
     pub rate_limit_refill_rate: f64,
 }
 
+/// Git identity configuration for AI-assisted commits.
+///
+/// This identity is communicated to the AI during initialization so they
+/// can configure their local Git to use it for commits. This allows
+/// clear separation between AI-made commits and human commits.
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitIdentity {
+    /// Name for commit author/committer (e.g., "Claude AI").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Email for commit author/committer.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+}
+
+impl GitIdentity {
+    /// Returns true if both name and email are set.
+    #[must_use]
+    pub const fn is_configured(&self) -> bool {
+        self.name.is_some() && self.email.is_some()
+    }
+
+    /// Returns true if at least one field is set.
+    #[must_use]
+    pub const fn is_partial(&self) -> bool {
+        self.name.is_some() || self.email.is_some()
+    }
+}
+
 /// The MCP server.
 pub struct McpServer {
     /// Current server state.
@@ -241,6 +271,8 @@ pub struct McpServer {
     audit_logger: Arc<AuditLogger>,
     /// Streaming session manager for Tier 2 chunked streaming.
     streaming_sessions: StreamingSessionManager,
+    /// Git identity for AI-assisted commits.
+    git_identity: GitIdentity,
 }
 
 impl McpServer {
@@ -249,9 +281,14 @@ impl McpServer {
     /// # Arguments
     ///
     /// * `security_config` — Security settings from configuration
+    /// * `git_identity` — Git identity for AI-assisted commits
     /// * `audit_logger` — Audit logger for recording operations
     #[must_use]
-    pub fn new(security_config: SecurityConfig, audit_logger: AuditLogger) -> Self {
+    pub fn new(
+        security_config: SecurityConfig,
+        git_identity: GitIdentity,
+        audit_logger: AuditLogger,
+    ) -> Self {
         // Build branch guard from protected branches
         let branch_guard = if security_config.protected_branches.is_empty() {
             BranchGuard::with_defaults()
@@ -301,6 +338,7 @@ impl McpServer {
             rate_limiter,
             audit_logger: Arc::new(audit_logger),
             streaming_sessions: StreamingSessionManager::new(),
+            git_identity,
         }
     }
 
@@ -495,11 +533,17 @@ impl McpServer {
         self.protocol_version = Some(negotiated_version.clone());
         self.state = ServerState::Initialising;
 
-        let result = json!({
+        // Build result with optional git identity
+        let mut result = json!({
             "protocolVersion": negotiated_version,
             "capabilities": ServerCapabilities::default(),
             "serverInfo": ServerInfo::default(),
         });
+
+        // Include git identity if configured (for AI to use when creating commits)
+        if self.git_identity.is_partial() {
+            result["gitIdentity"] = serde_json::to_value(&self.git_identity).unwrap_or(Value::Null);
+        }
 
         Ok(JsonRpcResponse::success(req.id.clone(), result))
     }
@@ -1351,9 +1395,10 @@ mod tests {
     /// Creates a test server with minimal configuration.
     fn create_test_server() -> McpServer {
         let security_config = SecurityConfig::default();
+        let git_identity = GitIdentity::default();
         let audit_logger = AuditLogger::disabled();
 
-        McpServer::new(security_config, audit_logger)
+        McpServer::new(security_config, git_identity, audit_logger)
     }
 
     #[test]
