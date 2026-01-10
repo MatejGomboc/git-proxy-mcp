@@ -36,6 +36,40 @@ This document explains how an AI assistant uses git-proxy-mcp to work with priva
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
+## Configuring Git Identity
+
+When the MCP server initializes, it may provide a `gitIdentity` in the response.
+This identity should be used for all commits to clearly distinguish AI-assisted
+commits from human commits.
+
+**Initialize Response (with git identity):**
+
+```json
+{
+  "protocolVersion": "2024-11-05",
+  "capabilities": { "tools": {} },
+  "serverInfo": { "name": "git-proxy-mcp", "version": "0.1.0" },
+  "gitIdentity": {
+    "name": "Claude AI",
+    "email": "ai-assistant@example.com"
+  }
+}
+```
+
+**AI configures Git before making commits:**
+
+```bash
+# Configure git identity from MCP initialize response
+git config user.name "Claude AI"
+git config user.email "ai-assistant@example.com"
+```
+
+This ensures all commits made by the AI are properly attributed, making it easy to:
+
+- Filter AI-made commits in git log (`git log --author="Claude AI"`)
+- Audit which changes were AI-assisted
+- Maintain clear attribution in the git history
+
 ## Step-by-Step Example
 
 ### 1. Clone a Repository

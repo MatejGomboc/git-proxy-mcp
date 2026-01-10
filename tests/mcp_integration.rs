@@ -6,15 +6,16 @@
 use git_proxy_mcp::mcp::protocol::{
     parse_message, IncomingMessage, JsonRpcError, JsonRpcResponse, RequestId,
 };
-use git_proxy_mcp::mcp::server::{McpServer, SecurityConfig, ServerState};
+use git_proxy_mcp::mcp::server::{GitIdentity, McpServer, SecurityConfig, ServerState};
 use git_proxy_mcp::security::AuditLogger;
 
 /// Creates a test server with minimal configuration.
 fn create_test_server() -> McpServer {
     let security_config = SecurityConfig::default();
+    let git_identity = GitIdentity::default();
     let audit_logger = AuditLogger::disabled();
 
-    McpServer::new(security_config, audit_logger)
+    McpServer::new(security_config, git_identity, audit_logger)
 }
 
 // =============================================================================

@@ -51,6 +51,10 @@ pub struct Config {
     /// Rate limiting settings.
     #[serde(default)]
     pub rate_limits: RateLimitConfig,
+
+    /// Git identity settings for AI-assisted commits.
+    #[serde(default)]
+    pub git_identity: GitIdentityConfig,
 }
 
 impl Config {
@@ -193,6 +197,27 @@ impl LimitsConfig {
     pub const fn max_output_bytes(&self) -> usize {
         self.max_output_bytes
     }
+}
+
+/// Git identity configuration.
+///
+/// Allows setting a custom Git identity for AI-assisted commits.
+/// This helps distinguish commits made by the AI from those made by humans,
+/// improving auditability and attribution in the git history.
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct GitIdentityConfig {
+    /// The name to use for commit author/committer.
+    ///
+    /// Example: "Claude AI"
+    #[serde(default)]
+    pub name: Option<String>,
+
+    /// The email to use for commit author/committer.
+    ///
+    /// Example: "ai-assistant@your-domain.com"
+    #[serde(default)]
+    pub email: Option<String>,
 }
 
 /// Rate limiting configuration.
@@ -469,5 +494,69 @@ mod tests {
         assert!(config.validate().is_ok());
         assert_eq!(config.rate_limits.max_burst, 30);
         assert!((config.rate_limits.refill_rate_per_sec - 8.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn git_identity_config_defaults() {
+        let config = GitIdentityConfig::default();
+        assert!(config.name.is_none());
+        assert!(config.email.is_none());
+    }
+
+    #[test]
+    fn parse_git_identity_config() {
+        let json = r#"{
+            "git_identity": {
+                "name": "Claude AI",
+                "email": "ai-assistant@example.com"
+            }
+        }"#;
+
+        let config: Config = serde_json::from_str(json).unwrap();
+        assert_eq!(config.git_identity.name, Some("Claude AI".to_string()));
+        assert_eq!(
+            config.git_identity.email,
+            Some("ai-assistant@example.com".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_git_identity_partial_config() {
+        let json = r#"{
+            "git_identity": {
+                "name": "AI Bot"
+            }
+        }"#;
+
+        let config: Config = serde_json::from_str(json).unwrap();
+        assert_eq!(config.git_identity.name, Some("AI Bot".to_string()));
+        assert!(config.git_identity.email.is_none());
+    }
+
+    #[test]
+    fn parse_full_config_with_git_identity() {
+        let json = r#"{
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "_comment": "Test config",
+            "security": {
+                "allow_force_push": false,
+                "protected_branches": ["main"]
+            },
+            "logging": {
+                "level": "debug"
+            },
+            "git_identity": {
+                "name": "Claude AI",
+                "email": "claude@anthropic.com"
+            }
+        }"#;
+
+        let config: Config = serde_json::from_str(json).unwrap();
+        assert!(config.validate().is_ok());
+        assert_eq!(config.git_identity.name, Some("Claude AI".to_string()));
+        assert_eq!(
+            config.git_identity.email,
+            Some("claude@anthropic.com".to_string())
+        );
     }
 }
