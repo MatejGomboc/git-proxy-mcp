@@ -98,9 +98,7 @@ git-proxy-mcp acts as an **authenticated streaming proxy** between Git providers
 | Rate limiting | ✅ Implemented |
 | Protected branch guards | ✅ Implemented |
 | Force push protection | ✅ Implemented |
-| Incremental sync (pull new changes) | 🚧 Planned |
-
-> See [TODO.md](TODO.md) for the full development roadmap.
+| Incremental sync (pull new changes) | ✅ Implemented |
 
 ---
 
@@ -352,5 +350,4 @@ GNU General Public License v3.0 — see [LICENCE](LICENCE).
 
 - [MCP Specification](https://modelcontextprotocol.io/)
 - [git2 (libgit2 Rust bindings)](https://crates.io/crates/git2)
-- [Development Roadmap](TODO.md)
 - [Report an Issue](https://github.com/MatejGomboc/git-proxy-mcp/issues)

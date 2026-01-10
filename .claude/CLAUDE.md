@@ -23,7 +23,6 @@ A secure credential relay for cloud-based AI assistants (Claude.ai, ChatGPT, Gem
 | Resource | Location |
 |----------|----------|
 | Vision | `docs/VISION.md` |
-| Battle plan | `TODO.md` |
 | Architecture | `docs/ARCHITECTURE.md` |
 
 ## Critical Rules
@@ -86,11 +85,13 @@ src/
 └── security/           # Guards from v1
 ```
 
-## Current Phase
+## Status
 
-**Phase 1: Tier 1 Foundation** <- WE ARE HERE
+All planned features are implemented:
 
-See `TODO.md` for detailed steps.
+- Tier 1 (memory streaming) ✅
+- Tier 2 (chunked streaming) ✅
+- LFS, submodules, incremental sync ✅
 
 ## Off Limits
 
