@@ -1,133 +1,226 @@
-# git-proxy-mcp
+# git-proxy-mcp — AI Assistant Context
 
-Secure credential proxy enabling cloud AI assistants to work with private Git repositories. Uses git2 (libgit2) for streaming operations. No credentials leave the user's machine; no files persist on the user's machine.
+## What Is This Project?
 
-## Quick Reference
+A secure credential proxy that enables **cloud-based AI assistants** (Claude.ai, ChatGPT, Gemini) to work with private Git repositories.
 
-| What | Where |
-|------|-------|
-| Build commands | `CONTRIBUTING.md` § Development Setup |
-| Coding standards | `CONTRIBUTING.md` § Coding Standards |
-| Style guide | `STYLE.md` |
-| Commit conventions | `CONTRIBUTING.md` § Commit Messages |
-| PR requirements | `CONTRIBUTING.md` § Pull Requests |
-| Development roadmap | `TODO.md` |
+**The key insight:** Cloud AIs have their own VMs with full compute capability. They can run git, build code, run tests. They just can't authenticate to private repos because they (rightfully) don't have access to user credentials.
+
+**We solve exactly that problem:** Stream Git data through an authenticated proxy on the user's machine.
 
 ## Architecture (v2)
 
-The MCP server is a **pure credential proxy** — it streams Git data between providers and AI VMs:
-
 ```
-GitHub/GitLab                 User's PC                   AI's VM
-      │                           │                          │
-      │◄── git2 auth + fetch ────►│◄── MCP stream ──────────►│
-      │                           │                          │
-      │                     Credentials                 Full repo
-      │                     stay here                  lives here
+GitHub/GitLab              User's PC                  AI's VM
+     │                         │                         │
+     │                    ┌────┴────┐                    │
+     │                    │ git-proxy│                    │
+     │◄───── git2 auth ───┤   mcp   ├─── MCP stream ────►│
+     │                    │         │                    │
+     │                    └────┬────┘                    │
+     │                         │                         │
+     │                   Credentials               Full repo
+     │                   stay here               lives here
 ```
 
-**Key principles:**
-- Credentials NEVER leave user's machine
-- Files NEVER persist on user's machine (stream-through only)
-- AI maintains complete local git repo in its VM
-- Uses git2 library (not git CLI subprocess)
+**Three core operations:**
 
-## Target Users
+| Tool | What It Does |
+|------|-------------|
+| `repo/clone` | Stream repo from GitHub → AI's VM as tar.gz |
+| `repo/push` | Stream commits from AI's VM → GitHub via bundle |
+| `repo/pull` | Stream only changed files (incremental sync) |
 
-- ✅ Claude.ai (with computer use)
-- ✅ ChatGPT with Code Interpreter
-- ✅ Gemini with code execution
-- ✅ Any cloud AI with sandboxed compute
-- ❌ Claude Code (already has local access)
-- ❌ Cursor (already has local access)
+## Who This Is For
 
-## MCP Tools
+| Environment | Uses This? | Why |
+|-------------|-----------|-----|
+| **Claude.ai** | ✅ YES | Has VM, lacks credentials |
+| **ChatGPT** | ✅ YES | Has Code Interpreter, lacks credentials |
+| **Gemini** | ✅ YES | Has code execution, lacks credentials |
+| Claude Code | ❌ No | Already runs on user's machine |
+| Cursor | ❌ No | Already has local access |
 
-| Tool | Purpose |
-|------|--------|
-| `repo/clone` | Stream repository to AI's VM |
-| `repo/push` | Push commits from AI's VM to remote |
-| `repo/pull` | Sync new changes to AI's VM |
+## Quick Reference
+
+| Resource | Location |
+|----------|----------|
+| Battle plan | `TODO.md` |
+| Architecture details | `docs/ARCHITECTURE.md` |
+| Style guide | `STYLE.md` |
+| Build commands | `CONTRIBUTING.md` |
+| Commit conventions | `CONTRIBUTING.md` |
 
 ## Critical Rules
 
-### Git Workflow — MANDATORY
+### 🔴 NEVER Do These
 
-> **WARNING: NEVER push directly to main. NEVER bypass branch protection.**
->
-> Always create a feature branch and open a pull request.
-> If you accidentally push to main, immediately inform the user.
+1. **NEVER store credentials** — Not in memory, not in config, not in session state
+2. **NEVER log credentials** — No Cred objects, no tokens, no keys
+3. **NEVER push to main** — Always feature branch + PR
+4. **NEVER include credentials in error messages**
 
-### Security
+### 🟢 ALWAYS Do These
 
-- Credentials handled via git2 callbacks to system credential helpers
-- No credentials stored in MCP server state
-- All streaming data is repo content only, never auth tokens
-- Audit logging for all operations
-
-### Before Committing
-
-Clean up stale branches:
-
-```bash
-git fetch --prune origin
-git branch -vv | grep ': gone]' | awk '{print $1}' | xargs -r git branch -d
-```
-
-### Task Management
-
-**Remove completed items from `TODO.md`** after finishing a task. Keep the roadmap current.
-
-## Off Limits
-
-**`CODE_OF_CONDUCT.md`** — Do not modify. Owned by repository owner.
+1. **Use git2 credential callbacks** — Let the system handle auth
+2. **Clean up temp files** — Use `TempDir` which auto-deletes
+3. **Follow TODO.md phases** — One feature at a time
+4. **Update CHANGELOG.md** — For user-facing changes
 
 ## Project Structure
 
 ```
 src/
-├── config/      # Configuration loading
-├── error.rs     # Error types
-├── git2/        # git2 library integration (NEW in v2)
-│   ├── auth.rs      # Credential callbacks
-│   ├── clone.rs     # Streaming clone
-│   ├── push.rs      # Patch application and push
-│   └── session.rs   # Repo session management
-├── mcp/         # MCP protocol, transport, server
-│   └── tools/       # repo/clone, repo/push, repo/pull
-├── security/    # Guards, audit, rate limiting
-└── streaming/   # Tar/archive handling (NEW in v2)
+├── git2_ops/           # NEW: git2 library integration
+│   ├── mod.rs          # Module exports  
+│   ├── auth.rs         # Credential callbacks (CRITICAL)
+│   ├── clone.rs        # Clone and streaming
+│   ├── push.rs         # Bundle handling and push
+│   └── error.rs        # git2-specific errors
+│
+├── streaming/          # NEW: Transfer format handling
+│   ├── mod.rs
+│   ├── tar.rs          # Tar archive creation
+│   └── bundle.rs       # Git bundle handling
+│
+├── mcp/                # MCP protocol (extend, don't rewrite)
+│   ├── server.rs       # Add new tool handlers here
+│   ├── protocol.rs     # Keep as-is
+│   └── transport.rs    # Keep as-is
+│
+├── security/           # Keep from v1
+│   ├── audit.rs        # Audit logging
+│   ├── guards.rs       # Branch/push protection
+│   └── rate_limit.rs   # Rate limiting
+│
+├── config/             # Extend for new options
+│
+├── session.rs          # NEW: Repo session management
+│
+└── main.rs             # Entry point
 ```
 
-## Development Notes
+## Key Implementation Patterns
 
-### git2 Credential Callbacks
+### Credential Handling (MEMORISE THIS)
 
 ```rust
+// ✅ CORRECT: Use system credential helpers
 let mut callbacks = git2::RemoteCallbacks::new();
-callbacks.credentials(|_url, username, allowed| {
-    // Use system credential helper — NEVER store credentials
-    git2::Cred::credential_helper(&git_config, url, username)
+callbacks.credentials(|url, username, allowed| {
+    if allowed.contains(CredentialType::SSH_KEY) {
+        if let Some(user) = username {
+            return Cred::ssh_key_from_agent(user);
+        }
+    }
+    if allowed.contains(CredentialType::USER_PASS_PLAINTEXT) {
+        let config = git2::Config::open_default()?;
+        return Cred::credential_helper(&config, url, username);
+    }
+    Err(git2::Error::from_str("no credential method"))
 });
+
+// ❌ WRONG: Never do these
+let token = "ghp_xxxx";  // NEVER hardcode
+log::debug!("Cred: {:?}", cred);  // NEVER log
+session.credential = cred;  // NEVER store
 ```
 
-### Streaming Pattern
+### Streaming Clone Pattern
 
 ```rust
-// Clone: stream directly from remote to MCP response
-// Never write to disk on MCP server side
-repo.find_tree(commit.tree_id())?
-    .walk(TreeWalkMode::PreOrder, |_, entry| {
-        // Stream each blob directly
-    });
+// Clone to temp, stream tar, delete temp
+pub async fn handle_clone(url: &str) -> Result<Vec<u8>> {
+    // 1. Clone to temp directory
+    let temp_dir = TempDir::new()?;  // Auto-deletes on drop
+    let repo = clone_with_auth(url, temp_dir.path())?;
+    
+    // 2. Create tar.gz archive
+    let archive = create_tar_gz(temp_dir.path())?;
+    
+    // 3. temp_dir drops here, files deleted
+    Ok(archive)
+}
 ```
 
-### Testing with git2
+### Error Messages (Security Critical)
+
+```rust
+// ✅ CORRECT: Generic error, no secrets
+Err(ToolError::AuthFailed(
+    "Authentication failed. Check credential helper config.".into()
+))
+
+// ❌ WRONG: Leaks credential info
+Err(ToolError::AuthFailed(
+    format!("Auth failed for token: {}", token)  // NEVER
+))
+```
+
+## Current Development Phase
+
+**Phase 1: Foundation Rewrite** ← WE ARE HERE
+
+See `TODO.md` for detailed tasks. Summary:
+
+1. ✅ Add git2 dependency and module structure
+2. 🔄 Implement credential callbacks
+3. 🔄 Implement streaming clone
+4. ⬜ Implement push
+5. ⬜ Session management
+6. ⬜ Integration tests
+
+## Testing
 
 ```bash
-# Integration tests need a test repo
-cargo test --features integration
+# Unit tests (no network)
+cargo test
 
-# Unit tests work standalone  
+# Integration tests (need credentials)
+GIT_TEST_REPO_URL=https://github.com/you/test-repo cargo test --features integration
+
+# All quality checks
+cargo fmt --check
+cargo clippy -- -D warnings
 cargo test
 ```
+
+## Useful git2 Examples
+
+The git2 crate has excellent examples:
+- https://github.com/rust-lang/git2-rs/tree/master/examples
+
+Key ones to study:
+- `clone.rs` — Basic cloning
+- `fetch.rs` — Fetching with progress
+- `push.rs` — Pushing with credentials
+
+## Off Limits
+
+**`CODE_OF_CONDUCT.md`** — Do not modify. Owned by repository owner.
+
+## Before Committing
+
+```bash
+# Clean up merged branches
+git fetch --prune origin
+git branch -vv | grep ': gone]' | awk '{print $1}' | xargs -r git branch -d
+
+# Run all checks
+cargo fmt
+cargo clippy -- -D warnings
+cargo test
+
+# Update changelog for user-facing changes
+```
+
+## Common Pitfalls
+
+| Pitfall | Solution |
+|---------|----------|
+| git2 credential callback called multiple times | That's normal — git tries different auth methods |
+| SSH auth fails | Ensure ssh-agent is running with key added |
+| HTTPS auth fails | Ensure credential helper is configured |
+| Large repo OOM | Use shallow clone + sparse checkout |
+| Temp files not cleaned | Use `TempDir`, not manual temp paths |
+| Tests fail in CI | Integration tests need `GIT_TEST_REPO_URL` env |
