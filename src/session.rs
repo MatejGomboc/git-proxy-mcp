@@ -126,6 +126,7 @@ impl SessionManager {
     /// # Errors
     ///
     /// Returns an error if the session limit is reached and cleanup fails.
+    #[allow(clippy::significant_drop_tightening)]
     pub fn create_session(
         &self,
         url: &str,
@@ -169,6 +170,7 @@ impl SessionManager {
     /// # Errors
     ///
     /// Returns an error if the lock is poisoned.
+    #[allow(clippy::significant_drop_tightening)]
     pub fn get_session(&self, session_id: &str) -> Result<Option<RepoSession>, SessionError> {
         let mut sessions = self
             .sessions
@@ -194,6 +196,7 @@ impl SessionManager {
     /// # Errors
     ///
     /// Returns an error if the session doesn't exist or the lock is poisoned.
+    #[allow(clippy::option_if_let_else)]
     pub fn update_session_commit(
         &self,
         session_id: &str,
@@ -218,6 +221,7 @@ impl SessionManager {
     /// # Errors
     ///
     /// Returns an error if the lock is poisoned.
+    #[allow(clippy::significant_drop_tightening)]
     pub fn remove_session(&self, session_id: &str) -> Result<bool, SessionError> {
         let mut sessions = self
             .sessions
@@ -261,6 +265,7 @@ impl SessionManager {
     }
 
     /// Internal cleanup helper (assumes lock is held).
+    #[allow(clippy::unused_self)] // Method for consistency, may use self in future
     fn cleanup_expired_internal(&self, sessions: &mut HashMap<String, RepoSession>) -> usize {
         let before = sessions.len();
         sessions.retain(|id, session| {

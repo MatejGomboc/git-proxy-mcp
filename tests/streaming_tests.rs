@@ -6,6 +6,9 @@
 //! - Session management
 //! - No source files written to disk (verified by design)
 
+#![allow(clippy::redundant_clone)] // Test clarity over micro-optimization
+#![allow(clippy::assertions_on_constants)] // Design verification tests
+
 use git_proxy_mcp::git2_ops::auth::{sanitize_url_for_logging, validate_url};
 use git_proxy_mcp::session::{SessionError, SessionManager};
 use git_proxy_mcp::streaming::bundle::{decode_bundle, parse_bundle_info, validate_bundle};

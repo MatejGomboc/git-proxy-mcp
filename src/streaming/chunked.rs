@@ -243,6 +243,7 @@ impl StreamingSessionManager {
     /// # Errors
     ///
     /// Returns an error if the maximum number of sessions is reached.
+    #[allow(clippy::significant_drop_tightening)]
     pub fn create_session(
         &self,
         url: &str,
@@ -308,6 +309,7 @@ impl StreamingSessionManager {
     /// # Errors
     ///
     /// Returns an error if the session doesn't exist or the chunk index is invalid.
+    #[allow(clippy::significant_drop_tightening)]
     pub fn get_chunk(
         &self,
         session_id: &str,
@@ -330,7 +332,7 @@ impl StreamingSessionManager {
         let total = session.total_chunks();
         let chunk = session
             .get_chunk(chunk_index)
-            .ok_or_else(|| StreamingError::InvalidChunkIndex {
+            .ok_or(StreamingError::InvalidChunkIndex {
                 index: chunk_index,
                 total,
             })?;
@@ -352,6 +354,7 @@ impl StreamingSessionManager {
     /// # Errors
     ///
     /// Returns an error if the session doesn't exist.
+    #[allow(clippy::significant_drop_tightening)]
     pub fn get_session_info(&self, session_id: &str) -> Result<StreamingSessionInfo, StreamingError> {
         let sessions = self
             .sessions
@@ -377,6 +380,7 @@ impl StreamingSessionManager {
     /// # Errors
     ///
     /// Returns an error if the lock is poisoned.
+    #[allow(clippy::significant_drop_tightening)]
     pub fn cancel_session(&self, session_id: &str) -> Result<bool, StreamingError> {
         let mut sessions = self
             .sessions

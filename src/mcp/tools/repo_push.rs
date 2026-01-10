@@ -109,6 +109,7 @@ impl From<Git2Error> for RepoPushError {
 /// - Credentials are handled via git2 callbacks (never stored)
 /// - Only the bundle file touches disk
 /// - Protected branch guards should be checked by caller
+#[allow(clippy::needless_pass_by_value)] // Consistent with other handlers
 pub fn handle_repo_push(args: RepoPushArgs) -> Result<RepoPushResult, RepoPushError> {
     info!(
         url = %sanitize_url_for_logging(&args.url),

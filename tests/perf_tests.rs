@@ -6,6 +6,9 @@
 //!
 //! Run with: `cargo test --test perf_tests -- --nocapture`
 
+#![allow(clippy::cast_possible_truncation)] // Test file, iterations fit in u32
+#![allow(clippy::cast_precision_loss)] // Acceptable for timing display
+
 use std::time::{Duration, Instant};
 
 use git_proxy_mcp::streaming::chunked::StreamingSessionManager;
