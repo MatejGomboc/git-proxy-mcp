@@ -18,6 +18,7 @@
 //! - [`auth`] — Credential callback setup
 //! - [`clone`] — Bare repository fetch operations
 //! - [`diff`] — Diff generation between commits
+//! - [`pull`] — Incremental sync (delta since known commit)
 //! - [`push`] — Bundle processing and authenticated push
 //! - [`refs`] — Remote reference listing (branches/tags)
 //! - [`error`] — Error types for git2 operations
@@ -26,5 +27,6 @@ pub mod auth;
 pub mod clone;
 pub mod diff;
 pub mod error;
+pub mod pull;
 pub mod push;
 pub mod refs;

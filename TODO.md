@@ -437,7 +437,7 @@ strace -f -e write cargo run 2>&1 | grep -v /tmp
 
 ## Phase 5: Future Enhancements (Planned)
 
-### 5.1 Incremental Sync (`repo/pull`)
+### 5.1 Incremental Sync (`repo/pull`) ✅ IMPLEMENTED
 
 **Goal:** Sync new changes from remote to AI's workspace without re-cloning.
 
@@ -451,19 +451,27 @@ pub struct RepoPullArgs {
 
 #[derive(Serialize)]
 pub struct RepoPullResult {
-    pub patch: String,         // Base64 patch/bundle of changes
+    pub diff: String,              // Unified diff text
+    pub files_archive: String,     // Base64 tar.gz of changed/added files
+    pub changed_files: Vec<ChangedFile>,
+    pub deleted_files: Vec<String>,
+    pub base_commit: String,
     pub new_commit: String,
-    pub files_changed: usize,
+    pub stats: PullStats,          // Commits, files, insertions, deletions
+    pub up_to_date: bool,
 }
 ```
 
+**Tool:** `repo/pull`
+
 **Use case:** AI has repo from earlier clone, needs to fetch latest changes without re-downloading entire repo.
 
-**Implementation approach:**
+**Response includes:**
 
-- [ ] Fetch new commits since `since_commit`
-- [ ] Generate patch/bundle of delta
-- [ ] Stream delta to AI (smaller than full clone)
+- Unified diff for review
+- Tar.gz of changed/added files (for applying updates)
+- List of deleted files
+- Full statistics (commits, files added/modified/deleted, lines)
 
 ---
 

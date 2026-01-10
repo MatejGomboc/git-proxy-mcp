@@ -173,7 +173,7 @@ GitHub ──► MCP (small chunks) ──► AI
 | `repo/clone_start` | Start chunked clone for large repos | ✅ Implemented |
 | `repo/clone_chunk` | Get chunk from streaming session | ✅ Implemented |
 | `repo/clone_cancel` | Cancel streaming session | ✅ Implemented |
-| `repo/pull` | Stream delta of changes since last sync | 🚧 Planned |
+| `repo/pull` | Stream delta of changes since last sync | ✅ Implemented |
 | `repo/diff` | Get diff between commits | ✅ Implemented |
 | `repo/refs` | List branches and tags | ✅ Implemented |
 
