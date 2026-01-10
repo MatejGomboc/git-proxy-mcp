@@ -50,7 +50,7 @@ use crate::security::{
     AuditEvent, AuditLogger, BranchGuard, PushGuard, RateLimiter, RepoFilter, SecurityGuard,
     ShutdownReason,
 };
-use crate::mcp::tools::{handle_repo_clone, RepoCloneArgs};
+use crate::mcp::tools::{handle_repo_clone, handle_repo_push, RepoCloneArgs, RepoPushArgs};
 
 /// Server state in the MCP lifecycle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -544,6 +544,7 @@ impl McpServer {
         let result = match params.name.as_str() {
             "git" => self.call_git_tool(&params.arguments).await,
             "repo/clone" => self.call_repo_clone_tool(&params.arguments),
+            "repo/push" => self.call_repo_push_tool(&params.arguments),
             _ => ToolCallResult::error(format!("Unknown tool: {}", params.name)),
         };
 
@@ -647,6 +648,38 @@ impl McpServer {
                         }
                     },
                     "required": ["url"]
+                }),
+            },
+            // Tier 1: Push a git bundle to remote
+            ToolDefinition {
+                name: "repo/push".to_string(),
+                description: Some(
+                    "Push a git bundle to a remote repository. The AI creates a bundle using \
+                     'git bundle create' and sends it base64-encoded. The MCP server unbundles \
+                     and pushes using your local Git credentials. Protected branch guards apply."
+                        .to_string(),
+                ),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "bundle": {
+                            "type": "string",
+                            "description": "Base64-encoded git bundle created with 'git bundle create'"
+                        },
+                        "url": {
+                            "type": "string",
+                            "description": "Target repository URL (https:// or git@)"
+                        },
+                        "branch": {
+                            "type": "string",
+                            "description": "Target branch to push to"
+                        },
+                        "force": {
+                            "type": "boolean",
+                            "description": "Force push (use with caution, may be blocked by guards)"
+                        }
+                    },
+                    "required": ["bundle", "url", "branch"]
                 }),
             },
         ]
@@ -866,6 +899,68 @@ impl McpServer {
 
         // Execute the clone
         match handle_repo_clone(args) {
+            Ok(result) => {
+                // Return the result as JSON text
+                match serde_json::to_string_pretty(&result) {
+                    Ok(json) => ToolCallResult::text(json),
+                    Err(e) => ToolCallResult::error(format!("Failed to serialize result: {e}")),
+                }
+            }
+            Err(e) => ToolCallResult::error(e.to_string()),
+        }
+    }
+
+    /// Calls the `repo/push` tool.
+    ///
+    /// This tool receives a git bundle and pushes it to a remote repository.
+    /// Only the bundle file touches disk (not source files).
+    fn call_repo_push_tool(&self, arguments: &Value) -> ToolCallResult {
+        // Parse arguments
+        let args: RepoPushArgs = match serde_json::from_value(arguments.clone()) {
+            Ok(a) => a,
+            Err(e) => {
+                return ToolCallResult::error(format!("Invalid arguments: {e}"));
+            }
+        };
+
+        // Check rate limiter
+        if !self.rate_limiter.try_acquire() {
+            return ToolCallResult::error(
+                "Rate limit exceeded. Please wait before sending more requests.",
+            );
+        }
+
+        // Check repo filter
+        if let Some(reason) = self
+            .repo_filter
+            .check("push", std::slice::from_ref(&args.url))
+            .reason()
+        {
+            return ToolCallResult::error(reason.to_string());
+        }
+
+        // Check branch guard (protected branches)
+        if let Some(reason) = self
+            .branch_guard
+            .check("push", &[args.branch.clone()])
+            .reason()
+        {
+            return ToolCallResult::error(reason.to_string());
+        }
+
+        // Check push guard (force push)
+        if args.force {
+            if let Some(reason) = self
+                .push_guard
+                .check("push", &["--force".to_string()])
+                .reason()
+            {
+                return ToolCallResult::error(reason.to_string());
+            }
+        }
+
+        // Execute the push
+        match handle_repo_push(args) {
             Ok(result) => {
                 // Return the result as JSON text
                 match serde_json::to_string_pretty(&result) {

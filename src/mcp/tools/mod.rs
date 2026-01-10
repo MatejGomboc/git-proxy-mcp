@@ -6,6 +6,7 @@
 //! # Available Tools
 //!
 //! - [`repo_clone`] — Clone a repository and stream as tar.gz (Tier 1)
+//! - [`repo_push`] — Push a git bundle to a remote repository (Tier 1)
 //!
 //! # Security
 //!
@@ -15,5 +16,7 @@
 //! - All responses are sanitized for credential leakage
 
 pub mod repo_clone;
+pub mod repo_push;
 
 pub use repo_clone::{handle_repo_clone, RepoCloneArgs, RepoCloneResult};
+pub use repo_push::{handle_repo_push, RepoPushArgs, RepoPushResult};
