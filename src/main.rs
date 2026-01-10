@@ -92,6 +92,16 @@ fn main() -> ExitCode {
     let log_level = get_log_level(args.verbose, args.quiet, &cfg.logging.level);
     init_tracing(log_level);
 
+    // Display GPL license notice (required by GPLv3 Section 5d)
+    eprintln!(
+        "git-proxy-mcp {}  Copyright (C) 2025  Matej Gomboc",
+        env!("CARGO_PKG_VERSION")
+    );
+    eprintln!("This program comes with ABSOLUTELY NO WARRANTY.");
+    eprintln!("This is free software, licensed under GPL-3.0-or-later.");
+    eprintln!("Source: {}", env!("CARGO_PKG_REPOSITORY"));
+    eprintln!();
+
     info!(
         version = env!("CARGO_PKG_VERSION"),
         "Starting git-proxy-mcp server"
