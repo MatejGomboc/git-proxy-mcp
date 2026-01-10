@@ -71,27 +71,6 @@ GitHub ──► MCP (small chunks) ──► AI
 
 ---
 
-## Why NOT Token Delegation?
-
-An alternative approach would be to generate short-lived tokens and give them to the AI, letting it clone directly from GitHub. We explicitly reject this approach:
-
-| Concern | Problem |
-|---------|---------|
-| **Still a credential** | Even a 1-hour token is a credential that can be abused |
-| **VM compromise** | If AI's VM is compromised, attacker gets a working token |
-| **Credential exposure** | Violates our core principle: credentials never leave user's PC |
-| **Attack surface** | Token in transit, token in AI's memory, token in logs... |
-
-**Our position:** Zero credential exposure is safer than "minimal" credential exposure.
-
-```
-Token delegation:     Credentials ──► AI's VM     ❌ REJECTED
-Credential relay:     Credentials ──► User's PC   ✅ OUR APPROACH
-                      Files only  ──► AI's VM
-```
-
----
-
 ## Security Model
 
 ### What Stays on User's PC
@@ -215,4 +194,4 @@ Credential relay:     Credentials ──► User's PC   ✅ OUR APPROACH
 
 ---
 
-*Tier 1 gets us working. Tier 2 gets us production-ready. Token delegation is explicitly out of scope.*
+*Tier 1 gets us working. Tier 2 gets us production-ready.*

@@ -2,42 +2,42 @@
 
 ## The Vision (Read First!)
 
-See `docs/VISION.md` for the full three-tier architecture:
+See `docs/VISION.md` for the full architecture:
 
 | Tier | Data Flow | Status |
 |------|-----------|--------|
 | **Tier 1** | GitHub → MCP (RAM) → AI | Current focus |
-| **Tier 2** | GitHub → MCP (chunks) → AI | Future |
-| **Tier 3** | GitHub ↔ AI directly! ⭐ | Ultimate goal |
+| **Tier 2** | GitHub → MCP (chunks) → AI | Target |
 
-**Tier 3 is THE GOLDEN GOAL:** User's PC becomes a pure authentication broker. It never sees the code. AI connects directly to GitHub using short-lived tokens.
+**Core principle:** Credentials NEVER leave user's PC. Files stream through MCP to AI's VM.
 
 ## What Is This Project?
 
-A secure credential proxy for cloud-based AI assistants (Claude.ai, ChatGPT, Gemini) to work with private Git repositories.
+A secure credential relay for cloud-based AI assistants (Claude.ai, ChatGPT, Gemini) to work with private Git repositories.
 
-**Current implementation (Tier 1):** Stream Git data through memory on user's PC.  
-**Ultimate goal (Tier 3):** AI connects directly to GitHub; user's PC only provides tokens.
+**Tier 1:** Stream Git data through memory on user's PC.
+**Tier 2:** Chunked streaming for large repos (production-ready).
 
 ## Quick Reference
 
 | Resource | Location |
 |----------|----------|
-| Vision (3 tiers) | `docs/VISION.md` |
+| Vision | `docs/VISION.md` |
 | Battle plan | `TODO.md` |
 | Architecture | `docs/ARCHITECTURE.md` |
 
 ## Critical Rules
 
-### 🔴 NEVER Do These
+### NEVER Do These
 
 1. **NEVER store credentials**
 2. **NEVER log credentials**
 3. **NEVER checkout working tree** (use bare repos)
 4. **NEVER write source files to disk**
 5. **NEVER push to main**
+6. **NEVER send credentials to AI** (not even short-lived tokens)
 
-### 🟢 ALWAYS Do These
+### ALWAYS Do These
 
 1. **Use `Repository::init_bare()`**
 2. **Use `repo.find_blob().content()`** (read from object DB)
@@ -45,17 +45,17 @@ A secure credential proxy for cloud-based AI assistants (Claude.ai, ChatGPT, Gem
 4. **Use git2 credential callbacks**
 5. **Use `TempDir`** (auto-cleanup)
 
-## Tier 1 Implementation Pattern
+## Implementation Pattern
 
 ```rust
 // CORRECT: Bare repo, walk tree, stream blobs
 pub fn create_tar_from_tree(repo: &Repository, commit_id: Oid) -> Vec<u8> {
     let tree = repo.find_commit(commit_id)?.tree()?;
-    
+
     let mut buffer = Vec::new();
     let encoder = GzEncoder::new(&mut buffer, Compression::fast());
     let mut tar = tar::Builder::new(encoder);
-    
+
     tree.walk(TreeWalkMode::PreOrder, |dir, entry| {
         if entry.kind() == Some(ObjectType::Blob) {
             let blob = repo.find_blob(entry.id())?;
@@ -63,28 +63,9 @@ pub fn create_tar_from_tree(repo: &Repository, commit_id: Oid) -> Vec<u8> {
         }
         TreeWalkResult::Ok
     })?;
-    
+
     buffer
 }
-```
-
-## Tier 3 Preview (The Goal)
-
-```rust
-// GOLDEN: Generate token, AI clones directly
-pub async fn handle_get_token(url: &str) -> TokenResponse {
-    let app = GitHubApp::load()?;
-    let token = app.create_installation_token(url, Duration::hours(1))?;
-    
-    TokenResponse {
-        token: token.value,
-        clone_url: format!("https://x-access-token:{token}@github.com/..."),
-        expires_at: token.expires_at,
-    }
-}
-
-// AI then runs: git clone https://x-access-token:TOKEN@github.com/...
-// ZERO bytes through user's PC!
 ```
 
 ## Project Structure
@@ -99,16 +80,15 @@ src/
 │   ├── tar.rs          # Tree → tar.gz (in memory)
 │   └── bundle.rs       # Git bundle handling
 ├── mcp/tools/          # MCP tool handlers
-│   ├── repo_clone.rs   # Tier 1: stream tar
-│   ├── repo_push.rs    # Tier 1: receive bundle
-│   └── auth_token.rs   # Tier 3: generate token
+│   ├── repo_clone.rs   # Stream tar to AI
+│   └── repo_push.rs    # Receive bundle from AI
 ├── session.rs          # Session tracking
 └── security/           # Guards from v1
 ```
 
 ## Current Phase
 
-**Phase 1: Tier 1 Foundation** ← WE ARE HERE
+**Phase 1: Tier 1 Foundation** <- WE ARE HERE
 
 See `TODO.md` for detailed steps.
 

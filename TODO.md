@@ -11,8 +11,6 @@ See `docs/VISION.md` for the full architectural vision. Summary:
 
 **Current focus:** Tier 1 (get it working), then Tier 2 (production-ready).
 
-**Explicitly out of scope:** Token delegation (giving AI any credentials, even short-lived ones).
-
 ---
 
 ## Overview
@@ -440,18 +438,6 @@ strace -f -e write cargo run 2>&1 | grep -v /tmp
 | Data through user's PC | Yes (RAM) | Yes (chunked) |
 | Clone 100 files | < 5s | < 5s |
 | Memory for large repo | O(repo) | O(chunk) |
-
----
-
-## Explicitly Out of Scope
-
-**Token Delegation** — We will NOT implement giving the AI any form of credential (even short-lived tokens). Rationale:
-
-- Even 1-hour tokens can be abused if AI's VM is compromised
-- Violates core principle: credentials never leave user's PC
-- "Minimal exposure" is still exposure
-
-See `docs/VISION.md` § "Why NOT Token Delegation?" for details.
 
 ---
 
