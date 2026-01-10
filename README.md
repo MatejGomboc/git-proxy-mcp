@@ -24,13 +24,17 @@ Cloud-based AI coding assistants face a fundamental dilemma:
 
 git-proxy-mcp acts as an **authenticated streaming proxy** between Git providers and AI workspaces:
 
-```mermaid
-flowchart LR
-    Git["Git Providers\n(GitHub, GitLab, etc.)"]
-    MCP["YOUR PC\ngit-proxy-mcp\n(credentials stay here)"]
-    AI["AI's VM\n/home/claude/repo/\n(files live here)"]
-
-    Git <--> MCP <--> AI
+```
+┌─────────────────┐      ┌─────────────────┐      ┌─────────────────┐
+│  Git Providers  │      │    YOUR PC      │      │    AI's VM      │
+│                 │      │                 │      │                 │
+│  GitHub         │◄────►│  git-proxy-mcp  │◄────►│  Claude.ai      │
+│  GitLab         │      │                 │      │                 │
+│  Bitbucket      │      │  (credentials   │      │  /home/claude/  │
+│  Azure DevOps   │      │   stay here)    │      │    repo/        │
+│  Self-hosted    │      │                 │      │  (files live    │
+│                 │      │                 │      │   here)         │
+└─────────────────┘      └─────────────────┘      └─────────────────┘
 ```
 
 **Key insight:** The AI has its own VM with full Linux capabilities. It just can't authenticate to your private repos. We solve *only* that problem.
@@ -77,22 +81,33 @@ flowchart LR
 
 ### Security Model
 
-```mermaid
-flowchart TB
-    subgraph pc["YOUR PC (credentials stay here)"]
-        MCP["git-proxy-mcp\nAuth callbacks | Object streaming | No file storage"]
-        Config["Git config: ~/.gitconfig, ssh-agent, credential helpers"]
-        MCP <--> Config
-    end
-
-    subgraph ai["AI's VM (files live here)"]
-        Repo["/home/claude/repo/\n.git/ | src/ | Cargo.toml"]
-        Work["AI workflow: branch, edit, test, commit"]
-        Repo --- Work
-    end
-
-    MCP -->|"files/patches"| Repo
-    Repo -->|"bundles"| MCP
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  YOUR PC (credentials stay here, files don't)                   │
+│                                                                 │
+│  ┌──────────────────┐      ┌─────────────────────────────────┐  │
+│  │ git-proxy-mcp    │      │ Your Git Configuration          │  │
+│  │                  │◄────►│                                 │  │
+│  │ • Auth callbacks │      │ • ~/.gitconfig                  │
+│  │ • Object stream  │      │ • SSH keys (ssh-agent)          │  │
+│  │ • No file storage│      │ • Credential helpers            │  │
+│  └────────┬─────────┘      └─────────────────────────────────┘  │
+│           │                                                     │
+└───────────┼─────────────────────────────────────────────────────┘
+            │
+            │ Streaming: files/patches (NOT credentials)
+            ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  AI's VM (files live here, credentials don't)                   │
+│                                                                 │
+│  ┌──────────────────┐                                           │
+│  │ /home/claude/    │  AI workflow (all local, no network):     │
+│  │   repo/          │  • git checkout -b feature                │
+│  │     .git/        │  • vim src/main.rs                        │
+│  │     src/         │  • cargo test                             │
+│  │     Cargo.toml   │  • git commit -m "fix bug"                │
+│  └──────────────────┘                                           │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ### What Flows Where
