@@ -4,52 +4,42 @@
 
 A secure credential proxy that enables **cloud-based AI assistants** (Claude.ai, ChatGPT, Gemini) to work with private Git repositories.
 
-**The key insight:** Cloud AIs have their own VMs with full compute capability. They can run git, build code, run tests. They just can't authenticate to private repos because they (rightfully) don't have access to user credentials.
+**The key insight:** Cloud AIs have their own VMs with full compute capability. They can run git, build code, run tests. They just can't authenticate to private repos.
 
-**We solve exactly that problem:** Stream Git data through an authenticated proxy on the user's machine.
+**We solve exactly that:** Stream Git data through an authenticated proxy. **No files stored on user's machine.**
 
-## Architecture (v2)
+## Architecture (v2) — ZERO FILE STORAGE
 
 ```
 GitHub/GitLab              User's PC                  AI's VM
      │                         │                         │
-     │                    ┌────┴────┐                    │
-     │                    │ git-proxy│                    │
-     │◄───── git2 auth ───┤   mcp   ├─── MCP stream ────►│
-     │                    │         │                    │
-     │                    └────┬────┘                    │
+     │  git2 fetch (bare)      │                         │
+     ├────────────────────────►│                         │
      │                         │                         │
-     │                   Credentials               Full repo
-     │                   stay here               lives here
+     │                    Walk tree,                     │
+     │                    stream blobs                   │
+     │                    directly to tar                │
+     │                    (IN MEMORY)                    │
+     │                         │                         │
+     │                         │  MCP response           │
+     │                         ├────────────────────────►│
+     │                         │  (tar.gz stream)        │
+     │                         │                         │
+     │                    NO SOURCE FILES                │
+     │                    ON USER'S DISK                 │
 ```
 
-**Three core operations:**
-
-| Tool | What It Does |
-|------|-------------|
-| `repo/clone` | Stream repo from GitHub → AI's VM as tar.gz |
-| `repo/push` | Stream commits from AI's VM → GitHub via bundle |
-| `repo/pull` | Stream only changed files (incremental sync) |
-
-## Who This Is For
-
-| Environment | Uses This? | Why |
-|-------------|-----------|-----|
-| **Claude.ai** | ✅ YES | Has VM, lacks credentials |
-| **ChatGPT** | ✅ YES | Has Code Interpreter, lacks credentials |
-| **Gemini** | ✅ YES | Has code execution, lacks credentials |
-| Claude Code | ❌ No | Already runs on user's machine |
-| Cursor | ❌ No | Already has local access |
+**Critical design principle:** The MCP server NEVER writes repository source files to the user's disk. We use bare repositories and stream blob contents directly from git's object database to an in-memory tar archive.
 
 ## Quick Reference
 
 | Resource | Location |
 |----------|----------|
-| Battle plan | `TODO.md` |
+| Battle plan | `TODO.md` (very detailed!) |
 | Architecture details | `docs/ARCHITECTURE.md` |
+| AI workflow examples | `docs/AI_WORKFLOW.md` |
+| Security model | `docs/SECURITY.md` |
 | Style guide | `STYLE.md` |
-| Build commands | `CONTRIBUTING.md` |
-| Commit conventions | `CONTRIBUTING.md` |
 
 ## Critical Rules
 
@@ -57,61 +47,61 @@ GitHub/GitLab              User's PC                  AI's VM
 
 1. **NEVER store credentials** — Not in memory, not in config, not in session state
 2. **NEVER log credentials** — No Cred objects, no tokens, no keys
-3. **NEVER push to main** — Always feature branch + PR
-4. **NEVER include credentials in error messages**
+3. **NEVER checkout working tree** — Use bare repos only
+4. **NEVER write source files to disk** — Stream to tar in memory
+5. **NEVER push to main** — Always feature branch + PR
 
 ### 🟢 ALWAYS Do These
 
-1. **Use git2 credential callbacks** — Let the system handle auth
-2. **Clean up temp files** — Use `TempDir` which auto-deletes
-3. **Follow TODO.md phases** — One feature at a time
-4. **Update CHANGELOG.md** — For user-facing changes
-
-## Project Structure
-
-```
-src/
-├── git2_ops/           # NEW: git2 library integration
-│   ├── mod.rs          # Module exports  
-│   ├── auth.rs         # Credential callbacks (CRITICAL)
-│   ├── clone.rs        # Clone and streaming
-│   ├── push.rs         # Bundle handling and push
-│   └── error.rs        # git2-specific errors
-│
-├── streaming/          # NEW: Transfer format handling
-│   ├── mod.rs
-│   ├── tar.rs          # Tar archive creation
-│   └── bundle.rs       # Git bundle handling
-│
-├── mcp/                # MCP protocol (extend, don't rewrite)
-│   ├── server.rs       # Add new tool handlers here
-│   ├── protocol.rs     # Keep as-is
-│   └── transport.rs    # Keep as-is
-│
-├── security/           # Keep from v1
-│   ├── audit.rs        # Audit logging
-│   ├── guards.rs       # Branch/push protection
-│   └── rate_limit.rs   # Rate limiting
-│
-├── config/             # Extend for new options
-│
-├── session.rs          # NEW: Repo session management
-│
-└── main.rs             # Entry point
-```
+1. **Use `Repository::init_bare()`** — No working tree
+2. **Use `repo.find_blob().content()`** — Read from object DB
+3. **Use `tar::Builder::new(Vec::new())`** — Build in memory
+4. **Use git2 credential callbacks** — System helpers only
+5. **Use `TempDir`** — Auto-cleanup on drop
 
 ## Key Implementation Patterns
 
-### Credential Handling (MEMORISE THIS)
+### ZERO-STORAGE Clone Pattern
 
 ```rust
-// ✅ CORRECT: Use system credential helpers
-let mut callbacks = git2::RemoteCallbacks::new();
+// ✅ CORRECT: Bare repo, walk tree, stream blobs
+pub fn create_tar_from_tree(repo: &Repository, commit_id: Oid) -> Result<Vec<u8>> {
+    let commit = repo.find_commit(commit_id)?;
+    let tree = commit.tree()?;
+    
+    // Build tar in memory
+    let mut buffer = Vec::new();
+    let encoder = GzEncoder::new(&mut buffer, Compression::fast());
+    let mut tar = tar::Builder::new(encoder);
+    
+    tree.walk(TreeWalkMode::PreOrder, |dir, entry| {
+        if let Some(ObjectType::Blob) = entry.kind() {
+            // Read blob directly from object database
+            let blob = repo.find_blob(entry.id())?;
+            let content = blob.content();  // NO disk read!
+            
+            // Write to tar in memory
+            tar.append_data(&mut header, path, content)?;
+        }
+        TreeWalkResult::Ok
+    })?;
+    
+    Ok(buffer)
+}
+
+// ❌ WRONG: Would write files to disk
+let repo = Repository::clone(url, path)?;  // Creates working tree!
+repo.checkout_head(...)?;                   // Writes files!
+let files = std::fs::read_dir(path)?;       // Reading disk files!
+```
+
+### Credential Handling
+
+```rust
+// ✅ CORRECT: System helpers via callbacks
 callbacks.credentials(|url, username, allowed| {
     if allowed.contains(CredentialType::SSH_KEY) {
-        if let Some(user) = username {
-            return Cred::ssh_key_from_agent(user);
-        }
+        return Cred::ssh_key_from_agent(username.unwrap_or("git"));
     }
     if allowed.contains(CredentialType::USER_PASS_PLAINTEXT) {
         let config = git2::Config::open_default()?;
@@ -120,107 +110,86 @@ callbacks.credentials(|url, username, allowed| {
     Err(git2::Error::from_str("no credential method"))
 });
 
-// ❌ WRONG: Never do these
-let token = "ghp_xxxx";  // NEVER hardcode
+// ❌ WRONG
+let token = "ghp_xxxx";           // NEVER hardcode
 log::debug!("Cred: {:?}", cred);  // NEVER log
-session.credential = cred;  // NEVER store
+session.credential = cred;        // NEVER store
 ```
 
-### Streaming Clone Pattern
+## Project Structure
 
-```rust
-// Clone to temp, stream tar, delete temp
-pub async fn handle_clone(url: &str) -> Result<Vec<u8>> {
-    // 1. Clone to temp directory
-    let temp_dir = TempDir::new()?;  // Auto-deletes on drop
-    let repo = clone_with_auth(url, temp_dir.path())?;
-    
-    // 2. Create tar.gz archive
-    let archive = create_tar_gz(temp_dir.path())?;
-    
-    // 3. temp_dir drops here, files deleted
-    Ok(archive)
-}
+```
+src/
+├── git2_ops/              # git2 library integration
+│   ├── mod.rs
+│   ├── auth.rs            # Credential callbacks (CRITICAL)
+│   ├── clone.rs           # Bare fetch + tree streaming
+│   ├── push.rs            # Bundle processing + push
+│   └── error.rs
+│
+├── streaming/             # In-memory transfer formats
+│   ├── mod.rs
+│   ├── tar.rs             # Tree → tar.gz (NO DISK)
+│   └── bundle.rs          # Git bundle handling
+│
+├── mcp/
+│   ├── server.rs          # Tool dispatch
+│   └── tools/
+│       ├── repo_clone.rs  # repo/clone handler
+│       ├── repo_push.rs   # repo/push handler
+│       └── repo_pull.rs   # repo/pull handler
+│
+├── session.rs             # Session tracking (NO files!)
+│
+└── security/              # Guards (from v1)
 ```
 
-### Error Messages (Security Critical)
+## What Gets Written to Disk?
 
-```rust
-// ✅ CORRECT: Generic error, no secrets
-Err(ToolError::AuthFailed(
-    "Authentication failed. Check credential helper config.".into()
-))
-
-// ❌ WRONG: Leaks credential info
-Err(ToolError::AuthFailed(
-    format!("Auth failed for token: {}", token)  // NEVER
-))
-```
+| Data | Disk? | Notes |
+|------|-------|-------|
+| Source files | **NO** | Never checked out |
+| Git objects | Temp | Bare repo, auto-deleted |
+| Bundle file | Temp | For unbundle, auto-deleted |
+| Tar archive | **NO** | Built in memory |
+| Credentials | **NO** | System helpers only |
 
 ## Current Development Phase
 
 **Phase 1: Foundation Rewrite** ← WE ARE HERE
 
-See `TODO.md` for detailed tasks. Summary:
-
-1. ✅ Add git2 dependency and module structure
-2. 🔄 Implement credential callbacks
-3. 🔄 Implement streaming clone
-4. ⬜ Implement push
-5. ⬜ Session management
-6. ⬜ Integration tests
+See `TODO.md` for extremely detailed implementation steps including:
+- Exact code patterns to use
+- Files to create
+- Acceptance criteria
+- What to verify (especially: NO DISK WRITES)
 
 ## Testing
 
 ```bash
-# Unit tests (no network)
+# Unit tests
 cargo test
 
 # Integration tests (need credentials)
-GIT_TEST_REPO_URL=https://github.com/you/test-repo cargo test --features integration
+GIT_TEST_REPO_URL=https://github.com/you/test cargo test --features integration
 
-# All quality checks
-cargo fmt --check
-cargo clippy -- -D warnings
-cargo test
+# CRITICAL: Verify no disk writes
+# On Linux:
+strace -f -e write cargo run ... 2>&1 | grep -v /tmp
+# On macOS:
+fs_usage -w cargo run ...
 ```
 
-## Useful git2 Examples
+## Common Mistakes to Avoid
 
-The git2 crate has excellent examples:
-- https://github.com/rust-lang/git2-rs/tree/master/examples
-
-Key ones to study:
-- `clone.rs` — Basic cloning
-- `fetch.rs` — Fetching with progress
-- `push.rs` — Pushing with credentials
+| Mistake | Why It's Wrong | Correct Approach |
+|---------|---------------|------------------|
+| `Repository::clone()` | Creates working tree | `Repository::init_bare()` + fetch |
+| `repo.checkout_head()` | Writes files | Don't checkout, walk tree instead |
+| `std::fs::read_dir()` | Reading disk files | Use `tree.walk()` + `find_blob()` |
+| `std::fs::write()` | Writing files | Write to `Vec<u8>` |
+| Storing `Cred` | Credential leak | Use callback, don't store |
 
 ## Off Limits
 
 **`CODE_OF_CONDUCT.md`** — Do not modify. Owned by repository owner.
-
-## Before Committing
-
-```bash
-# Clean up merged branches
-git fetch --prune origin
-git branch -vv | grep ': gone]' | awk '{print $1}' | xargs -r git branch -d
-
-# Run all checks
-cargo fmt
-cargo clippy -- -D warnings
-cargo test
-
-# Update changelog for user-facing changes
-```
-
-## Common Pitfalls
-
-| Pitfall | Solution |
-|---------|----------|
-| git2 credential callback called multiple times | That's normal — git tries different auth methods |
-| SSH auth fails | Ensure ssh-agent is running with key added |
-| HTTPS auth fails | Ensure credential helper is configured |
-| Large repo OOM | Use shallow clone + sparse checkout |
-| Temp files not cleaned | Use `TempDir`, not manual temp paths |
-| Tests fail in CI | Integration tests need `GIT_TEST_REPO_URL` env |

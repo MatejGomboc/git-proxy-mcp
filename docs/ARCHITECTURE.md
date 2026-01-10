@@ -1,398 +1,211 @@
 # Architecture: git-proxy-mcp v2
 
-This document describes the v2 architecture — a complete redesign focused on streaming Git data between providers and AI workspaces.
+This document describes the v2 architecture — a pure streaming credential proxy.
 
-## Problem Statement
+## Core Principle: ZERO FILE STORAGE
 
-Cloud-based AI assistants (Claude.ai, ChatGPT, Gemini) have:
+**The MCP server NEVER stores repository files on the user's disk.**
 
-- ✅ Compute capability (Linux VMs, sandboxes)
-- ✅ Ability to run git locally
-- ❌ No access to user's credentials for private repos
+This is the fundamental design principle that distinguishes git-proxy-mcp from other approaches:
 
-Existing solutions are inadequate:
+| Approach | Files on User's Disk |
+|----------|---------------------|
+| Git CLI | Full working tree |
+| v1 git-proxy-mcp | Full clone (then deleted) |
+| **v2 git-proxy-mcp** | **NONE** |
 
-| Solution | Problem |
-|----------|--------|
-| GitHub MCP Server | File-by-file API calls. 100 files = 100 calls. Can't run tests. |
-| Share credentials with AI | Security nightmare. Credentials in someone else's cloud. |
-| Public repos only | Most real work is private. |
+## How Zero-Storage Works
 
-## Solution: Credential Proxy
-
-The MCP server acts as an authenticated proxy that streams Git data:
+### Clone Flow (In Detail)
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                              DATA FLOW                                      │
+│ CLONE: Stream directly from git objects to tar archive                      │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
-│  CLONE:                                                                     │
-│  GitHub ──► git2 fetch ──► create tar.gz ──► MCP response ──► AI's VM      │
-│                  ▲                                                          │
-│             credentials                                                     │
-│            (from system)                                                    │
-│                                                                             │
-│  PUSH:                                                                      │
-│  AI's VM ──► git bundle ──► MCP request ──► git2 push ──► GitHub           │
-│                                                  ▲                          │
-│                                             credentials                     │
-│                                            (from system)                    │
-│                                                                             │
+│  GitHub                 User's PC                        AI's VM            │
+│    │                       │                                │               │
+│    │  git2 fetch           │                                │               │
+│    │  (pack protocol)      │                                │               │
+│    ├──────────────────────►│                                │               │
+│    │                       │                                │               │
+│    │                       │  Objects stored in             │               │
+│    │                       │  BARE REPO (no checkout)       │               │
+│    │                       │  Temp dir, auto-cleaned        │               │
+│    │                       │                                │               │
+│    │                       │  Walk tree:                    │               │
+│    │                       │  for each blob:                │               │
+│    │                       │    read content from objects   │               │
+│    │                       │    write to tar (in memory)    │               │
+│    │                       │                                │               │
+│    │                       │  NO working tree checkout      │               │
+│    │                       │  NO source files on disk       │               │
+│    │                       │                                │               │
+│    │                       │  MCP response                  │               │
+│    │                       ├───────────────────────────────►│               │
+│    │                       │  (base64 tar.gz)               │               │
+│    │                       │                                │               │
+│    │                       │                                │  Extract      │
+│    │                       │                                │  git init     │
+│    │                       │                                │  Full repo!   │
+│    │                       │                                │               │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-## Key Design Principles
+### The Key Insight: Bare Repositories
 
-### 1. Credentials Never Leave User's Machine
+A **bare repository** contains:
+- Git objects (commits, trees, blobs) — compressed, deduplicated
+- References (branches, tags)
+- NO working tree (no checked-out files)
 
-The MCP server uses git2's credential callbacks to delegate authentication to the system:
-
-```rust
-callbacks.credentials(|url, username, allowed| {
-    // SSH: Use ssh-agent (key never leaves agent)
-    if allowed.contains(CredentialType::SSH_KEY) {
-        return Cred::ssh_key_from_agent(username.unwrap_or("git"));
-    }
-    
-    // HTTPS: Use system credential helper
-    if allowed.contains(CredentialType::USER_PASS_PLAINTEXT) {
-        let config = git2::Config::open_default()?;
-        return Cred::credential_helper(&config, url, username);
-    }
-    
-    Err(git2::Error::from_str("no credential method"))
-});
-```
-
-**What this means:**
-
-- SSH private keys stay in ssh-agent (never read by our code)
-- HTTPS tokens handled by OS credential store
-- No credentials stored in MCP server memory
-- No credentials in logs, errors, or MCP responses
-
-### 2. Files Never Persist on User's Machine
-
-The MCP server is a pure streaming proxy:
+We use bare repos because:
+1. `git2::Repository::init_bare()` — no working directory created
+2. We can fetch objects from remotes
+3. We can walk trees and read blob contents
+4. We NEVER checkout — no source files written
 
 ```rust
-async fn handle_clone(url: &str) -> Result<TarArchive> {
-    // 1. Clone to TEMP directory
-    let temp_dir = TempDir::new()?;  // Auto-deleted on drop
-    let repo = clone_repo(url, temp_dir.path())?;
-    
-    // 2. Create tar archive in memory
-    let archive = create_tar_gz(temp_dir.path())?;
-    
-    // 3. Return archive (temp_dir deleted here)
-    Ok(archive)
-    
-    // temp_dir.drop() called automatically — files gone
+// This is what we do:
+let repo = Repository::init_bare(temp_path)?;  // No working tree
+let tree = commit.tree()?;
+for entry in tree.iter() {
+    let blob = repo.find_blob(entry.id())?;
+    // blob.content() gives us bytes directly from object DB
+    // We write these to tar, not to disk
 }
+
+// This is what we DON'T do:
+let repo = Repository::clone(url, path)?;  // Would checkout files!
+repo.checkout_head(...)?;                  // Would write files!
 ```
 
-**Data lifecycle:**
-
-| Phase | Data Location | Duration |
-|-------|---------------|----------|
-| Clone fetch | Memory (git2 objects) | Seconds |
-| Working tree | Temp directory | Seconds |
-| Tar archive | Memory | Seconds |
-| Final storage | AI's VM only | Persistent |
-
-### 3. AI Gets Full Git Workflow
-
-After receiving the streamed archive, the AI has:
+### Push Flow
 
 ```
-/home/claude/repo/
-├── src/
-│   ├── main.rs
-│   └── lib.rs
-├── tests/
-├── Cargo.toml
-├── Cargo.lock
-└── README.md
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ PUSH: Receive bundle, push to remote                                        │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  AI's VM                   User's PC                        GitHub          │
+│    │                          │                                │            │
+│    │  git bundle create       │                                │            │
+│    │  (in AI's repo)          │                                │            │
+│    │                          │                                │            │
+│    │  MCP request             │                                │            │
+│    ├─────────────────────────►│                                │            │
+│    │  (base64 bundle)         │                                │            │
+│    │                          │                                │            │
+│    │                          │  Create bare temp repo         │            │
+│    │                          │  Unbundle (adds objects)       │            │
+│    │                          │  NO checkout                   │            │
+│    │                          │                                │            │
+│    │                          │  git2 push                     │            │
+│    │                          ├───────────────────────────────►│            │
+│    │                          │  (with credentials)            │            │
+│    │                          │                                │            │
+│    │                          │  Clean up temp                 │            │
+│    │                          │                                │            │
+│    │  MCP response            │                                │            │
+│    │◄─────────────────────────┤                                │            │
+│    │  (commit URL)            │                                │            │
+│    │                          │                                │            │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-The AI then initialises git and works locally:
+## What Touches Disk (And What Doesn't)
 
-```bash
-# AI's workflow (all local, no network)
-cd /home/claude/repo
-git init
-git add .
-git commit -m "Initial state from clone"
+### On User's Disk
 
-# Work on the code
-git checkout -b feature/fix-bug
-vim src/main.rs
-cargo test  # ← Can actually run tests!
-git add .
-git commit -m "Fix the bug"
+| Data | Written to Disk? | Notes |
+|------|-----------------|-------|
+| Source files | **NO** | Never checked out |
+| Git objects | Temp only | Bare repo, deleted after |
+| Bundle file | Temp only | For unbundle operation |
+| Credentials | **NO** | System helpers only |
+| Tar archive | **NO** | Built in memory |
 
-# Ready to push - create bundle
-git bundle create changes.bundle origin/main..HEAD
-# Send bundle to MCP server for authenticated push
-```
-
-## Component Architecture
-
-### MCP Tools
+### Temp Directory Contents
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│ MCP Tool: repo/clone                                            │
-├─────────────────────────────────────────────────────────────────┤
-│ Input:                                                          │
-│   url: string        "https://github.com/user/repo"            │
-│   branch?: string    "main"                                    │
-│   depth?: number     1 (shallow)                               │
-│   sparse?: string[]  ["src/", "Cargo.toml"]                    │
-│                                                                 │
-│ Output:                                                         │
-│   archive: string    Base64-encoded tar.gz                     │
-│   commit: string     "abc123..."                               │
-│   branch: string     "main"                                    │
-│   file_count: number 47                                        │
-└─────────────────────────────────────────────────────────────────┘
+/tmp/git-proxy-xxxxx/        # Temp dir (auto-deleted)
+├── objects/                 # Git object database
+│   ├── pack/               # Pack files from fetch
+│   └── ...                 # Loose objects
+├── refs/                   # Branch references
+├── HEAD                    # Current ref
+└── config                  # Bare repo config
 
-┌─────────────────────────────────────────────────────────────────┐
-│ MCP Tool: repo/push                                             │
-├─────────────────────────────────────────────────────────────────┤
-│ Input:                                                          │
-│   url: string        "https://github.com/user/repo"            │
-│   branch: string     "feature/fix-bug"                         │
-│   bundle: string     Base64-encoded git bundle                 │
-│                                                                 │
-│ Output:                                                         │
-│   success: boolean   true                                      │
-│   commit: string     "def456..."                               │
-│   url: string        "https://github.com/.../commit/def456"   │
-└─────────────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────────┐
-│ MCP Tool: repo/pull                                             │
-├─────────────────────────────────────────────────────────────────┤
-│ Input:                                                          │
-│   url: string        "https://github.com/user/repo"            │
-│   branch: string     "main"                                    │
-│   since_commit: str  "abc123..." (what AI has)                 │
-│                                                                 │
-│ Output:                                                         │
-│   archive: string    Base64 tar.gz of changed files only       │
-│   commit: string     New HEAD commit                           │
-│   changed: string[]  List of changed file paths                │
-└─────────────────────────────────────────────────────────────────┘
+NO src/, NO Cargo.toml, NO working tree files!
 ```
 
-### Internal Modules
+## Memory vs Disk Trade-offs
+
+| Operation | Memory Usage | Disk Usage |
+|-----------|-------------|------------|
+| Fetch objects | O(packed size) | Temp only |
+| Walk tree | O(1) per entry | None |
+| Build tar | O(archive size) | None |
+| Encode base64 | O(archive size) | None |
+
+For very large repos, we may need streaming/chunking to avoid OOM.
+
+## Security Implications
+
+### Credential Security
+
+Same as before — credentials never stored, git2 callbacks only.
+
+### Data Security
+
+**Stronger than v1:**
+- Source files never on user's disk, even temporarily
+- If MCP server crashes, no source files left behind
+- Nothing to clean up, nothing to leak
+
+### Audit Trail
+
+All operations logged (without credentials), showing:
+- Repository URL (sanitized)
+- Branch
+- Commit SHA
+- Operation success/failure
+- Duration
+
+## Component Overview
 
 ```
 src/
-├── git2_ops/                    # git2 library wrapper
-│   ├── mod.rs                   # Public API
+├── git2_ops/                    # git2 operations
 │   ├── auth.rs                  # Credential callbacks
-│   │   └── create_callbacks()   # Returns configured RemoteCallbacks
-│   ├── clone.rs                 # Clone operations
-│   │   ├── clone_repo()         # Clone to temp dir
-│   │   └── CloneOptions         # URL, branch, depth, sparse
-│   ├── push.rs                  # Push operations
-│   │   └── push_bundle()        # Apply bundle and push
-│   └── error.rs                 # git2-specific errors
+│   ├── clone.rs                 # Bare fetch + tree streaming
+│   └── push.rs                  # Bundle processing + push
 │
-├── streaming/                   # Transfer format handling
-│   ├── mod.rs
-│   ├── tar.rs                   # Tar archive creation
-│   │   ├── create_tar_gz()      # Dir → tar.gz bytes
-│   │   └── TarOptions           # Exclude patterns, etc.
+├── streaming/                   # Transfer formats
+│   ├── tar.rs                   # Tree → tar.gz (in memory)
 │   └── bundle.rs                # Git bundle handling
-│       ├── create_bundle()      # Repo → bundle bytes
-│       └── apply_bundle()       # Bundle → repo
 │
-├── mcp/                         # MCP protocol layer
-│   ├── server.rs                # Main server, tool dispatch
-│   ├── tools/                   # Tool handlers
-│   │   ├── repo_clone.rs        # repo/clone handler
-│   │   ├── repo_push.rs         # repo/push handler
-│   │   └── repo_pull.rs         # repo/pull handler
-│   ├── protocol.rs              # JSON-RPC types (unchanged)
-│   └── transport.rs             # stdio transport (unchanged)
+├── mcp/tools/                   # MCP tool handlers
+│   ├── repo_clone.rs            # repo/clone
+│   ├── repo_push.rs             # repo/push
+│   └── repo_pull.rs             # repo/pull
 │
-├── security/                    # Security guards (from v1)
-│   ├── audit.rs                 # Audit logging
-│   ├── guards.rs                # Branch/push protection
-│   └── rate_limit.rs            # Rate limiting
+├── session.rs                   # Session tracking (no files!)
 │
-├── session.rs                   # Repo session tracking
-│   ├── SessionManager           # Track active repos
-│   └── RepoSession              # URL, branch, last_commit
-│
-└── config/                      # Configuration (extend v1)
-    └── settings.rs              # Add new options
+└── security/                    # Guards (from v1)
+    ├── branch_guard.rs
+    ├── push_guard.rs
+    └── rate_limiter.rs
 ```
 
-## Session Management
+## Comparison: v1 vs v2
 
-**Why sessions?** To enable incremental operations:
-
-```rust
-pub struct RepoSession {
-    pub url: String,
-    pub branch: String,
-    pub last_commit: String,  // What the AI has
-    pub cloned_at: Instant,
-}
-
-pub struct SessionManager {
-    sessions: HashMap<String, RepoSession>,  // key = "url:branch"
-}
-```
-
-**Workflow:**
-
-1. AI calls `repo/clone` → Session created with `last_commit`
-2. AI works locally, creates commits
-3. AI calls `repo/push` → Session updated with new `last_commit`
-4. Later, AI calls `repo/pull` → We fetch only commits after `last_commit`
-
-**What sessions DON'T store:**
-
-- ❌ Credentials (never)
-- ❌ File contents (AI has those)
-- ❌ Repository objects (AI has those)
-
-## Security Model
-
-### Threat Model
-
-| Threat | Mitigation |
-|--------|------------|
-| Credential theft | Credentials never stored; system helpers only |
-| Credential logging | Audit code; Cred objects never in logs |
-| Man-in-the-middle | TLS to Git providers; stdio to MCP client |
-| Malicious bundle | Validate bundle format before processing |
-| Path traversal | Validate archive paths; no `..` allowed |
-| DoS via large repo | Rate limiting; configurable size limits |
-| Unauthorized branch push | Branch protection guards |
-
-### Credential Flow (Detailed)
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ SSH Authentication                                                          │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  git2 needs auth ──► callback invoked ──► Cred::ssh_key_from_agent()       │
-│                                                    │                        │
-│                                                    ▼                        │
-│                                           ssh-agent (OS process)            │
-│                                                    │                        │
-│                                           Signs challenge                   │
-│                                           (key never leaves agent)          │
-│                                                    │                        │
-│                                                    ▼                        │
-│                                           Signed response ──► git2 ──► GitHub
-│                                                                             │
-│  Private key NEVER read by git-proxy-mcp                                   │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ HTTPS Authentication                                                        │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  git2 needs auth ──► callback invoked ──► Cred::credential_helper()        │
-│                                                    │                        │
-│                                                    ▼                        │
-│                                           OS credential helper              │
-│                                           (osxkeychain / manager / etc.)    │
-│                                                    │                        │
-│                                           Returns username + token          │
-│                                                    │                        │
-│                                                    ▼                        │
-│                                           git2 uses for HTTPS auth          │
-│                                                                             │
-│  Token passes through git2 but is NEVER stored/logged by git-proxy-mcp    │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-## Performance Considerations
-
-### Memory Usage
-
-| Component | Memory Usage | Notes |
-|-----------|-------------|-------|
-| git2 fetch | O(repo size) | Streamed, but needs buffer |
-| Tar creation | O(working tree) | Files read into memory |
-| Base64 encoding | 1.33x archive size | Standard overhead |
-
-**For large repos:** Use shallow clone + sparse checkout to limit data.
-
-### Transfer Size Comparison
-
-| Repo Size | GitHub MCP | git-proxy-mcp |
-|-----------|------------|---------------|
-| 100 files, 1MB | ~100 API calls | 1 call, ~1MB |
-| 1000 files, 50MB | ~1000 API calls | 1 call, ~50MB |
-| 10000 files, 500MB | Infeasible | Chunked transfer |
-
-### Chunked Transfer (for large repos)
-
-```rust
-// For repos > MAX_SINGLE_RESPONSE (e.g., 50MB)
-pub struct ChunkedCloneResult {
-    pub chunk_index: usize,
-    pub total_chunks: usize,
-    pub data: String,  // Base64 chunk
-    pub is_last: bool,
-}
-```
-
-AI accumulates chunks and reassembles the archive.
-
-## Comparison with v1
-
-| Aspect | v1 (CLI Proxy) | v2 (Streaming Proxy) |
-|--------|----------------|----------------------|
-| Git library | Subprocess (`git` CLI) | git2 (in-process) |
-| Use case | Local MCP clients | Cloud AI assistants |
-| Files on MCP machine | Cloned to disk | Never persisted |
-| Transfer method | CLI stdout | Tar/bundle streaming |
-| Credential handling | Env vars | git2 callbacks |
-| Output sanitisation | Regex on stdout | Not needed (binary) |
-
-## Future Considerations
-
-### WebSocket Transport
-
-Currently stdio only. Future: WebSocket for remote MCP clients.
-
-### Provider-Specific Features
-
-- Create pull request (requires GitHub/GitLab API)
-- Fork repository
-- Manage webhooks
-
-These may need separate provider API integration beyond git2.
-
-### Git LFS
-
-Large File Storage needs special handling:
-
-1. Detect LFS pointers in tree
-2. Fetch actual objects from LFS server
-3. Stream with regular files
-
-Deferred to Phase 5.
-
-## References
-
-- [git2-rs documentation](https://docs.rs/git2/latest/git2/)
-- [git2-rs examples](https://github.com/rust-lang/git2-rs/tree/master/examples)
-- [libgit2 authentication guide](https://libgit2.org/docs/guides/authentication/)
-- [Git bundle format](https://git-scm.com/docs/git-bundle)
-- [Git transfer protocols](https://git-scm.com/book/en/v2/Git-Internals-Transfer-Protocols)
-- [MCP specification](https://modelcontextprotocol.io/)
+| Aspect | v1 | v2 |
+|--------|----|----|  
+| Git library | CLI subprocess | git2 (in-process) |
+| Clone method | Full checkout | Bare repo, tree walk |
+| Files on disk | Yes (temp) | No (objects only) |
+| Working tree | Created, then deleted | Never created |
+| Tar creation | From disk files | From git objects |
+| Memory usage | Lower | Higher |
+| Security | Good | Better (no files) |
