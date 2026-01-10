@@ -50,6 +50,7 @@ use crate::security::{
     AuditEvent, AuditLogger, BranchGuard, PushGuard, RateLimiter, RepoFilter, SecurityGuard,
     ShutdownReason,
 };
+use crate::mcp::tools::{handle_repo_clone, RepoCloneArgs};
 
 /// Server state in the MCP lifecycle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -542,6 +543,7 @@ impl McpServer {
 
         let result = match params.name.as_str() {
             "git" => self.call_git_tool(&params.arguments).await,
+            "repo/clone" => self.call_repo_clone_tool(&params.arguments),
             _ => ToolCallResult::error(format!("Unknown tool: {}", params.name)),
         };
 
@@ -580,36 +582,74 @@ impl McpServer {
 
     /// Returns the list of available tools.
     fn get_tool_definitions() -> Vec<ToolDefinition> {
-        vec![ToolDefinition {
-            name: "git".to_string(),
-            description: Some(
-                "Execute remote Git commands using your existing Git credential configuration. \
-                 Only remote operations are supported: clone, fetch, pull, push, ls-remote. \
-                 Local commands (status, log, diff, commit, etc.) should be run directly. \
-                 Authentication is handled by your system's credential helpers and SSH agent."
-                    .to_string(),
-            ),
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "command": {
-                        "type": "string",
-                        "enum": ["clone", "fetch", "ls-remote", "pull", "push"],
-                        "description": "The remote Git command to execute"
+        vec![
+            // Legacy git subprocess tool
+            ToolDefinition {
+                name: "git".to_string(),
+                description: Some(
+                    "Execute remote Git commands using your existing Git credential configuration. \
+                     Only remote operations are supported: clone, fetch, pull, push, ls-remote. \
+                     Local commands (status, log, diff, commit, etc.) should be run directly. \
+                     Authentication is handled by your system's credential helpers and SSH agent."
+                        .to_string(),
+                ),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "command": {
+                            "type": "string",
+                            "enum": ["clone", "fetch", "ls-remote", "pull", "push"],
+                            "description": "The remote Git command to execute"
+                        },
+                        "args": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Arguments to pass to the Git command"
+                        },
+                        "cwd": {
+                            "type": "string",
+                            "description": "Working directory for the Git command (optional)"
+                        }
                     },
-                    "args": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "Arguments to pass to the Git command"
+                    "required": ["command"]
+                }),
+            },
+            // Tier 1: Stream repository as tar.gz
+            ToolDefinition {
+                name: "repo/clone".to_string(),
+                description: Some(
+                    "Clone a repository and return it as a base64-encoded tar.gz archive. \
+                     The repository is fetched using your local Git credentials (SSH agent or \
+                     credential helpers) but no source files are written to your disk. \
+                     Use this to get a complete repository snapshot that can be extracted \
+                     on the AI's VM."
+                        .to_string(),
+                ),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "url": {
+                            "type": "string",
+                            "description": "Repository URL (https:// or git@)"
+                        },
+                        "branch": {
+                            "type": "string",
+                            "description": "Branch to clone (defaults to 'main')"
+                        },
+                        "depth": {
+                            "type": "integer",
+                            "description": "Shallow clone depth (not yet implemented)"
+                        },
+                        "sparse": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Sparse checkout paths (not yet implemented)"
+                        }
                     },
-                    "cwd": {
-                        "type": "string",
-                        "description": "Working directory for the Git command (optional)"
-                    }
-                },
-                "required": ["command"]
-            }),
-        }]
+                    "required": ["url"]
+                }),
+            },
+        ]
     }
 
     /// Applies all security guards to a command.
@@ -792,6 +832,48 @@ impl McpServer {
                 "Command failed with exit code {}:\n{}",
                 output.exit_code, response_text
             ))
+        }
+    }
+
+    /// Calls the `repo/clone` tool.
+    ///
+    /// This tool clones a repository and returns it as a base64-encoded tar.gz.
+    /// Source files are never written to the user's disk.
+    fn call_repo_clone_tool(&self, arguments: &Value) -> ToolCallResult {
+        // Parse arguments
+        let args: RepoCloneArgs = match serde_json::from_value(arguments.clone()) {
+            Ok(a) => a,
+            Err(e) => {
+                return ToolCallResult::error(format!("Invalid arguments: {e}"));
+            }
+        };
+
+        // Check rate limiter
+        if !self.rate_limiter.try_acquire() {
+            return ToolCallResult::error(
+                "Rate limit exceeded. Please wait before sending more requests.",
+            );
+        }
+
+        // Check repo filter
+        if let Some(reason) = self
+            .repo_filter
+            .check("clone", std::slice::from_ref(&args.url))
+            .reason()
+        {
+            return ToolCallResult::error(reason.to_string());
+        }
+
+        // Execute the clone
+        match handle_repo_clone(args) {
+            Ok(result) => {
+                // Return the result as JSON text
+                match serde_json::to_string_pretty(&result) {
+                    Ok(json) => ToolCallResult::text(json),
+                    Err(e) => ToolCallResult::error(format!("Failed to serialize result: {e}")),
+                }
+            }
+            Err(e) => ToolCallResult::error(e.to_string()),
         }
     }
 }
