@@ -32,15 +32,12 @@
 //!   │                          │ exit
 //! ```
 
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::git::command::GitCommand;
-use crate::git::executor::GitExecutor;
 use crate::mcp::protocol::{
     ErrorCode, IncomingMessage, JsonRpcError, JsonRpcErrorData, JsonRpcNotification,
     JsonRpcRequest, JsonRpcResponse, RequestId, MCP_PROTOCOL_VERSION, SERVER_NAME,
@@ -232,8 +229,6 @@ pub struct McpServer {
     transport: StdioTransport,
     /// Negotiated protocol version (set after initialisation).
     protocol_version: Option<String>,
-    /// Git command executor.
-    executor: Arc<GitExecutor>,
     /// Branch protection guard.
     branch_guard: BranchGuard,
     /// Push protection guard.
@@ -253,15 +248,10 @@ impl McpServer {
     ///
     /// # Arguments
     ///
-    /// * `executor` — Git command executor with credentials
     /// * `security_config` — Security settings from configuration
     /// * `audit_logger` — Audit logger for recording operations
     #[must_use]
-    pub fn new(
-        executor: GitExecutor,
-        security_config: SecurityConfig,
-        audit_logger: AuditLogger,
-    ) -> Self {
+    pub fn new(security_config: SecurityConfig, audit_logger: AuditLogger) -> Self {
         // Build branch guard from protected branches
         let branch_guard = if security_config.protected_branches.is_empty() {
             BranchGuard::with_defaults()
@@ -305,7 +295,6 @@ impl McpServer {
             state: ServerState::AwaitingInit,
             transport: StdioTransport::new(),
             protocol_version: None,
-            executor: Arc::new(executor),
             branch_guard,
             push_guard,
             repo_filter,
@@ -551,7 +540,6 @@ impl McpServer {
             })?;
 
         let result = match params.name.as_str() {
-            "git" => self.call_git_tool(&params.arguments).await,
             "repo/clone" => self.call_repo_clone_tool(&params.arguments),
             "repo/push" => self.call_repo_push_tool(&params.arguments),
             "repo/refs" => self.call_repo_refs_tool(&params.arguments),
@@ -601,37 +589,6 @@ impl McpServer {
     #[allow(clippy::too_many_lines)] // Tool definitions are naturally verbose
     fn get_tool_definitions() -> Vec<ToolDefinition> {
         vec![
-            // Legacy git subprocess tool
-            ToolDefinition {
-                name: "git".to_string(),
-                description: Some(
-                    "Execute remote Git commands using your existing Git credential configuration. \
-                     Only remote operations are supported: clone, fetch, pull, push, ls-remote. \
-                     Local commands (status, log, diff, commit, etc.) should be run directly. \
-                     Authentication is handled by your system's credential helpers and SSH agent."
-                        .to_string(),
-                ),
-                input_schema: json!({
-                    "type": "object",
-                    "properties": {
-                        "command": {
-                            "type": "string",
-                            "enum": ["clone", "fetch", "ls-remote", "pull", "push"],
-                            "description": "The remote Git command to execute"
-                        },
-                        "args": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Arguments to pass to the Git command"
-                        },
-                        "cwd": {
-                            "type": "string",
-                            "description": "Working directory for the Git command (optional)"
-                        }
-                    },
-                    "required": ["command"]
-                }),
-            },
             // Tier 1: Stream repository as tar.gz
             ToolDefinition {
                 name: "repo/clone".to_string(),
@@ -877,189 +834,6 @@ impl McpServer {
                 }),
             },
         ]
-    }
-
-    /// Applies all security guards to a command.
-    ///
-    /// Returns `Some(reason)` if the command should be blocked.
-    fn check_security_guards(&self, command: &str, args: &[String]) -> Option<String> {
-        // Check branch guard
-        if let Some(reason) = self.branch_guard.check(command, args).reason() {
-            return Some(reason.to_string());
-        }
-
-        // Check push guard
-        if let Some(reason) = self.push_guard.check(command, args).reason() {
-            return Some(reason.to_string());
-        }
-
-        // Check repo filter
-        if let Some(reason) = self.repo_filter.check(command, args).reason() {
-            return Some(reason.to_string());
-        }
-
-        None
-    }
-
-    /// Formats command output into a response string.
-    fn format_output(output: &crate::git::executor::CommandOutput, command: &str) -> String {
-        let mut response_text = String::new();
-
-        if !output.stdout.is_empty() {
-            response_text.push_str(&output.stdout);
-        }
-
-        // Add stdout truncation indicator
-        if output.stdout_truncated {
-            response_text.push_str("\n\n[stdout truncated due to size limit]");
-        }
-
-        if !output.stderr.is_empty() {
-            if !response_text.is_empty() {
-                response_text.push_str("\n\n--- stderr ---\n");
-            }
-            response_text.push_str(&output.stderr);
-        }
-
-        // Add stderr truncation indicator
-        if output.stderr_truncated {
-            if output.stderr.is_empty() && !response_text.is_empty() {
-                response_text.push_str("\n\n--- stderr ---\n");
-            }
-            response_text.push_str("\n\n[stderr truncated due to size limit]");
-        }
-
-        // Add truncation warning if any output was truncated
-        if output.is_truncated() {
-            response_text.push_str(
-                "\n\n⚠️ Output was truncated to prevent protocol buffer overflow. \
-                 Consider using more specific git commands to reduce output size.",
-            );
-        }
-
-        // Add other warnings
-        for warning in &output.warnings {
-            response_text.push_str("\n\n⚠️ ");
-            response_text.push_str(warning);
-        }
-
-        if response_text.is_empty() {
-            response_text = format!("Command 'git {command}' completed successfully.");
-        }
-
-        response_text
-    }
-
-    /// Executes the git tool.
-    ///
-    /// This method:
-    /// 1. Parses and validates the command
-    /// 2. Applies security guards (rate limiting, branch protection, repo filtering)
-    /// 3. Executes the command with credential injection
-    /// 4. Logs the operation to the audit log
-    /// 5. Returns sanitised output
-    async fn call_git_tool(&self, arguments: &Value) -> ToolCallResult {
-        let start_time = Instant::now();
-
-        // Extract command from arguments
-        let command_str = match arguments.get("command").and_then(Value::as_str) {
-            Some(cmd) if !cmd.is_empty() => cmd,
-            _ => return ToolCallResult::error("Missing required 'command' argument"),
-        };
-
-        // Extract args
-        let args: Vec<String> = arguments
-            .get("args")
-            .and_then(Value::as_array)
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(Value::as_str)
-                    .map(String::from)
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        // Extract working directory
-        let working_dir: Option<PathBuf> = arguments
-            .get("cwd")
-            .and_then(Value::as_str)
-            .map(PathBuf::from);
-
-        // Check rate limiter first
-        if !self.rate_limiter.try_acquire() {
-            self.audit_logger
-                .log_silent(&AuditEvent::rate_limit_exceeded(
-                    command_str,
-                    args.clone(),
-                    working_dir.clone(),
-                ));
-            return ToolCallResult::error(
-                "Rate limit exceeded. Please wait before sending more Git commands.",
-            );
-        }
-
-        // Parse and validate the command
-        let git_command = match GitCommand::new(command_str, args.clone(), working_dir.clone()) {
-            Ok(cmd) => cmd,
-            Err(e) => {
-                self.audit_logger.log_silent(&AuditEvent::command_blocked(
-                    command_str,
-                    args,
-                    working_dir,
-                    e.to_string(),
-                ));
-                return ToolCallResult::error(format!("Invalid command: {e}"));
-            }
-        };
-
-        // Apply security guards
-        let args_for_guard: Vec<String> = git_command.args().to_vec();
-        if let Some(reason) = self.check_security_guards(command_str, &args_for_guard) {
-            self.audit_logger.log_silent(&AuditEvent::command_blocked(
-                command_str,
-                args,
-                working_dir,
-                &reason,
-            ));
-            return ToolCallResult::error(reason);
-        }
-
-        // Execute the command
-        let output = match self.executor.execute(&git_command).await {
-            Ok(output) => output,
-            Err(e) => {
-                let duration = start_time.elapsed();
-                self.audit_logger.log_silent(&AuditEvent::command_success(
-                    command_str,
-                    args,
-                    working_dir,
-                    duration,
-                    -1,
-                ));
-                return ToolCallResult::error(format!("Execution failed: {e}"));
-            }
-        };
-
-        // Log the operation
-        let duration = start_time.elapsed();
-        self.audit_logger.log_silent(&AuditEvent::command_success(
-            command_str,
-            args,
-            working_dir,
-            duration,
-            output.exit_code,
-        ));
-
-        // Format and return the response
-        let response_text = Self::format_output(&output, command_str);
-        if output.success {
-            ToolCallResult::text(response_text)
-        } else {
-            ToolCallResult::error(format!(
-                "Command failed with exit code {}:\n{}",
-                output.exit_code, response_text
-            ))
-        }
     }
 
     /// Calls the `repo/clone` tool.
@@ -1579,11 +1353,10 @@ mod tests {
 
     /// Creates a test server with minimal configuration.
     fn create_test_server() -> McpServer {
-        let executor = GitExecutor::new();
         let security_config = SecurityConfig::default();
         let audit_logger = AuditLogger::disabled();
 
-        McpServer::new(executor, security_config, audit_logger)
+        McpServer::new(security_config, audit_logger)
     }
 
     #[test]
@@ -1639,78 +1412,5 @@ mod tests {
         let info = ServerInfo::default();
         assert_eq!(info.name, SERVER_NAME);
         assert!(!info.version.is_empty());
-    }
-
-    #[test]
-    fn format_output_no_truncation() {
-        use crate::git::executor::CommandOutput;
-
-        let output = CommandOutput::new_with_truncation(
-            "hello".to_string(),
-            "world".to_string(),
-            0,
-            false,
-            false,
-        );
-        let formatted = McpServer::format_output(&output, "status");
-        assert!(formatted.contains("hello"));
-        assert!(formatted.contains("world"));
-        assert!(!formatted.contains("truncated"));
-    }
-
-    #[test]
-    fn format_output_stdout_truncated() {
-        use crate::git::executor::CommandOutput;
-
-        let output = CommandOutput::new_with_truncation(
-            "partial output".to_string(),
-            String::new(),
-            0,
-            true,
-            false,
-        );
-        let formatted = McpServer::format_output(&output, "log");
-        assert!(formatted.contains("partial output"));
-        assert!(formatted.contains("[stdout truncated due to size limit]"));
-        assert!(formatted.contains("protocol buffer overflow"));
-    }
-
-    #[test]
-    fn format_output_stderr_truncated() {
-        use crate::git::executor::CommandOutput;
-
-        let output = CommandOutput::new_with_truncation(
-            String::new(),
-            "error output".to_string(),
-            1,
-            false,
-            true,
-        );
-        let formatted = McpServer::format_output(&output, "push");
-        assert!(formatted.contains("error output"));
-        assert!(formatted.contains("[stderr truncated due to size limit]"));
-        assert!(formatted.contains("protocol buffer overflow"));
-    }
-
-    #[test]
-    fn format_output_both_truncated() {
-        use crate::git::executor::CommandOutput;
-
-        let output = CommandOutput::new_with_truncation(
-            "stdout".to_string(),
-            "stderr".to_string(),
-            0,
-            true,
-            true,
-        );
-        let formatted = McpServer::format_output(&output, "clone");
-        assert!(formatted.contains("[stdout truncated due to size limit]"));
-        assert!(formatted.contains("[stderr truncated due to size limit]"));
-        // Should only have one truncation warning
-        assert_eq!(
-            formatted.matches("protocol buffer overflow").count(),
-            1,
-            "Should have exactly one truncation warning"
-        );
     }
 }

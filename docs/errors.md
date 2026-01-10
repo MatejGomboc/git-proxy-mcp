@@ -31,44 +31,6 @@ These are standard JSON-RPC 2.0 error codes returned when there's an issue with 
 
 ---
 
-## Git Command Errors
-
-These errors occur when validating or executing Git commands through the `git` tool.
-
-### Command Validation Errors
-
-| Error | Message Format | Cause |
-|-------|---------------|-------|
-| Empty command | `git command cannot be empty` | The `command` field is missing or empty |
-| Command not allowed | `git command '{command}' is not allowed` | The command is not in the allowlist (only `clone`, `fetch`, `pull`, `push`, `ls-remote` are allowed) |
-| Dangerous flag | `dangerous flag '{flag}' is not allowed` | A blocked flag was detected (see Blocked Flags below) |
-| Invalid working directory | `invalid working directory: {path}` | The `cwd` path is relative (must be absolute) |
-
-### Blocked Flags
-
-The following flags are blocked for security reasons:
-
-| Flag | Reason |
-|------|--------|
-| `--exec` | Arbitrary command execution |
-| `-c` | Can set arbitrary git config including hooks |
-| `--upload-pack` | Custom pack command execution |
-| `--receive-pack` | Custom pack command execution |
-| `--no-verify` | Bypasses security hooks |
-| `--verbose`, `-v` | May leak credentials in output |
-| `--debug` | May contain sensitive information |
-| `--git-dir` | Path traversal risk |
-| `--work-tree` | Path traversal risk |
-
-### Execution Errors
-
-| Error | Message Format | Cause |
-|-------|---------------|-------|
-| Process error | `process error: {message}` | Git process failed to start (e.g., git not installed) |
-| Working directory error | `working directory error: {message}` | The working directory doesn't exist, isn't a directory, or isn't accessible |
-
----
-
 ## Security Guard Errors
 
 These errors occur when security policies block an operation.

@@ -12,7 +12,6 @@ use tracing::{error, info, Level};
 use tracing_subscriber::EnvFilter;
 
 use git_proxy_mcp::config;
-use git_proxy_mcp::git::executor::GitExecutor;
 use git_proxy_mcp::mcp::server::{McpServer, SecurityConfig};
 use git_proxy_mcp::security::{AuditEvent, AuditLogger};
 
@@ -136,14 +135,8 @@ fn main() -> ExitCode {
         "Configuration loaded"
     );
 
-    // Create git executor with configured timeout and output limits
-    let executor = GitExecutor::with_limits(
-        cfg.timeouts.request_timeout(),
-        cfg.limits.max_output_bytes(),
-    );
-
     // Create MCP server
-    let mut server = McpServer::new(executor, security_config, audit_logger);
+    let mut server = McpServer::new(security_config, audit_logger);
 
     info!("MCP server ready, waiting for client connection...");
     info!("Note: Authentication uses your existing Git credential configuration");
