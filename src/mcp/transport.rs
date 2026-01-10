@@ -18,7 +18,7 @@ use std::io;
 
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
-use crate::mcp::protocol::{JsonRpcError, JsonRpcResponse};
+use crate::mcp::protocol::{JsonRpcError, JsonRpcResponse, OutgoingNotification};
 
 /// A stdio-based MCP transport.
 ///
@@ -88,6 +88,20 @@ impl StdioTransport {
     /// Returns an error if serialisation or writing fails.
     pub async fn write_error(&mut self, error: &JsonRpcError) -> io::Result<()> {
         let json = serde_json::to_string(error)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+        self.write_raw(&json).await
+    }
+
+    /// Writes a JSON-RPC notification to stdout.
+    ///
+    /// Used for sending progress updates and other server-initiated messages.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if serialisation or writing fails.
+    pub async fn write_notification(&mut self, notification: &OutgoingNotification) -> io::Result<()> {
+        let json = serde_json::to_string(notification)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
         self.write_raw(&json).await

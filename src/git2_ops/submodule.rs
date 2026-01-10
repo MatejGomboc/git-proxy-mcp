@@ -276,6 +276,7 @@ pub fn fetch_submodule(entry: &SubmoduleEntry) -> Result<FetchedSubmodule, Git2E
     let fetch_opts = FetchOptions2 {
         branch: None,
         depth: None,
+        progress: None, // Submodule fetch progress is reported at higher level
     };
 
     let fetch_result = fetch_bare(&entry.url, Some(fetch_opts))?;

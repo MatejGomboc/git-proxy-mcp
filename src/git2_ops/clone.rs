@@ -21,8 +21,9 @@ use git2::{FetchOptions, Oid, Repository};
 use tempfile::TempDir;
 use tracing::{debug, info};
 
-use super::auth::{create_callbacks, validate_url};
+use super::auth::{create_callbacks_with_progress, validate_url};
 use super::error::Git2Error;
+use crate::mcp::ProgressSender;
 
 /// Result of a successful fetch operation.
 ///
@@ -46,6 +47,8 @@ pub struct FetchOptions2 {
     pub branch: Option<String>,
     /// Shallow clone depth (None = full history)
     pub depth: Option<u32>,
+    /// Optional progress sender for real-time updates
+    pub progress: Option<ProgressSender>,
 }
 
 /// Fetch a repository without creating a working tree.
@@ -119,7 +122,7 @@ pub fn fetch_bare(url: &str, options: Option<FetchOptions2>) -> Result<FetchResu
             repo.remote_anonymous(url)
                 .map_err(|e| Git2Error::InitFailed(format!("failed to create remote: {e}")))?;
 
-        let callbacks = create_callbacks();
+        let callbacks = create_callbacks_with_progress(options.progress.as_ref());
 
         let mut fetch_opts = FetchOptions::new();
         fetch_opts.remote_callbacks(callbacks);

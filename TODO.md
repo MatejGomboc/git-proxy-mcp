@@ -589,14 +589,35 @@ pub struct RepoCloneResult {
 
 ---
 
-### 5.6 Progress Callbacks
+### 5.6 Progress Callbacks ✅ IMPLEMENTED (Infrastructure)
 
 **Goal:** Real-time progress during long operations.
 
-**Implementation approach:**
+**Implementation:**
 
-- [ ] Use MCP notifications for progress updates
-- [ ] Report: bytes transferred, files processed, estimated time
+- [x] `ProgressSender` type for sending progress updates from sync code
+- [x] `ProgressUpdate` enum with Transfer, FileProcessing, LfsDownload, SubmoduleFetch variants
+- [x] Rate-limited sending (100ms minimum interval to avoid flooding)
+- [x] Progress integrated into git2 fetch operations
+- [x] Progress integrated into tar creation (file processing)
+- [x] Progress integrated into LFS downloads
+- [x] Progress integrated into submodule fetching
+- [x] `OutgoingNotification` type for MCP progress notifications
+- [x] `write_notification` method on transport
+
+**Note:** Infrastructure is in place. Full real-time MCP notification streaming requires
+async/sync bridging refactoring (sync git2 operations with async transport).
+Progress is currently logged and reported via callbacks.
+
+**Files:**
+
+- `src/mcp/progress.rs` — Progress types and sender
+- `src/mcp/protocol.rs` — `OutgoingNotification` type
+- `src/mcp/transport.rs` — `write_notification` method
+- `src/git2_ops/auth.rs` — `create_callbacks_with_progress`
+- `src/git2_ops/clone.rs` — `FetchOptions2.progress`
+- `src/streaming/tar.rs` — `TarOptions.progress`
+- `src/mcp/tools/repo_clone.rs` — `handle_repo_clone_with_progress`
 
 ---
 

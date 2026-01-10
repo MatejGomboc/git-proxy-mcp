@@ -26,6 +26,7 @@ use tracing::{debug, info};
 use crate::git2_ops::auth::sanitize_url_for_logging;
 use crate::git2_ops::clone::{fetch_bare, FetchOptions2};
 use crate::git2_ops::error::Git2Error;
+use crate::mcp::ProgressSender;
 use crate::streaming::tar::{create_tar_from_tree_with_options, encode_base64, TarOptions};
 
 /// Arguments for the `repo/clone` tool.
@@ -172,6 +173,32 @@ impl From<Git2Error> for RepoCloneError {
 /// - Source files are never written to disk
 /// - The archive is built entirely in memory
 pub fn handle_repo_clone(args: RepoCloneArgs) -> Result<RepoCloneResult, RepoCloneError> {
+    handle_repo_clone_with_progress(args, None)
+}
+
+/// Handle the `repo/clone` tool call with optional progress reporting.
+///
+/// Same as [`handle_repo_clone`], but accepts an optional progress sender for
+/// real-time progress updates during long operations.
+///
+/// # Progress Updates
+///
+/// When a progress sender is provided, the following updates are sent:
+/// - Transfer progress during fetch (bytes, objects)
+/// - File processing progress during tar creation
+/// - LFS download progress (if `resolve_lfs` is true)
+/// - Submodule fetch progress (if `include_submodules` is true)
+///
+/// # Errors
+///
+/// Returns `RepoCloneError` if:
+/// - URL validation fails
+/// - Fetch operation fails (auth, network, etc.)
+/// - Tar creation fails
+pub fn handle_repo_clone_with_progress(
+    args: RepoCloneArgs,
+    progress: Option<ProgressSender>,
+) -> Result<RepoCloneResult, RepoCloneError> {
     info!(
         url = %sanitize_url_for_logging(&args.url),
         branch = ?args.branch,
@@ -202,6 +229,7 @@ pub fn handle_repo_clone(args: RepoCloneArgs) -> Result<RepoCloneResult, RepoClo
     let fetch_opts = FetchOptions2 {
         branch: args.branch.clone(),
         depth: args.depth,
+        progress: progress.clone(),
     };
 
     let fetch_result = fetch_bare(&args.url, Some(fetch_opts))?;
@@ -221,6 +249,7 @@ pub fn handle_repo_clone(args: RepoCloneArgs) -> Result<RepoCloneResult, RepoClo
         repo_url: Some(args.url),
         lfs_credentials: None, // TODO: Support LFS credentials from git credential helper
         include_submodules: args.include_submodules,
+        progress,
     };
 
     let tar_result =

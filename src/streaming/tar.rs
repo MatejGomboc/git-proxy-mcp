@@ -31,6 +31,7 @@ use tracing::{debug, trace, warn};
 use crate::git2_ops::error::Git2Error;
 use crate::git2_ops::lfs::{is_lfs_pointer, parse_lfs_pointer, LfsClient};
 use crate::git2_ops::submodule::fetch_all_submodules;
+use crate::mcp::ProgressSender;
 
 /// Options for tar creation.
 #[derive(Debug, Clone, Default)]
@@ -63,6 +64,9 @@ pub struct TarOptions {
     /// When enabled, submodules are fetched and their files are included
     /// at their respective paths in the archive.
     pub include_submodules: Option<bool>,
+
+    /// Optional progress sender for real-time updates during tar creation.
+    pub progress: Option<ProgressSender>,
 }
 
 /// Compiled sparse patterns for efficient matching.
@@ -283,6 +287,9 @@ pub fn create_tar_from_tree_with_options(
     // Get submodule option
     let include_submodules = options.include_submodules.unwrap_or(false);
 
+    // Get progress sender (moved, not cloned - caller no longer needs it)
+    let progress = options.progress;
+
     let mut archive_buffer = Vec::new();
     let mut file_count = 0usize;
     let mut uncompressed_size = 0u64;
@@ -334,9 +341,20 @@ pub fn create_tar_from_tree_with_options(
                                 if is_lfs_pointer(raw_content) {
                                     if let Some(pointer) = parse_lfs_pointer(raw_content) {
                                         trace!(path = %path, oid = %pointer.oid, "resolving LFS pointer");
+                                        // Report LFS download progress
+                                        if let Some(ref sender) = progress {
+                                            // Truncation is acceptable - only used for progress display
+                                            #[allow(clippy::cast_possible_truncation)]
+                                            let size_hint = pointer.size as usize;
+                                            sender.send_lfs_progress(lfs_resolved, 0, Some(&path), 0, size_hint);
+                                        }
                                         match client.fetch_content(&pointer) {
                                             Ok(lfs_content) => {
                                                 lfs_resolved += 1;
+                                                // Report LFS download complete
+                                                if let Some(ref sender) = progress {
+                                                    sender.send_lfs_progress(lfs_resolved, 0, Some(&path), lfs_content.len(), lfs_content.len());
+                                                }
                                                 (std::borrow::Cow::Owned(lfs_content), true)
                                             }
                                             Err(e) => {
@@ -395,6 +413,11 @@ pub fn create_tar_from_tree_with_options(
 
                         file_count += 1;
                         uncompressed_size += content.len() as u64;
+
+                        // Report progress for file processing
+                        if let Some(ref sender) = progress {
+                            sender.send_file_progress(file_count, 0, Some(&path));
+                        }
                     }
                     Err(e) => {
                         debug!(path = %path, error = %e, "failed to read blob, skipping");
@@ -412,7 +435,16 @@ pub fn create_tar_from_tree_with_options(
             match fetch_all_submodules(repo, commit_id) {
                 Ok(submodules) => {
                     let total_submodules = submodules.len();
+                    let mut processed_submodules = 0usize;
                     for submodule in submodules {
+                        // Report submodule fetch progress
+                        if let Some(ref sender) = progress {
+                            sender.send_submodule_progress(
+                                processed_submodules,
+                                total_submodules,
+                                Some(&submodule.entry.path),
+                            );
+                        }
                         let submodule_path = &submodule.entry.path;
                         let submodule_commit = submodule.entry.commit;
                         let submodule_repo = &submodule.fetch_result.repo;
@@ -526,9 +558,11 @@ pub fn create_tar_from_tree_with_options(
                                 "submodule added to tar"
                             );
                             submodules_included += 1;
+                            processed_submodules += 1;
                         } else if walk_result.is_err() {
                             warn!(path = %submodule_path, "failed to walk submodule tree");
                             submodules_failed += 1;
+                            processed_submodules += 1;
                         }
                     }
 

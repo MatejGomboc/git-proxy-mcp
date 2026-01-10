@@ -79,7 +79,7 @@ impl JsonRpcRequest {
     }
 }
 
-/// A JSON-RPC 2.0 notification message.
+/// A JSON-RPC 2.0 notification message (incoming).
 ///
 /// Notifications do not have an ID and do not expect a response.
 #[derive(Debug, Clone, Deserialize)]
@@ -93,6 +93,46 @@ pub struct JsonRpcNotification {
     /// Optional parameters for the notification.
     #[serde(default)]
     pub params: Option<Value>,
+}
+
+/// An outgoing JSON-RPC 2.0 notification (server to client).
+///
+/// Used for sending progress updates and other notifications.
+#[derive(Debug, Clone, Serialize)]
+pub struct OutgoingNotification {
+    /// Always "2.0".
+    pub jsonrpc: &'static str,
+
+    /// The notification method.
+    pub method: String,
+
+    /// Optional parameters for the notification.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub params: Option<Value>,
+}
+
+impl OutgoingNotification {
+    /// Creates a new outgoing notification.
+    #[must_use]
+    pub fn new(method: impl Into<String>, params: Option<Value>) -> Self {
+        Self {
+            jsonrpc: "2.0",
+            method: method.into(),
+            params,
+        }
+    }
+
+    /// Creates a progress notification.
+    #[must_use]
+    pub fn progress(progress_token: &str, progress: u32, total: Option<u32>, message: Option<&str>) -> Self {
+        let params = serde_json::json!({
+            "progressToken": progress_token,
+            "progress": progress,
+            "total": total,
+            "message": message,
+        });
+        Self::new("notifications/progress", Some(params))
+    }
 }
 
 /// A successful JSON-RPC 2.0 response.

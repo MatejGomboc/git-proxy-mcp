@@ -175,6 +175,7 @@ pub fn handle_repo_clone_start(
     let fetch_opts = FetchOptions2 {
         branch: args.branch.clone(),
         depth: args.depth,
+        progress: None, // TODO: Add progress support to chunked streaming
     };
 
     let fetch_result = fetch_bare(&args.url, Some(fetch_opts))?;
@@ -194,6 +195,7 @@ pub fn handle_repo_clone_start(
         repo_url: None,             // TODO: Add to RepoCloneStartArgs when needed
         lfs_credentials: None,      // TODO: Add to RepoCloneStartArgs when needed
         include_submodules: None,   // TODO: Add to RepoCloneStartArgs when needed
+        progress: None,             // TODO: Add progress support to chunked streaming
     };
 
     let tar_result = create_tar_from_tree_with_options(

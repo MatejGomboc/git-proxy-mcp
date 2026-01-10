@@ -28,6 +28,7 @@ use git2::{Cred, CredentialType, RemoteCallbacks};
 use tracing::{debug, warn};
 
 use super::error::Git2Error;
+use crate::mcp::ProgressSender;
 
 /// Creates git2 remote callbacks with credential handling.
 ///
@@ -40,19 +41,57 @@ use super::error::Git2Error;
 /// This function does not store or log any credentials. The credential
 /// callbacks retrieve secrets on-demand and they are used only for the
 /// duration of the git operation.
+#[must_use]
 pub fn create_callbacks<'a>() -> RemoteCallbacks<'a> {
+    create_callbacks_with_progress(None)
+}
+
+/// Creates git2 remote callbacks with credential handling and optional progress reporting.
+///
+/// Same as `create_callbacks` but accepts an optional progress sender for real-time
+/// transfer progress updates during fetch operations.
+///
+/// # Arguments
+///
+/// - `progress`: Optional progress sender for reporting transfer progress
+///
+/// # Progress Updates
+///
+/// When a progress sender is provided, the callback reports:
+/// - Received bytes
+/// - Total bytes (if known)
+/// - Received objects
+/// - Total objects
+/// - Indexed objects
+#[must_use]
+pub fn create_callbacks_with_progress<'a>(progress: Option<&ProgressSender>) -> RemoteCallbacks<'a> {
     let mut callbacks = RemoteCallbacks::new();
 
     callbacks.credentials(credentials_callback);
 
-    // Log transfer progress (no credentials)
-    callbacks.transfer_progress(|stats| {
+    // Clone the progress sender for the closure
+    let progress_sender = progress.cloned();
+
+    // Log transfer progress and optionally send to progress channel
+    callbacks.transfer_progress(move |stats| {
         debug!(
             received = stats.received_objects(),
             total = stats.total_objects(),
             bytes = stats.received_bytes(),
             "transfer progress"
         );
+
+        // Send progress update if we have a sender
+        if let Some(ref sender) = progress_sender {
+            sender.send_transfer(
+                stats.received_bytes(),
+                0, // git2 doesn't provide total_bytes upfront
+                stats.received_objects(),
+                stats.total_objects(),
+                stats.indexed_objects(),
+            );
+        }
+
         true
     });
 
