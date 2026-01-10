@@ -252,6 +252,8 @@ fn test_server_with_custom_security_config() {
         protected_branches: vec!["main".to_string(), "release/*".to_string()],
         repo_allowlist: Some(vec!["github.com/myorg/*".to_string()]),
         repo_blocklist: None,
+        rate_limit_max_burst: 20,
+        rate_limit_refill_rate: 5.0,
     };
 
     let server = create_server_with_security(config);

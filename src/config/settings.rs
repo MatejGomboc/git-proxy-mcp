@@ -47,6 +47,10 @@ pub struct Config {
     /// Limits settings.
     #[serde(default)]
     pub limits: LimitsConfig,
+
+    /// Rate limiting settings.
+    #[serde(default)]
+    pub rate_limits: RateLimitConfig,
 }
 
 impl Config {
@@ -120,6 +124,16 @@ const fn default_max_output_bytes() -> usize {
     10 * 1024 * 1024
 }
 
+/// Default maximum burst for rate limiting.
+const fn default_rate_limit_max_burst() -> u64 {
+    20
+}
+
+/// Default refill rate for rate limiting (operations per second).
+const fn default_rate_limit_refill_rate() -> f64 {
+    5.0
+}
+
 /// Timeout configuration.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -178,6 +192,42 @@ impl LimitsConfig {
     #[must_use]
     pub const fn max_output_bytes(&self) -> usize {
         self.max_output_bytes
+    }
+}
+
+/// Rate limiting configuration.
+///
+/// Controls how many Git commands can be executed per unit of time.
+/// Uses a token bucket algorithm where operations consume tokens and
+/// tokens are replenished at a steady rate.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RateLimitConfig {
+    /// Maximum number of operations allowed in a burst.
+    ///
+    /// This is the maximum number of Git commands that can be executed
+    /// in rapid succession before rate limiting kicks in.
+    ///
+    /// Default: 20
+    #[serde(default = "default_rate_limit_max_burst")]
+    pub max_burst: u64,
+
+    /// Sustained rate of operations allowed per second.
+    ///
+    /// After the burst capacity is exhausted, this is the maximum
+    /// sustained rate of Git commands that can be executed.
+    ///
+    /// Default: 5.0 (operations per second)
+    #[serde(default = "default_rate_limit_refill_rate")]
+    pub refill_rate_per_sec: f64,
+}
+
+impl Default for RateLimitConfig {
+    fn default() -> Self {
+        Self {
+            max_burst: default_rate_limit_max_burst(),
+            refill_rate_per_sec: default_rate_limit_refill_rate(),
+        }
     }
 }
 
@@ -357,5 +407,67 @@ mod tests {
         let config: Config = serde_json::from_str(json).unwrap();
         assert!(config.validate().is_ok());
         assert_eq!(config.limits.max_output_bytes, 1024 * 1024);
+    }
+
+    #[test]
+    fn rate_limit_config_defaults() {
+        let config = RateLimitConfig::default();
+        assert_eq!(config.max_burst, 20);
+        assert!((config.refill_rate_per_sec - 5.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn parse_rate_limit_config() {
+        let json = r#"{
+            "rate_limits": {
+                "max_burst": 50,
+                "refill_rate_per_sec": 10.0
+            }
+        }"#;
+
+        let config: Config = serde_json::from_str(json).unwrap();
+        assert_eq!(config.rate_limits.max_burst, 50);
+        assert!((config.rate_limits.refill_rate_per_sec - 10.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn parse_rate_limit_partial_config() {
+        let json = r#"{
+            "rate_limits": {
+                "max_burst": 100
+            }
+        }"#;
+
+        let config: Config = serde_json::from_str(json).unwrap();
+        assert_eq!(config.rate_limits.max_burst, 100);
+        // Should use default for refill_rate_per_sec
+        assert!((config.rate_limits.refill_rate_per_sec - 5.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn parse_full_config_with_rate_limits() {
+        let json = r#"{
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "_comment": "Test config",
+            "security": {
+                "allow_force_push": false,
+                "protected_branches": ["main"]
+            },
+            "logging": {
+                "level": "debug"
+            },
+            "timeouts": {
+                "request_timeout_secs": 120
+            },
+            "rate_limits": {
+                "max_burst": 30,
+                "refill_rate_per_sec": 8.0
+            }
+        }"#;
+
+        let config: Config = serde_json::from_str(json).unwrap();
+        assert!(config.validate().is_ok());
+        assert_eq!(config.rate_limits.max_burst, 30);
+        assert!((config.rate_limits.refill_rate_per_sec - 8.0).abs() < f64::EPSILON);
     }
 }

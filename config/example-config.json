@@ -17,5 +17,9 @@
     },
     "timeouts": {
         "request_timeout_secs": 300
+    },
+    "rate_limits": {
+        "max_burst": 20,
+        "refill_rate_per_sec": 5.0
     }
 }

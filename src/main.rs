@@ -124,6 +124,8 @@ fn main() -> ExitCode {
         protected_branches: cfg.security.protected_branches,
         repo_allowlist: cfg.security.repo_allowlist,
         repo_blocklist: cfg.security.repo_blocklist,
+        rate_limit_max_burst: cfg.rate_limits.max_burst,
+        rate_limit_refill_rate: cfg.rate_limits.refill_rate_per_sec,
     };
 
     info!(

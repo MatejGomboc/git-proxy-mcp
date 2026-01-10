@@ -211,6 +211,10 @@ pub struct SecurityConfig {
     pub repo_allowlist: Option<Vec<String>>,
     /// Repository blocklist.
     pub repo_blocklist: Option<Vec<String>>,
+    /// Rate limiting: maximum operations in a burst.
+    pub rate_limit_max_burst: u64,
+    /// Rate limiting: sustained operations per second.
+    pub rate_limit_refill_rate: f64,
 }
 
 /// The MCP server.
@@ -278,6 +282,16 @@ impl McpServer {
             }
         }
 
+        // Build rate limiter from config (0 means unlimited)
+        let rate_limiter = if security_config.rate_limit_max_burst == 0 {
+            RateLimiter::unlimited()
+        } else {
+            RateLimiter::new(
+                security_config.rate_limit_max_burst,
+                security_config.rate_limit_refill_rate,
+            )
+        };
+
         Self {
             state: ServerState::AwaitingInit,
             transport: StdioTransport::new(),
@@ -286,7 +300,7 @@ impl McpServer {
             branch_guard,
             push_guard,
             repo_filter,
-            rate_limiter: RateLimiter::default_for_ai(),
+            rate_limiter,
             audit_logger: Arc::new(audit_logger),
         }
     }
