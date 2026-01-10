@@ -415,6 +415,12 @@ strace -f -e write cargo run 2>&1 | grep -v /tmp
 - [x] Handle repos larger than available RAM (via multi-call protocol)
 - [x] Resume interrupted transfers (chunks can be requested in any order)
 - [x] Progress reporting (total_chunks, chunk_index, is_last)
+- [x] **Feature parity with Tier 1** — all filtering options supported:
+    - Binary file exclusion (`exclude_binary`)
+    - File size limits (`max_file_size`)
+    - LFS resolution (`resolve_lfs`)
+    - Submodule inclusion (`include_submodules`)
+- [x] Disk-backed storage for archives > 10MB (O(chunk) memory)
 
 **New tools:**
 
@@ -422,7 +428,7 @@ strace -f -e write cargo run 2>&1 | grep -v /tmp
 - `repo/clone_chunk` — Get chunk by index (base64 encoded)
 - `repo/clone_cancel` — Cancel session and free resources
 
-**Tier 2 is now production-ready!**
+**Tier 2 is now production-ready with full feature parity!**
 
 ---
 
