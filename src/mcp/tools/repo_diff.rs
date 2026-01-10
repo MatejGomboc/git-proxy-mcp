@@ -1,4 +1,4 @@
-//! Handler for the `repo/diff` MCP tool.
+//! Handler for the `repo_diff` MCP tool.
 //!
 //! This tool generates a unified diff between two commits from a remote
 //! repository. It's useful for reviewing changes without downloading the
@@ -27,7 +27,7 @@ use crate::git2_ops::auth::sanitize_url_for_logging;
 use crate::git2_ops::diff::{generate_diff, DiffStats};
 use crate::git2_ops::error::Git2Error;
 
-/// Arguments for the `repo/diff` tool.
+/// Arguments for the `repo_diff` tool.
 #[derive(Debug, Clone, Deserialize)]
 pub struct RepoDiffArgs {
     /// Repository URL (https:// or git@)
@@ -40,7 +40,7 @@ pub struct RepoDiffArgs {
     pub head_commit: String,
 }
 
-/// Result of a successful `repo/diff` operation.
+/// Result of a successful `repo_diff` operation.
 #[derive(Debug, Clone, Serialize)]
 pub struct RepoDiffResult {
     /// Unified diff output
@@ -56,7 +56,7 @@ pub struct RepoDiffResult {
     pub head_commit: String,
 }
 
-/// Error from repo/diff operation (safe for display).
+/// Error from `repo_diff` operation (safe for display).
 #[derive(Debug)]
 pub struct RepoDiffError {
     /// Error message (credential-safe)
@@ -77,7 +77,7 @@ impl From<Git2Error> for RepoDiffError {
     }
 }
 
-/// Handle the `repo/diff` tool call.
+/// Handle the `repo_diff` tool call.
 ///
 /// This function:
 /// 1. Validates the URL
@@ -113,7 +113,7 @@ pub fn handle_repo_diff(args: RepoDiffArgs) -> Result<RepoDiffResult, RepoDiffEr
         url = %sanitize_url_for_logging(&args.url),
         base = %args.base_commit,
         head = %args.head_commit,
-        "repo/diff tool called"
+        "repo_diff tool called"
     );
 
     let diff_result = generate_diff(&args.url, &args.base_commit, &args.head_commit)?;
@@ -122,7 +122,7 @@ pub fn handle_repo_diff(args: RepoDiffArgs) -> Result<RepoDiffResult, RepoDiffEr
         files = diff_result.stats.files_changed,
         insertions = diff_result.stats.insertions,
         deletions = diff_result.stats.deletions,
-        "repo/diff complete"
+        "repo_diff complete"
     );
 
     Ok(RepoDiffResult {

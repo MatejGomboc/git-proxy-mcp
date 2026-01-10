@@ -1,12 +1,12 @@
-//! Handler for the `repo/clone_chunk` MCP tool (Tier 2).
+//! Handler for the `repo_clone_chunk` MCP tool (Tier 2).
 //!
 //! This tool retrieves a chunk from a streaming session created by
-//! `repo/clone_start`. The AI calls this repeatedly to get all chunks.
+//! `repo_clone_start`. The AI calls this repeatedly to get all chunks.
 //!
 //! # Protocol
 //!
 //! ```text
-//! AI calls repo/clone_chunk with session_id and chunk_index
+//! AI calls repo_clone_chunk with session_id and chunk_index
 //! Server returns base64-encoded chunk data and is_last flag
 //! AI concatenates chunks client-side to reconstruct tar.gz
 //! Session auto-cleans after all chunks retrieved
@@ -23,17 +23,17 @@ use tracing::{debug, info};
 use crate::streaming::chunked::{StreamingError, StreamingSessionManager};
 use crate::streaming::tar::encode_base64;
 
-/// Arguments for the `repo/clone_chunk` tool.
+/// Arguments for the `repo_clone_chunk` tool.
 #[derive(Debug, Clone, Deserialize)]
 pub struct RepoCloneChunkArgs {
-    /// Session ID from `repo/clone_start`
+    /// Session ID from `repo_clone_start`
     pub session_id: String,
 
     /// Chunk index to retrieve (0-based)
     pub chunk_index: usize,
 }
 
-/// Result of a successful `repo/clone_chunk` operation.
+/// Result of a successful `repo_clone_chunk` operation.
 #[derive(Debug, Clone, Serialize)]
 pub struct RepoCloneChunkResult {
     /// Base64-encoded chunk data
@@ -49,7 +49,7 @@ pub struct RepoCloneChunkResult {
     pub is_last: bool,
 }
 
-/// Error from `repo/clone_chunk` operation (safe for display).
+/// Error from `repo_clone_chunk` operation (safe for display).
 #[derive(Debug)]
 pub struct RepoCloneChunkError {
     /// Error message (credential-safe)
@@ -70,7 +70,7 @@ impl From<StreamingError> for RepoCloneChunkError {
     }
 }
 
-/// Handle the `repo/clone_chunk` tool call.
+/// Handle the `repo_clone_chunk` tool call.
 ///
 /// This function:
 /// 1. Looks up the streaming session
@@ -106,7 +106,7 @@ pub fn handle_repo_clone_chunk(
     debug!(
         session_id = %args.session_id,
         chunk_index = args.chunk_index,
-        "repo/clone_chunk tool called"
+        "repo_clone_chunk tool called"
     );
 
     // Get the chunk from the session
@@ -120,7 +120,7 @@ pub fn handle_repo_clone_chunk(
         chunk_index = args.chunk_index,
         chunk_size = chunk.data.len(),
         is_last = chunk.is_last,
-        "repo/clone_chunk complete"
+        "repo_clone_chunk complete"
     );
 
     Ok(RepoCloneChunkResult {
@@ -131,21 +131,21 @@ pub fn handle_repo_clone_chunk(
     })
 }
 
-/// Arguments for the `repo/clone_cancel` tool (optional cleanup).
+/// Arguments for the `repo_clone_cancel` tool (optional cleanup).
 #[derive(Debug, Clone, Deserialize)]
 pub struct RepoCloneCancelArgs {
     /// Session ID to cancel
     pub session_id: String,
 }
 
-/// Result of a successful `repo/clone_cancel` operation.
+/// Result of a successful `repo_clone_cancel` operation.
 #[derive(Debug, Clone, Serialize)]
 pub struct RepoCloneCancelResult {
     /// Whether the session was found and cancelled
     pub cancelled: bool,
 }
 
-/// Handle the `repo/clone_cancel` tool call.
+/// Handle the `repo_clone_cancel` tool call.
 ///
 /// This allows the AI to explicitly cancel a streaming session
 /// if it no longer needs the data (e.g., user cancelled the operation).
@@ -162,7 +162,7 @@ pub fn handle_repo_clone_cancel(
 ) -> Result<RepoCloneCancelResult, RepoCloneChunkError> {
     info!(
         session_id = %args.session_id,
-        "repo/clone_cancel tool called"
+        "repo_clone_cancel tool called"
     );
 
     let cancelled = session_manager.cancel_session(&args.session_id)?;

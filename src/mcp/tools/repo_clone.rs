@@ -1,4 +1,4 @@
-//! Handler for the `repo/clone` MCP tool.
+//! Handler for the `repo_clone` MCP tool.
 //!
 //! This tool clones a repository and returns its contents as a base64-encoded
 //! tar.gz archive. The entire operation happens without writing source files
@@ -29,7 +29,7 @@ use crate::git2_ops::error::Git2Error;
 use crate::mcp::ProgressSender;
 use crate::streaming::tar::{create_tar_from_tree_with_options, encode_base64, TarOptions};
 
-/// Arguments for the `repo/clone` tool.
+/// Arguments for the `repo_clone` tool.
 #[derive(Debug, Clone, Deserialize)]
 pub struct RepoCloneArgs {
     /// Repository URL (https:// or git@)
@@ -69,7 +69,7 @@ pub struct RepoCloneArgs {
     pub include_submodules: Option<bool>,
 }
 
-/// Result of a successful `repo/clone` operation.
+/// Result of a successful `repo_clone` operation.
 #[derive(Debug, Clone, Serialize)]
 pub struct RepoCloneResult {
     /// Base64-encoded tar.gz archive of the repository
@@ -123,7 +123,7 @@ fn is_zero(n: &usize) -> bool {
     *n == 0
 }
 
-/// Error from repo/clone operation (safe for display).
+/// Error from `repo_clone` operation (safe for display).
 #[derive(Debug)]
 pub struct RepoCloneError {
     /// Error message (credential-safe)
@@ -144,7 +144,7 @@ impl From<Git2Error> for RepoCloneError {
     }
 }
 
-/// Handle the `repo/clone` tool call.
+/// Handle the `repo_clone` tool call.
 ///
 /// This function:
 /// 1. Validates the URL
@@ -176,7 +176,7 @@ pub fn handle_repo_clone(args: RepoCloneArgs) -> Result<RepoCloneResult, RepoClo
     handle_repo_clone_with_progress(args, None)
 }
 
-/// Handle the `repo/clone` tool call with optional progress reporting.
+/// Handle the `repo_clone` tool call with optional progress reporting.
 ///
 /// Same as [`handle_repo_clone`], but accepts an optional progress sender for
 /// real-time progress updates during long operations.
@@ -202,7 +202,7 @@ pub fn handle_repo_clone_with_progress(
     info!(
         url = %sanitize_url_for_logging(&args.url),
         branch = ?args.branch,
-        "repo/clone tool called"
+        "repo_clone tool called"
     );
 
     // Log info about optional features
@@ -290,7 +290,7 @@ pub fn handle_repo_clone_with_progress(
         branch = %fetch_result.branch,
         file_count = tar_result.file_count,
         archive_size = tar_result.data.len(),
-        "repo/clone complete"
+        "repo_clone complete"
     );
 
     Ok(RepoCloneResult {
