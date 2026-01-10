@@ -114,6 +114,9 @@ pub struct RepoCloneResult {
     /// Number of submodules that failed to fetch
     #[serde(skip_serializing_if = "is_zero")]
     pub submodules_failed: usize,
+
+    /// Hint for AI assistants on how to extract the archive
+    pub hint: String,
 }
 
 /// Helper for `skip_serializing_if` — skip if value is zero.
@@ -306,6 +309,7 @@ pub fn handle_repo_clone_with_progress(
         lfs_failed: tar_result.lfs_failed,
         submodules_included: tar_result.submodules_included,
         submodules_failed: tar_result.submodules_failed,
+        hint: "Use helper_script tool to get git_proxy_helper.py, then: python git_proxy_helper.py extract <result.json> <output_dir>".to_string(),
     })
 }
 
@@ -345,6 +349,7 @@ mod tests {
             lfs_failed: 0,
             submodules_included: 0,
             submodules_failed: 0,
+            hint: "test hint".to_string(),
         };
         let json = serde_json::to_string(&result).unwrap();
         assert!(json.contains("\"archive\":\"SGVsbG8=\""));
@@ -370,6 +375,7 @@ mod tests {
             lfs_failed: 0,
             submodules_included: 0,
             submodules_failed: 0,
+            hint: "test hint".to_string(),
         };
         let json = serde_json::to_string(&result).unwrap();
         assert!(json.contains("\"skipped_by_filter\":5"));
@@ -392,6 +398,7 @@ mod tests {
             lfs_failed: 1,
             submodules_included: 0,
             submodules_failed: 0,
+            hint: "test hint".to_string(),
         };
         let json = serde_json::to_string(&result).unwrap();
         assert!(json.contains("\"lfs_resolved\":3"));
@@ -413,6 +420,7 @@ mod tests {
             lfs_failed: 0,
             submodules_included: 2,
             submodules_failed: 1,
+            hint: "test hint".to_string(),
         };
         let json = serde_json::to_string(&result).unwrap();
         assert!(json.contains("\"submodules_included\":2"));

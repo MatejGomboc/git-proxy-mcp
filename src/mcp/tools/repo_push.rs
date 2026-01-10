@@ -58,6 +58,9 @@ pub struct RepoPushResult {
 
     /// Remote URL (sanitized)
     pub remote_url: String,
+
+    /// Hint for AI assistants on how to create bundles
+    pub hint: String,
 }
 
 /// Error from `repo_push` operation (safe for display).
@@ -146,6 +149,7 @@ pub fn handle_repo_push(args: RepoPushArgs) -> Result<RepoPushResult, RepoPushEr
         commit: result.commit,
         force: args.force,
         remote_url: sanitize_url_for_logging(&args.url),
+        hint: "To create a bundle: use helper_script tool, then: python git_proxy_helper.py bundle <repo_dir> <since_commit>".to_string(),
     })
 }
 
@@ -185,6 +189,7 @@ mod tests {
             commit: "abc123".to_string(),
             force: false,
             remote_url: "https://github.com/owner/repo.git".to_string(),
+            hint: "test hint".to_string(),
         };
         let json = serde_json::to_string(&result).unwrap();
         assert!(json.contains("\"branch\":\"main\""));

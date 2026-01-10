@@ -632,15 +632,32 @@ impl McpServer {
     #[allow(clippy::too_many_lines)] // Tool definitions are naturally verbose
     fn get_tool_definitions() -> Vec<ToolDefinition> {
         vec![
+            // IMPORTANT: Helper script should be first so AI discovers it
+            ToolDefinition {
+                name: "helper_script".to_string(),
+                description: Some(
+                    "**CALL THIS FIRST** before using repo_clone, repo_pull, or repo_push. \
+                     Returns a Python helper script that handles JSON parsing, base64 decoding, \
+                     and archive extraction automatically. Save it as git_proxy_helper.py and use: \
+                     'python git_proxy_helper.py extract <result.json> <dir>' for clone/pull, \
+                     'python git_proxy_helper.py bundle <repo> <commit>' for push."
+                        .to_string(),
+                ),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }),
+            },
             // Tier 1: Stream repository as tar.gz
             ToolDefinition {
                 name: "repo_clone".to_string(),
                 description: Some(
                     "Clone a repository and return it as a base64-encoded tar.gz archive. \
-                     The repository is fetched using your local Git credentials (SSH agent or \
-                     credential helpers) but no source files are written to your disk. \
-                     Use this to get a complete repository snapshot that can be extracted \
-                     on the AI's VM."
+                     **Tip:** Use helper_script first to get a Python script that handles \
+                     extraction automatically. The repository is fetched using your local Git \
+                     credentials (SSH agent or credential helpers) but no source files are \
+                     written to your disk."
                         .to_string(),
                 ),
                 input_schema: json!({
@@ -874,22 +891,6 @@ impl McpServer {
                         }
                     },
                     "required": ["url", "branch", "since_commit"]
-                }),
-            },
-            // Utility: Helper script for AI assistants
-            ToolDefinition {
-                name: "helper_script".to_string(),
-                description: Some(
-                    "Get a Python helper script that simplifies working with git-proxy-mcp. \
-                     The script handles JSON parsing, base64 decoding, and archive extraction \
-                     automatically. Save it once per session and use for all operations. \
-                     Commands: extract (for clone/pull results), bundle (for push), info (metadata)."
-                        .to_string(),
-                ),
-                input_schema: json!({
-                    "type": "object",
-                    "properties": {},
-                    "required": []
                 }),
             },
         ]
