@@ -189,10 +189,9 @@ jobs:
                 VERSION="${{ needs.validate.outputs.version }}"
 
                 # Extract release notes for this version from CHANGELOG.md
-                # Uses awk to handle both mid-file and end-of-file sections
-                # Note: brackets must be escaped in awk regex
-                awk -v ver="## \\[${VERSION}\\]" '
-                    $0 ~ ver { found=1; next }
+                # Uses awk with index() for literal string matching (avoids regex escaping issues)
+                awk -v ver="## [${VERSION}]" '
+                    index($0, ver) == 1 { found=1; next }
                     found && /^## \[/ { exit }
                     found { print }
                 ' CHANGELOG.md > release_notes.md
