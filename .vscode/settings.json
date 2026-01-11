@@ -3,7 +3,9 @@
     "editor.tabSize": 4,
     "editor.trimAutoWhitespace": true,
     "editor.formatOnSave": true,
-    "editor.rulers": [170],
+    "editor.rulers": [
+        170
+    ],
     "files.trimTrailingWhitespace": true,
     "files.insertFinalNewline": true,
     "files.encoding": "utf8",
@@ -26,11 +28,9 @@
         "editor.defaultFormatter": "vscode.json-language-features"
     },
     "[yaml]": {
-        "editor.tabSize": 4,
         "editor.formatOnSave": false
     },
     "[github-actions-workflow]": {
-        "editor.tabSize": 4,
         "editor.formatOnSave": false
     },
     "rust-analyzer.check.command": "clippy",

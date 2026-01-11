@@ -23,13 +23,13 @@ jobs:
             - name: Install Rust toolchain
               uses: dtolnay/rust-toolchain@stable
               with:
-                  components: rustfmt
+                components: rustfmt
 
             - name: Setup Node.js
               id: setup-node
               uses: actions/setup-node@v6
               with:
-                  node-version: "lts/*"
+                node-version: "lts/*"
 
             - name: Get markdownlint-cli2 version
               id: mdlint-version
@@ -39,8 +39,8 @@ jobs:
             - name: Restore npm cache
               uses: actions/cache/restore@v5
               with:
-                  path: ~/.npm
-                  key: npm-markdownlint-${{ runner.os }}-node-${{ steps.setup-node.outputs.node-version }}-mdlint-${{ steps.mdlint-version.outputs.version }}
+                path: ~/.npm
+                key: npm-markdownlint-${{ runner.os }}-node-${{ steps.setup-node.outputs.node-version }}-mdlint-${{ steps.mdlint-version.outputs.version }}
 
             - name: Install markdownlint-cli2
               run: npm install -g markdownlint-cli2
@@ -54,7 +54,7 @@ jobs:
             - name: Check documentation
               run: cargo doc --no-deps --document-private-items
               env:
-                  RUSTDOCFLAGS: "-Dwarnings"
+                RUSTDOCFLAGS: "-Dwarnings"
 
     build:
         name: Build (${{ matrix.os }})
@@ -75,7 +75,7 @@ jobs:
             - name: Install Rust toolchain
               uses: dtolnay/rust-toolchain@stable
               with:
-                  components: clippy
+                components: clippy
 
             - name: Get Rust version
               id: rust-version
@@ -93,24 +93,24 @@ jobs:
             - name: Restore Rust cache
               uses: actions/cache/restore@v5
               with:
-                  path: |
-                      ~/.cargo/bin/
-                      ~/.cargo/registry/index/
-                      ~/.cargo/registry/cache/
-                      ~/.cargo/git/db/
-                      target/.rustc_info.json
-                      target/.cargo-lock
-                      target/debug/deps/
-                      target/debug/build/
-                      target/debug/.fingerprint/
-                      target/debug/incremental/
-                      target/release/deps/
-                      target/release/build/
-                      target/release/.fingerprint/
-                      target/release/incremental/
-                  key: rust-${{ runner.os }}-${{ steps.rust-version.outputs.version }}-${{ hashFiles('**/Cargo.lock') }}
-                  restore-keys: |
-                      rust-${{ runner.os }}-${{ steps.rust-version.outputs.version }}-
+                path: |
+                    ~/.cargo/bin/
+                    ~/.cargo/registry/index/
+                    ~/.cargo/registry/cache/
+                    ~/.cargo/git/db/
+                    target/.rustc_info.json
+                    target/.cargo-lock
+                    target/debug/deps/
+                    target/debug/build/
+                    target/debug/.fingerprint/
+                    target/debug/incremental/
+                    target/release/deps/
+                    target/release/build/
+                    target/release/.fingerprint/
+                    target/release/incremental/
+                key: rust-${{ runner.os }}-${{ steps.rust-version.outputs.version }}-${{ hashFiles('**/Cargo.lock') }}
+                restore-keys: |
+                    rust-${{ runner.os }}-${{ steps.rust-version.outputs.version }}-
 
             - name: Run Clippy
               run: cargo clippy --all-targets --all-features -- -D warnings

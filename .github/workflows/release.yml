@@ -110,7 +110,7 @@ jobs:
             - name: Install Rust toolchain
               uses: dtolnay/rust-toolchain@stable
               with:
-                  targets: ${{ matrix.target }}
+                targets: ${{ matrix.target }}
 
             # No caching for release builds - they're one-off events triggered by
             # version tags, so caches would never be reused and just waste storage
@@ -149,17 +149,17 @@ jobs:
               if: runner.os != 'Windows'
               uses: actions/upload-artifact@v6
               with:
-                  name: ${{ matrix.artifact }}
-                  path: ${{ matrix.artifact }}.tar.gz
-                  retention-days: 1
+                name: ${{ matrix.artifact }}
+                path: ${{ matrix.artifact }}.tar.gz
+                retention-days: 1
 
             - name: Upload artifact (Windows)
               if: runner.os == 'Windows'
               uses: actions/upload-artifact@v6
               with:
-                  name: ${{ matrix.artifact }}
-                  path: ${{ matrix.artifact }}.zip
-                  retention-days: 1
+                name: ${{ matrix.artifact }}
+                path: ${{ matrix.artifact }}.zip
+                retention-days: 1
 
     release:
         name: Create Release
@@ -173,7 +173,7 @@ jobs:
             - name: Download all artifacts
               uses: actions/download-artifact@v7
               with:
-                  path: artifacts
+                path: artifacts
 
             - name: List artifacts
               run: find artifacts -type f
@@ -189,9 +189,9 @@ jobs:
             - name: Attest build provenance
               uses: actions/attest-build-provenance@v2
               with:
-                  subject-path: |
-                      artifacts/*.tar.gz
-                      artifacts/*.zip
+                subject-path: |
+                    artifacts/*.tar.gz
+                    artifacts/*.zip
 
             - name: Extract release notes from CHANGELOG
               id: release-notes
@@ -224,15 +224,15 @@ jobs:
             - name: Create GitHub Release
               uses: softprops/action-gh-release@v2
               with:
-                  tag_name: ${{ needs.validate.outputs.tag }}
-                  name: ${{ needs.validate.outputs.tag }}
-                  body_path: release_notes.md
-                  draft: false
-                  prerelease: ${{ contains(needs.validate.outputs.version, '-') }}
-                  make_latest: true
-                  files: |
-                      artifacts/*.tar.gz
-                      artifacts/*.zip
-                      artifacts/SHA256SUMS.txt
+                tag_name: ${{ needs.validate.outputs.tag }}
+                name: ${{ needs.validate.outputs.tag }}
+                body_path: release_notes.md
+                draft: false
+                prerelease: ${{ contains(needs.validate.outputs.version, '-') }}
+                make_latest: true
+                files: |
+                    artifacts/*.tar.gz
+                    artifacts/*.zip
+                    artifacts/SHA256SUMS.txt
               env:
-                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

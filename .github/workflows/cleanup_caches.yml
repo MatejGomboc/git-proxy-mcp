@@ -26,8 +26,8 @@ jobs:
             - name: Run cleanup script
               uses: actions/github-script@v8
               env:
-                  INPUT_DRY_RUN: ${{ inputs.dry_run || false }}
+                INPUT_DRY_RUN: ${{ inputs.dry_run || false }}
               with:
-                  script: |
-                      const cleanupScript = require('./.github/scripts/cleanup-caches.js');
-                      await cleanupScript({ github, context, core });
+                script: |
+                    const cleanupScript = require('./.github/scripts/cleanup-caches.js');
+                    await cleanupScript({ github, context, core });
