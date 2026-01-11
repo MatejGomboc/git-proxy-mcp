@@ -103,6 +103,20 @@ jobs:
               run: cargo build
 ```
 
+### List Item Indentation
+
+For list items (`-`), nested content uses **4 spaces from the `-` column**, not from the property column:
+
+```yaml
+updates:
+    - package-ecosystem: "github-actions"
+      directory: "/"
+      schedule:
+        interval: "daily"
+```
+
+Here, `interval:` is 4 spaces from the `-` (at column 4), resulting in 8 total spaces.
+
 ### Multi-line Scripts (`run: |`)
 
 Use **4 spaces from the `-` column** for shell script content inside `run: |` blocks. This provides clear visual separation between YAML structure and shell commands.
@@ -217,4 +231,4 @@ See `CONTRIBUTING.md` § British Spelling for the full reference table.
 
 ---
 
-*Last updated: 2026-01-10*
+*Last updated: 2026-01-11*
