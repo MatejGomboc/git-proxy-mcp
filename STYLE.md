@@ -87,7 +87,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 
 ### Indentation
 
-**4 spaces** — aligned with project-wide convention.
+**4 spaces** for structure levels — aligned with project-wide convention.
 
 ```yaml
 jobs:
@@ -103,9 +103,30 @@ jobs:
               run: cargo build
 ```
 
+### List Item Indentation
+
+List items use **2-space continuation** from the `-` character (standard YAML behaviour):
+
+```yaml
+updates:
+    - package-ecosystem: "github-actions"
+      directory: "/"
+      schedule:
+        interval: "daily"
+```
+
+**Column breakdown:**
+
+| Element | Column | Explanation |
+|---------|--------|-------------|
+| `-` | 4 | Structure level (4 spaces from `updates:`) |
+| `package-ecosystem:` | 6 | 2 spaces from `-` |
+| `schedule:` | 6 | 2 spaces from `-` |
+| `interval:` | 8 | 2 spaces from `schedule:` (nested map) |
+
 ### Multi-line Scripts (`run: |`)
 
-Use **4 spaces from the `-` column** for shell script content inside `run: |` blocks. This provides clear visual separation between YAML structure and shell commands.
+Shell script content inside `run: |` blocks uses **4-space indentation** for shell constructs (if/else, loops):
 
 ```yaml
             - name: Example step
@@ -118,12 +139,30 @@ Use **4 spaces from the `-` column** for shell script content inside `run: |` bl
                 fi
 ```
 
+### Nested Maps in Steps
+
+Properties within a step use 2-space continuation from `-`. Nested maps (like `with:` contents) use additional 2-space increments:
+
+```yaml
+            - name: Setup Node.js
+              uses: actions/setup-node@v6
+              with:
+                node-version: "lts/*"
+```
+
 ### Structure
 
 - Blank line between top-level keys (`on`, `env`, `jobs`)
 - Blank line between jobs
 - Blank line before `steps:` in complex jobs
 - Comments on their own line, not inline
+
+### Formatter
+
+**Format-on-save is disabled** for YAML files in VS Code (configured in `.vscode/settings.json`).
+
+The Red Hat YAML extension cannot be configured for our mixed indentation style (4-space structure levels +
+2-space list continuation). Format YAML files manually.
 
 ---
 
@@ -217,4 +256,4 @@ See `CONTRIBUTING.md` § British Spelling for the full reference table.
 
 ---
 
-*Last updated: 2026-01-10*
+*Last updated: 2026-01-11*

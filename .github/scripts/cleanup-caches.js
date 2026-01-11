@@ -6,7 +6,7 @@
  */
 
 module.exports = async ({ github, context, core }) => {
-    const dryRun = process.env.INPUT_DRY_RUN === 'true';
+    const dryRun = process.env.INPUT_DRY_RUN === "true";
     const owner = context.repo.owner;
     const repo = context.repo.repo;
 
@@ -18,11 +18,11 @@ module.exports = async ({ github, context, core }) => {
     };
 
     function formatBytes(bytes) {
-        if (bytes === 0) return '0 B';
+        if (bytes === 0) return "0 B";
         const k = 1024;
-        const sizes = ['B', 'KB', 'MB', 'GB'];
+        const sizes = ["B", "KB", "MB", "GB"];
         const i = Math.floor(Math.log(bytes) / Math.log(k));
-        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
     }
 
     function getDaysSinceAccess(cache) {
@@ -31,11 +31,11 @@ module.exports = async ({ github, context, core }) => {
         return Math.floor((now - lastAccessed) / (1000 * 60 * 60 * 24));
     }
 
-    function log(message, level = 'info') {
-        const prefix = dryRun ? '[DRY-RUN] ' : '';
-        if (level === 'error') {
+    function log(message, level = "info") {
+        const prefix = dryRun ? "[DRY-RUN] " : "";
+        if (level === "error") {
             core.error(`${prefix}${message}`);
-        } else if (level === 'warning') {
+        } else if (level === "warning") {
             core.warning(`${prefix}${message}`);
         } else {
             core.info(`${prefix}${message}`);
@@ -61,7 +61,7 @@ module.exports = async ({ github, context, core }) => {
                 page++;
             } catch (error) {
                 if (error.status === 404) {
-                    log('No caches found', 'warning');
+                    log("No caches found", "warning");
                     break;
                 }
                 throw error;
@@ -88,31 +88,31 @@ module.exports = async ({ github, context, core }) => {
             stats.freedBytes += cache.size_in_bytes;
             return true;
         } catch (error) {
-            log(`  Failed to delete ${cache.key}: ${error.message}`, 'error');
+            log(`  Failed to delete ${cache.key}: ${error.message}`, "error");
             stats.errors++;
             return false;
         }
     }
 
     try {
-        log('='.repeat(60));
-        log('GitHub Actions Cache Cleanup');
-        log('='.repeat(60));
-        log('');
+        log("=".repeat(60));
+        log("GitHub Actions Cache Cleanup");
+        log("=".repeat(60));
+        log("");
         log(`Repository:   ${owner}/${repo}`);
         log(`Dry run:      ${dryRun}`);
-        log('');
+        log("");
 
         const caches = await listAllCaches();
         stats.totalCaches = caches.length;
 
         if (caches.length === 0) {
-            log('No caches found.');
+            log("No caches found.");
             return;
         }
 
         log(`Found ${caches.length} cache(s).`);
-        log('');
+        log("");
 
         // Group caches by type and OS
         // Rust caches: rust-{OS}-{rustc-hash}-{cargo-lock-hash}
@@ -120,13 +120,13 @@ module.exports = async ({ github, context, core }) => {
         const cacheGroups = {};
         for (const cache of caches) {
             let prefix;
-            if (cache.key.startsWith('rust-')) {
+            if (cache.key.startsWith("rust-")) {
                 // Group by rust-{OS} (e.g., rust-Linux, rust-Windows, rust-macOS)
-                const parts = cache.key.split('-');
+                const parts = cache.key.split("-");
                 prefix = `${parts[0]}-${parts[1]}`;
-            } else if (cache.key.startsWith('npm-markdownlint-')) {
+            } else if (cache.key.startsWith("npm-markdownlint-")) {
                 // Group by npm-markdownlint-{OS} (e.g., npm-markdownlint-Linux)
-                const parts = cache.key.split('-');
+                const parts = cache.key.split("-");
                 prefix = `${parts[0]}-${parts[1]}-${parts[2]}`;
             } else {
                 // Unknown cache type, use full key as prefix (won't group)
@@ -141,9 +141,7 @@ module.exports = async ({ github, context, core }) => {
 
         for (const [prefix, groupCaches] of Object.entries(cacheGroups)) {
             // Sort by last_accessed_at descending (most recent first)
-            groupCaches.sort((a, b) =>
-                new Date(b.last_accessed_at) - new Date(a.last_accessed_at)
-            );
+            groupCaches.sort((a, b) => new Date(b.last_accessed_at) - new Date(a.last_accessed_at));
 
             log(`Group: ${prefix} (${groupCaches.length} cache(s))`);
 
@@ -161,30 +159,29 @@ module.exports = async ({ github, context, core }) => {
             }
         }
 
-        log('');
-        log('='.repeat(60));
-        log('Summary');
-        log('='.repeat(60));
+        log("");
+        log("=".repeat(60));
+        log("Summary");
+        log("=".repeat(60));
         log(`  Total caches:  ${stats.totalCaches}`);
         log(`  Deleted:       ${stats.deletedCaches}`);
         log(`  Kept:          ${stats.totalCaches - stats.deletedCaches}`);
         log(`  Space freed:   ${formatBytes(stats.freedBytes)}`);
 
         if (stats.errors > 0) {
-            log(`  Errors:        ${stats.errors}`, 'warning');
+            log(`  Errors:        ${stats.errors}`, "warning");
         }
 
         if (dryRun) {
-            log('');
-            log('Dry run - no caches were actually deleted.', 'warning');
+            log("");
+            log("Dry run - no caches were actually deleted.", "warning");
         }
 
-        core.setOutput('deleted_count', stats.deletedCaches);
-        core.setOutput('freed_bytes', stats.freedBytes);
+        core.setOutput("deleted_count", stats.deletedCaches);
+        core.setOutput("freed_bytes", stats.freedBytes);
 
-        log('');
-        log('Cleanup completed');
-
+        log("");
+        log("Cleanup completed");
     } catch (error) {
         core.setFailed(`Cleanup failed: ${error.message}`);
         throw error;

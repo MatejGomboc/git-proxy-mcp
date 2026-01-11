@@ -3,7 +3,9 @@
     "editor.tabSize": 4,
     "editor.trimAutoWhitespace": true,
     "editor.formatOnSave": true,
-    "editor.rulers": [170],
+    "editor.rulers": [
+        170
+    ],
     "files.trimTrailingWhitespace": true,
     "files.insertFinalNewline": true,
     "files.encoding": "utf8",
@@ -26,16 +28,15 @@
         "editor.defaultFormatter": "vscode.json-language-features"
     },
     "[yaml]": {
-        "editor.defaultFormatter": "redhat.vscode-yaml"
+        "editor.formatOnSave": false
     },
     "[github-actions-workflow]": {
-        "editor.defaultFormatter": "redhat.vscode-yaml"
+        "editor.formatOnSave": false
     },
     "rust-analyzer.check.command": "clippy",
     "rust-analyzer.cargo.features": "all",
     "rust-analyzer.inlayHints.parameterHints.enable": true,
     "rust-analyzer.inlayHints.typeHints.enable": true,
     "rust-analyzer.lens.enable": true,
-    "yaml.format.printWidth": 170,
     "evenBetterToml.formatter.columnWidth": 170
 }
