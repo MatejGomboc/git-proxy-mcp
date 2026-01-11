@@ -199,40 +199,50 @@ jobs:
               run: |
                 VERSION="${{ needs.validate.outputs.version }}"
 
-                # Try to extract notes for this version from CHANGELOG.md
-                # Look for ## [version] or ## version header
-                if grep -q "## \[${VERSION}\]" CHANGELOG.md || grep -q "## ${VERSION}" CHANGELOG.md; then
-                    # Extract content between this version header and the next
-                    sed -n "/## \[${VERSION}\]/,/## \[/p" CHANGELOG.md | sed '$d' > release_notes.md || \
-                    sed -n "/## ${VERSION}/,/## /p" CHANGELOG.md | sed '$d' > release_notes.md
+                # Extract release notes for this version from CHANGELOG.md
+                # Uses awk to handle both mid-file and end-of-file sections
+                awk -v ver="## [${VERSION}]" '
+                    $0 ~ ver { found=1; next }
+                    found && /^## \[/ { exit }
+                    found { print }
+                ' CHANGELOG.md > release_notes.md
 
-                    if [[ -s release_notes.md ]]; then
-                        echo "Found release notes in CHANGELOG.md"
-                    else
-                        echo "No specific release notes found, using default"
-                        echo "Release ${VERSION}" > release_notes.md
-                    fi
+                # Trim leading/trailing blank lines
+                sed -i '/./,$!d' release_notes.md
+                sed -i ':a;/^[[:space:]]*$/{$d;N;ba}' release_notes.md
+
+                if [[ -s release_notes.md ]]; then
+                    echo "Found release notes in CHANGELOG.md:"
                 else
                     echo "No CHANGELOG entry for ${VERSION}, using default"
                     echo "Release ${VERSION}" > release_notes.md
                 fi
 
-                echo ""
                 echo "--- Release Notes ---"
                 cat release_notes.md
 
             - name: Create GitHub Release
-              uses: softprops/action-gh-release@v2
-              with:
-                tag_name: ${{ needs.validate.outputs.tag }}
-                name: ${{ needs.validate.outputs.tag }}
-                body_path: release_notes.md
-                draft: false
-                prerelease: ${{ contains(needs.validate.outputs.version, '-') }}
-                make_latest: true
-                files: |
-                    artifacts/*.tar.gz
-                    artifacts/*.zip
-                    artifacts/SHA256SUMS.txt
+              shell: bash
               env:
-                GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: |
+                TAG="${{ needs.validate.outputs.tag }}"
+                VERSION="${{ needs.validate.outputs.version }}"
+
+                # Determine if this is a prerelease
+                PRERELEASE_FLAG=""
+                if [[ "$VERSION" == *-* ]]; then
+                    PRERELEASE_FLAG="--prerelease"
+                fi
+
+                # Create the release with gh CLI (more reliable than third-party actions)
+                gh release create "$TAG" \
+                    --title "$TAG" \
+                    --notes-file release_notes.md \
+                    --latest \
+                    $PRERELEASE_FLAG \
+                    artifacts/*.tar.gz \
+                    artifacts/*.zip \
+                    artifacts/SHA256SUMS.txt
+
+                echo "Release created: $TAG"
