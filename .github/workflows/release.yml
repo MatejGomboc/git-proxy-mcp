@@ -190,7 +190,8 @@ jobs:
 
                 # Extract release notes for this version from CHANGELOG.md
                 # Uses awk to handle both mid-file and end-of-file sections
-                awk -v ver="## [${VERSION}]" '
+                # Note: brackets must be escaped in awk regex
+                awk -v ver="## \\[${VERSION}\\]" '
                     $0 ~ ver { found=1; next }
                     found && /^## \[/ { exit }
                     found { print }
