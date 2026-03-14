@@ -480,6 +480,7 @@ pub fn create_tar_from_tree_with_options(
                     proxy_url.as_deref(),
                     sub_cfg.max_depth,
                     sub_cfg.max_failures,
+                    sub_cfg.max_concurrent,
                     &sub_filter,
                 ) {
                     Ok(submodules) => {

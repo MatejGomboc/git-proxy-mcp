@@ -88,7 +88,7 @@ src/
 │   ├── diff.rs         # Commit comparison
 │   ├── refs.rs         # Remote ref listing
 │   ├── lfs.rs          # Git LFS support (retry, progress, size limits)
-│   └── submodule.rs    # Submodule recursive fetch, filtering, cycle detection
+│   └── submodule.rs    # Submodule recursive fetch, filtering, parallel, cycle detection
 ├── streaming/          # Transfer formats
 │   ├── mod.rs          # Module exports
 │   ├── tar.rs          # Tree → tar.gz (in memory)
