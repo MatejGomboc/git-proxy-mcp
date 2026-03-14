@@ -79,9 +79,13 @@ pub struct TarOptions {
     /// When `None`, defaults are used.
     pub lfs_config: Option<LfsConfig>,
 
-    /// Optional submodule configuration (depth, filtering, failure limits).
+    /// Optional submodule configuration (filtering, failure limits).
     /// When `None`, defaults are used.
     pub submodule_config: Option<SubmoduleConfig>,
+
+    /// Submodule recursion depth.
+    /// `None` = unlimited (git default). `0` = skip submodules.
+    pub submodule_depth: Option<u32>,
 }
 
 /// Compiled sparse patterns for efficient matching.
@@ -461,11 +465,12 @@ pub fn create_tar_from_tree_with_options(
         })
         .map_err(|e| Git2Error::Git2(format!("tree walk failed: {e}")))?;
 
-        // Process submodules if enabled (max_depth=0 means skip submodules)
+        // Process submodules if enabled (submodule_depth=0 means skip submodules)
         if include_submodules {
             let sub_cfg = options.submodule_config.unwrap_or_default();
+            let depth = options.submodule_depth.unwrap_or(u32::MAX);
 
-            if sub_cfg.max_depth == 0 {
+            if depth == 0 {
                 debug!("submodule_depth=0, skipping submodule fetching");
             } else {
                 debug!("fetching submodules");
@@ -478,7 +483,7 @@ pub fn create_tar_from_tree_with_options(
                     repo,
                     commit_id,
                     proxy_url.as_deref(),
-                    sub_cfg.max_depth,
+                    depth,
                     sub_cfg.max_failures,
                     sub_cfg.max_concurrent,
                     &sub_filter,
