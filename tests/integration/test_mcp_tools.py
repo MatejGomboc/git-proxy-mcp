@@ -444,9 +444,12 @@ def test_repo_push(client, runner, refs_content):
             cwd=repo_dir, capture_output=True, text=True, check=True,
         )
 
-        # Read and base64-encode the bundle.
+        # Verify bundle was created and read it.
         with open(bundle_path, "rb") as f:
-            bundle_b64 = base64.b64encode(f.read()).decode("ascii")
+            bundle_bytes = f.read()
+        print(f"  Bundle size: {len(bundle_bytes)} bytes")
+        print(f"  Bundle header: {bundle_bytes[:30]}")
+        bundle_b64 = base64.b64encode(bundle_bytes).decode("ascii")
 
     except subprocess.CalledProcessError as e:
         print(f"  SKIP: failed to create bundle: {e.stderr}")
