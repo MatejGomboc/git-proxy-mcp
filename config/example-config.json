@@ -25,5 +25,9 @@
     "rate_limits": {
         "max_burst": 20,
         "refill_rate_per_sec": 5.0
+    },
+    "proxy": {
+        "url": null,
+        "no_proxy": null
     }
 }

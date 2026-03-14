@@ -77,6 +77,7 @@ pub fn push_bundle(
     bundle_data: &[u8],
     remote_url: &str,
     options: PushOptions2,
+    proxy_url: Option<&str>,
 ) -> Result<PushResult, Git2Error> {
     // Validate URL
     validate_url(remote_url)?;
@@ -121,7 +122,7 @@ pub fn push_bundle(
     debug!(commit = %commit_id, "found commit to push");
 
     // Push to remote
-    push_to_remote(&repo, remote_url, &options.branch, options.force)?;
+    push_to_remote(&repo, remote_url, &options.branch, options.force, proxy_url)?;
 
     info!(
         commit = %commit_id,
@@ -167,6 +168,7 @@ fn push_to_remote(
     remote_url: &str,
     branch: &str,
     force: bool,
+    proxy_url: Option<&str>,
 ) -> Result<(), Git2Error> {
     debug!(
         url = %super::auth::sanitize_url_for_logging(remote_url),
@@ -183,6 +185,14 @@ fn push_to_remote(
 
     let mut push_opts = PushOptions::new();
     push_opts.remote_callbacks(callbacks);
+
+    let mut proxy_opts = git2::ProxyOptions::new();
+    if let Some(url) = proxy_url {
+        proxy_opts.url(url);
+    } else {
+        proxy_opts.auto();
+    }
+    push_opts.proxy_options(proxy_opts);
 
     // Build refspec
     let refspec = if force {

@@ -65,6 +65,12 @@ pub struct TarOptions {
     /// at their respective paths in the archive.
     pub include_submodules: Option<bool>,
 
+    /// Optional proxy URL for network operations (None = auto-detect from environment).
+    pub proxy_url: Option<String>,
+
+    /// Comma-separated list of hosts that should bypass the proxy.
+    pub no_proxy: Option<String>,
+
     /// Optional progress sender for real-time updates during tar creation.
     pub progress: Option<ProgressSender>,
 }
@@ -271,7 +277,12 @@ pub fn create_tar_from_tree_with_options(
     // Create LFS client if needed
     let lfs_client = if resolve_lfs {
         if let Some(ref url) = options.repo_url {
-            match LfsClient::new(url, options.lfs_credentials.clone()) {
+            match LfsClient::new(
+                url,
+                options.lfs_credentials.clone(),
+                options.proxy_url.as_deref(),
+                options.no_proxy.as_deref(),
+            ) {
                 Ok(client) => Some(client),
                 Err(e) => {
                     warn!(error = %e, "failed to create LFS client, LFS files won't be resolved");
@@ -288,6 +299,9 @@ pub fn create_tar_from_tree_with_options(
 
     // Get submodule option
     let include_submodules = options.include_submodules.unwrap_or(false);
+
+    // Get proxy URL for submodule fetching
+    let proxy_url = options.proxy_url;
 
     // Get progress sender (moved, not cloned - caller no longer needs it)
     let progress = options.progress;
@@ -436,7 +450,7 @@ pub fn create_tar_from_tree_with_options(
         // Process submodules if enabled
         if include_submodules {
             debug!("fetching submodules");
-            match fetch_all_submodules(repo, commit_id) {
+            match fetch_all_submodules(repo, commit_id, proxy_url.as_deref()) {
                 Ok(submodules) => {
                     let total_submodules = submodules.len();
                     let mut processed_submodules = 0usize;

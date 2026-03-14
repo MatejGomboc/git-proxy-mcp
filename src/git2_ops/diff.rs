@@ -81,6 +81,7 @@ pub fn generate_diff(
     url: &str,
     base_commit: &str,
     head_commit: &str,
+    proxy_url: Option<&str>,
 ) -> Result<DiffResult, Git2Error> {
     info!(
         url = %sanitize_url_for_logging(url),
@@ -111,6 +112,14 @@ pub fn generate_diff(
         let callbacks = create_callbacks();
         let mut fetch_opts = FetchOptions::new();
         fetch_opts.remote_callbacks(callbacks);
+
+        let mut proxy_opts = git2::ProxyOptions::new();
+        if let Some(url) = proxy_url {
+            proxy_opts.url(url);
+        } else {
+            proxy_opts.auto();
+        }
+        fetch_opts.proxy_options(proxy_opts);
 
         debug!("fetching repository");
 
@@ -295,13 +304,13 @@ mod tests {
 
     #[test]
     fn generate_diff_rejects_invalid_url() {
-        let result = generate_diff("/invalid/path", "abc", "def");
+        let result = generate_diff("/invalid/path", "abc", "def", None);
         assert!(result.is_err());
     }
 
     #[test]
     fn generate_diff_rejects_file_url() {
-        let result = generate_diff("file:///etc/passwd", "abc", "def");
+        let result = generate_diff("file:///etc/passwd", "abc", "def", None);
         assert!(result.is_err());
     }
 }

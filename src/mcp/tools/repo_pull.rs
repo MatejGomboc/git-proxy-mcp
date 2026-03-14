@@ -31,6 +31,7 @@
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
+use crate::config::ProxyConfig;
 use crate::git2_ops::auth::sanitize_url_for_logging;
 use crate::git2_ops::error::Git2Error;
 use crate::git2_ops::pull::{pull_changes, ChangedFile, PullStats};
@@ -131,7 +132,10 @@ impl From<Git2Error> for RepoPullError {
 /// - Temporary bare repo is cleaned up after operation
 /// - Only diff text, file archive, and metadata are returned
 #[allow(clippy::needless_pass_by_value)] // Consistent with other handlers
-pub fn handle_repo_pull(args: RepoPullArgs) -> Result<RepoPullResult, RepoPullError> {
+pub fn handle_repo_pull(
+    args: RepoPullArgs,
+    proxy_config: &ProxyConfig,
+) -> Result<RepoPullResult, RepoPullError> {
     info!(
         url = %sanitize_url_for_logging(&args.url),
         branch = %args.branch,
@@ -139,7 +143,12 @@ pub fn handle_repo_pull(args: RepoPullArgs) -> Result<RepoPullResult, RepoPullEr
         "repo_pull tool called"
     );
 
-    let pull_result = pull_changes(&args.url, &args.branch, &args.since_commit)?;
+    let pull_result = pull_changes(
+        &args.url,
+        &args.branch,
+        &args.since_commit,
+        proxy_config.url.as_deref(),
+    )?;
 
     if pull_result.up_to_date {
         info!("repo_pull: already up to date");

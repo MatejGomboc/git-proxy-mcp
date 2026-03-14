@@ -341,6 +341,10 @@ Configuration file location:
   "logging": {
     "level": "warn",
     "audit_log_path": "~/.git-proxy-mcp/audit.log"
+  },
+  "proxy": {
+    "url": "http://proxy.example.com:8080",
+    "no_proxy": "*.internal.com,localhost"
   }
 }
 ```
@@ -360,6 +364,8 @@ Configuration file location:
 | `timeouts` | `request_timeout_secs` | Git operation timeout (default: 300) |
 | `rate_limits` | `max_burst` | Max burst operations (default: 20) |
 | `rate_limits` | `refill_rate_per_sec` | Sustained rate limit (default: 5.0) |
+| `proxy` | `url` | Proxy URL (HTTP, HTTPS, or SOCKS5) |
+| `proxy` | `no_proxy` | Comma-separated hosts to bypass proxy |
 
 ---
 

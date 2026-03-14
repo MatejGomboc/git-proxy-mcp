@@ -69,7 +69,7 @@ pub struct RefsResult {
 /// # Security
 ///
 /// Credentials are handled via git2 callbacks and never stored or logged.
-pub fn list_remote_refs(url: &str) -> Result<RefsResult, Git2Error> {
+pub fn list_remote_refs(url: &str, proxy_url: Option<&str>) -> Result<RefsResult, Git2Error> {
     info!(url = %sanitize_url_for_logging(url), "listing remote refs");
 
     // Validate URL
@@ -84,9 +84,16 @@ pub fn list_remote_refs(url: &str) -> Result<RefsResult, Git2Error> {
         let mut remote = repo.remote_anonymous(url)?;
         let callbacks = create_callbacks();
 
+        let mut proxy_opts = git2::ProxyOptions::new();
+        if let Some(url) = proxy_url {
+            proxy_opts.url(url);
+        } else {
+            proxy_opts.auto();
+        }
+
         // Connect to remote and get refs
         debug!("connecting to remote");
-        remote.connect_auth(Direction::Fetch, Some(callbacks), None)?;
+        remote.connect_auth(Direction::Fetch, Some(callbacks), Some(proxy_opts))?;
 
         let remote_refs = remote.list()?;
 
@@ -204,13 +211,13 @@ mod tests {
 
     #[test]
     fn list_remote_refs_rejects_invalid_url() {
-        let result = list_remote_refs("/invalid/path");
+        let result = list_remote_refs("/invalid/path", None);
         assert!(result.is_err());
     }
 
     #[test]
     fn list_remote_refs_rejects_file_url() {
-        let result = list_remote_refs("file:///etc/passwd");
+        let result = list_remote_refs("file:///etc/passwd", None);
         assert!(result.is_err());
     }
 }

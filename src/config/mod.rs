@@ -24,7 +24,7 @@
 
 mod settings;
 
-pub use settings::{Config, LoggingConfig, SecurityConfig, TimeoutConfig};
+pub use settings::{Config, LoggingConfig, ProxyConfig, SecurityConfig, TimeoutConfig};
 
 use std::path::{Path, PathBuf};
 

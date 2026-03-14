@@ -3,6 +3,7 @@
 //! These tests verify the MCP server's JSON-RPC 2.0 protocol implementation,
 //! including request/response handling, error responses, and lifecycle management.
 
+use git_proxy_mcp::config::ProxyConfig;
 use git_proxy_mcp::mcp::protocol::{
     parse_message, IncomingMessage, JsonRpcError, JsonRpcResponse, RequestId,
 };
@@ -15,7 +16,12 @@ fn create_test_server() -> McpServer {
     let git_identity = GitIdentity::default();
     let audit_logger = AuditLogger::disabled();
 
-    McpServer::new(security_config, git_identity, audit_logger)
+    McpServer::new(
+        security_config,
+        git_identity,
+        audit_logger,
+        ProxyConfig::default(),
+    )
 }
 
 // =============================================================================

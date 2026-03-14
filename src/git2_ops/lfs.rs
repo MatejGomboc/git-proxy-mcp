@@ -188,13 +188,30 @@ impl LfsClient {
     /// # Errors
     ///
     /// Returns error if the URL scheme is unsupported or HTTP client creation fails.
-    pub fn new(repo_url: &str, credentials: Option<(String, String)>) -> Result<Self, Git2Error> {
+    pub fn new(
+        repo_url: &str,
+        credentials: Option<(String, String)>,
+        proxy_url: Option<&str>,
+        no_proxy: Option<&str>,
+    ) -> Result<Self, Git2Error> {
         let lfs_url = derive_lfs_url(repo_url)?;
 
         debug!(lfs_url = %lfs_url, "created LFS client");
 
-        let client = Client::builder()
-            .user_agent("git-proxy-mcp/0.1")
+        let mut builder = Client::builder().user_agent("git-proxy-mcp/0.1");
+
+        if let Some(proxy_url) = proxy_url {
+            let proxy = reqwest::Proxy::all(proxy_url)
+                .map_err(|e| Git2Error::Git2(format!("invalid proxy URL: {e}")))?;
+            let proxy = if let Some(no_proxy) = no_proxy {
+                proxy.no_proxy(reqwest::NoProxy::from_string(no_proxy))
+            } else {
+                proxy
+            };
+            builder = builder.proxy(proxy);
+        }
+
+        let client = builder
             .build()
             .map_err(|e| Git2Error::Git2(format!("failed to create HTTP client: {e}")))?;
 
@@ -601,7 +618,7 @@ mod tests {
 
     #[test]
     fn lfs_client_creation() {
-        let client = LfsClient::new("https://github.com/owner/repo.git", None);
+        let client = LfsClient::new("https://github.com/owner/repo.git", None, None, None);
         assert!(client.is_ok());
     }
 
@@ -610,6 +627,8 @@ mod tests {
         let client = LfsClient::new(
             "https://github.com/owner/repo.git",
             Some(("user".to_string(), "pass".to_string())),
+            None,
+            None,
         );
         assert!(client.is_ok());
     }

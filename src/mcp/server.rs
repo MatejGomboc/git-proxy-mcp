@@ -38,6 +38,7 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use crate::config::ProxyConfig;
 use crate::mcp::protocol::{
     ErrorCode, IncomingMessage, JsonRpcError, JsonRpcErrorData, JsonRpcNotification,
     JsonRpcRequest, JsonRpcResponse, RequestId, MCP_PROTOCOL_VERSION, SERVER_NAME,
@@ -273,6 +274,8 @@ pub struct McpServer {
     streaming_sessions: StreamingSessionManager,
     /// Git identity for AI-assisted commits.
     git_identity: GitIdentity,
+    /// Proxy configuration for network connections.
+    proxy_config: ProxyConfig,
 }
 
 impl McpServer {
@@ -283,11 +286,13 @@ impl McpServer {
     /// * `security_config` — Security settings from configuration
     /// * `git_identity` — Git identity for AI-assisted commits
     /// * `audit_logger` — Audit logger for recording operations
+    /// * `proxy_config` — Proxy configuration for network connections
     #[must_use]
     pub fn new(
         security_config: SecurityConfig,
         git_identity: GitIdentity,
         audit_logger: AuditLogger,
+        proxy_config: ProxyConfig,
     ) -> Self {
         // Build branch guard from protected branches
         let branch_guard = if security_config.protected_branches.is_empty() {
@@ -339,6 +344,7 @@ impl McpServer {
             audit_logger: Arc::new(audit_logger),
             streaming_sessions: StreamingSessionManager::new(),
             git_identity,
+            proxy_config,
         }
     }
 
@@ -938,7 +944,7 @@ impl McpServer {
 
         // Execute the clone with timing
         let start = Instant::now();
-        match handle_repo_clone(args) {
+        match handle_repo_clone(args, &self.proxy_config) {
             Ok(result) => {
                 let duration = start.elapsed();
                 self.audit_logger
@@ -1039,7 +1045,7 @@ impl McpServer {
         let branch = args.branch.clone();
         let force = args.force;
 
-        match handle_repo_push(args) {
+        match handle_repo_push(args, &self.proxy_config) {
             Ok(result) => {
                 let duration = start.elapsed();
                 self.audit_logger.log_silent(&AuditEvent::repo_push_success(
@@ -1107,7 +1113,7 @@ impl McpServer {
 
         // Execute the clone_start
         let start = Instant::now();
-        match handle_repo_clone_start(args, &self.streaming_sessions) {
+        match handle_repo_clone_start(args, &self.proxy_config, &self.streaming_sessions) {
             Ok(result) => {
                 let duration = start.elapsed();
                 self.audit_logger
@@ -1227,7 +1233,7 @@ impl McpServer {
 
         // Execute the refs listing
         let start = Instant::now();
-        match handle_repo_refs(args) {
+        match handle_repo_refs(args, &self.proxy_config) {
             Ok(result) => {
                 let duration = start.elapsed();
                 tracing::info!(
@@ -1297,7 +1303,7 @@ impl McpServer {
 
         // Execute the diff generation
         let start = Instant::now();
-        match handle_repo_diff(args) {
+        match handle_repo_diff(args, &self.proxy_config) {
             Ok(result) => {
                 let duration = start.elapsed();
                 tracing::info!(
@@ -1367,7 +1373,7 @@ impl McpServer {
 
         // Execute the pull
         let start = Instant::now();
-        match handle_repo_pull(args) {
+        match handle_repo_pull(args, &self.proxy_config) {
             Ok(result) => {
                 let duration = start.elapsed();
                 if result.up_to_date {
@@ -1434,7 +1440,12 @@ mod tests {
         let git_identity = GitIdentity::default();
         let audit_logger = AuditLogger::disabled();
 
-        McpServer::new(security_config, git_identity, audit_logger)
+        McpServer::new(
+            security_config,
+            git_identity,
+            audit_logger,
+            ProxyConfig::default(),
+        )
     }
 
     #[test]

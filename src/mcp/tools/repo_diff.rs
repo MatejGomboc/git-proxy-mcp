@@ -23,6 +23,7 @@
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
+use crate::config::ProxyConfig;
 use crate::git2_ops::auth::sanitize_url_for_logging;
 use crate::git2_ops::diff::{generate_diff, DiffStats};
 use crate::git2_ops::error::Git2Error;
@@ -108,7 +109,10 @@ impl From<Git2Error> for RepoDiffError {
 /// - Temporary bare repo is cleaned up after operation
 /// - Only diff text and metadata are returned
 #[allow(clippy::needless_pass_by_value)] // Consistent with other handlers
-pub fn handle_repo_diff(args: RepoDiffArgs) -> Result<RepoDiffResult, RepoDiffError> {
+pub fn handle_repo_diff(
+    args: RepoDiffArgs,
+    proxy_config: &ProxyConfig,
+) -> Result<RepoDiffResult, RepoDiffError> {
     info!(
         url = %sanitize_url_for_logging(&args.url),
         base = %args.base_commit,
@@ -116,7 +120,12 @@ pub fn handle_repo_diff(args: RepoDiffArgs) -> Result<RepoDiffResult, RepoDiffEr
         "repo_diff tool called"
     );
 
-    let diff_result = generate_diff(&args.url, &args.base_commit, &args.head_commit)?;
+    let diff_result = generate_diff(
+        &args.url,
+        &args.base_commit,
+        &args.head_commit,
+        proxy_config.url.as_deref(),
+    )?;
 
     info!(
         files = diff_result.stats.files_changed,
