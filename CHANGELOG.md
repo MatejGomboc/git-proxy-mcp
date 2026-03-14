@@ -13,6 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   operations (git fetch/push/connect, LFS downloads) through HTTP, HTTPS, or SOCKS5
   proxy servers. Includes `no_proxy` for bypassing the proxy on specific hosts.
   Useful for corporate environments behind firewalls.
+- **Configurable session management** — new `sessions` section in `config.json` for
+  setting session timeout, max concurrent streaming sessions, and max repo sessions.
+  Previously hardcoded to 1 hour / 10 / 100 respectively.
+- **Chunk-level resume** — new `repo_clone_status` tool to check progress and identify
+  missing chunks in a Tier 2 streaming session. `repo/clone_chunk` responses now include
+  `next_missing_chunk` so the AI can resume interrupted transfers without re-downloading
+  chunks it already has.
 
 ### Changed
 

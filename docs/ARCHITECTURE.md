@@ -194,10 +194,10 @@ For large repositories, Tier 1 may buffer too much data in memory. Tier 2 solves
 | Aspect | Tier 1 | Tier 2 |
 |--------|--------|--------|
 | Response size | Entire repo | Configurable (1KB-4MB) |
-| Resume on failure | Start over | Resume from last chunk |
-| Progress reporting | None | chunk_index / total_chunks |
+| Resume on failure | Start over | Resume via `repo_clone_status` |
+| Progress reporting | None | chunk_index / total_chunks / progress % |
 | Memory per response | O(repo) | O(chunk) |
-| Session management | None | Session ID with timeout |
+| Session management | None | Configurable timeout and concurrency |
 
 ## Security Implications
 
@@ -265,7 +265,7 @@ src/
 │       ├── repo_clone.rs        # Tier 1: repo/clone
 │       ├── repo_push.rs         # Tier 1: repo/push
 │       ├── repo_clone_start.rs  # Tier 2: repo/clone_start
-│       ├── repo_clone_chunk.rs  # Tier 2: repo/clone_chunk + cancel
+│       ├── repo_clone_chunk.rs  # Tier 2: repo/clone_chunk + cancel + status
 │       ├── repo_pull.rs         # repo/pull (incremental sync)
 │       ├── repo_diff.rs         # repo/diff (commit comparison)
 │       ├── repo_refs.rs         # repo/refs (list branches/tags)

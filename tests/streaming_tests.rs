@@ -9,6 +9,8 @@
 #![allow(clippy::redundant_clone)] // Test clarity over micro-optimization
 #![allow(clippy::assertions_on_constants)] // Design verification tests
 
+use std::time::Duration;
+
 use git_proxy_mcp::git2_ops::auth::{sanitize_url_for_logging, validate_url};
 use git_proxy_mcp::session::{SessionError, SessionManager};
 use git_proxy_mcp::streaming::bundle::{decode_bundle, parse_bundle_info, validate_bundle};
@@ -172,7 +174,7 @@ fn test_encode_base64_binary() {
 
 #[test]
 fn test_session_manager_basic_workflow() {
-    let manager = SessionManager::new();
+    let manager = SessionManager::new(Duration::from_secs(3600), 100);
 
     // Create session
     let session_id = manager
@@ -199,7 +201,7 @@ fn test_session_manager_basic_workflow() {
 
 #[test]
 fn test_session_manager_multiple_sessions() {
-    let manager = SessionManager::new();
+    let manager = SessionManager::new(Duration::from_secs(3600), 100);
 
     let id1 = manager
         .create_session("https://github.com/owner/repo1.git", "main", "commit1")
@@ -238,7 +240,7 @@ fn test_session_id_does_not_contain_credentials() {
 
 #[test]
 fn test_session_sanitized_url() {
-    let manager = SessionManager::new();
+    let manager = SessionManager::new(Duration::from_secs(3600), 100);
 
     let session_id = manager
         .create_session(
@@ -257,7 +259,7 @@ fn test_session_sanitized_url() {
 
 #[test]
 fn test_session_update_nonexistent() {
-    let manager = SessionManager::new();
+    let manager = SessionManager::new(Duration::from_secs(3600), 100);
 
     let result = manager.update_session_commit("nonexistent_session", "commit");
     assert!(matches!(result, Err(SessionError::NotFound(_))));
@@ -265,7 +267,7 @@ fn test_session_update_nonexistent() {
 
 #[test]
 fn test_session_remove_nonexistent() {
-    let manager = SessionManager::new();
+    let manager = SessionManager::new(Duration::from_secs(3600), 100);
 
     let removed = manager.remove_session("nonexistent").unwrap();
     assert!(!removed);
@@ -280,7 +282,7 @@ fn test_session_manager_concurrent_access() {
     use std::sync::Arc;
     use std::thread;
 
-    let manager = Arc::new(SessionManager::new());
+    let manager = Arc::new(SessionManager::new(Duration::from_secs(3600), 100));
     let mut handles = vec![];
 
     // Spawn multiple threads creating sessions

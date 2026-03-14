@@ -153,7 +153,13 @@ fn main() -> ExitCode {
     );
 
     // Create MCP server
-    let mut server = McpServer::new(security_config, git_identity, audit_logger, cfg.proxy);
+    let mut server = McpServer::new(
+        security_config,
+        git_identity,
+        audit_logger,
+        cfg.proxy,
+        &cfg.sessions,
+    );
 
     info!("MCP server ready, waiting for client connection...");
     info!("Note: Authentication uses your existing Git credential configuration");

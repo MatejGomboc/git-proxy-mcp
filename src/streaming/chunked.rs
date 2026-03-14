@@ -73,12 +73,6 @@ pub const MAX_CHUNK_SIZE: usize = 4 * 1024 * 1024;
 /// Archives larger than this are stored in temp files instead of memory.
 pub const DISK_THRESHOLD: usize = 10 * 1024 * 1024;
 
-/// Session timeout: 1 hour
-const SESSION_TIMEOUT: Duration = Duration::from_secs(3600);
-
-/// Maximum concurrent streaming sessions
-const MAX_SESSIONS: usize = 10;
-
 /// Storage backend for session data.
 ///
 /// Small archives (< `DISK_THRESHOLD`) are kept in memory for fast access.
@@ -274,16 +268,25 @@ impl StreamingSession {
         })
     }
 
+    /// Returns the index of the next chunk that has not yet been retrieved.
+    /// Returns `None` if all chunks have been retrieved.
+    #[must_use]
+    pub fn next_missing_chunk(&self) -> Option<usize> {
+        self.retrieved_chunks
+            .iter()
+            .position(|&retrieved| !retrieved)
+    }
+
     /// Check if all chunks have been retrieved.
     #[must_use]
     pub fn is_complete(&self) -> bool {
         self.retrieved_chunks.iter().all(|&r| r)
     }
 
-    /// Check if the session has timed out.
+    /// Check if the session has timed out given the configured timeout.
     #[must_use]
-    pub fn is_expired(&self) -> bool {
-        self.last_accessed.elapsed() > SESSION_TIMEOUT
+    pub fn is_expired(&self, timeout: Duration) -> bool {
+        self.last_accessed.elapsed() > timeout
     }
 
     /// Get session age.
@@ -322,20 +325,26 @@ pub struct ChunkData {
 #[derive(Debug, Clone)]
 pub struct StreamingSessionManager {
     sessions: Arc<RwLock<HashMap<String, StreamingSession>>>,
+    /// Timeout for inactive sessions before automatic cleanup.
+    session_timeout: Duration,
+    /// Maximum number of concurrent streaming sessions.
+    max_sessions: usize,
 }
 
 impl Default for StreamingSessionManager {
     fn default() -> Self {
-        Self::new()
+        Self::new(Duration::from_secs(3600), 10)
     }
 }
 
 impl StreamingSessionManager {
-    /// Create a new session manager.
+    /// Create a new session manager with the given timeout and session limit.
     #[must_use]
-    pub fn new() -> Self {
+    pub fn new(session_timeout: Duration, max_sessions: usize) -> Self {
         Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
+            session_timeout,
+            max_sessions,
         }
     }
 
@@ -374,8 +383,9 @@ impl StreamingSessionManager {
             .map_err(|_| StreamingError::LockPoisoned)?;
 
         // Cleanup expired sessions first
+        let timeout = self.session_timeout;
         sessions.retain(|id, session| {
-            let keep = !session.is_expired();
+            let keep = !session.is_expired(timeout);
             if !keep {
                 debug!(session_id = %id, "cleaning up expired streaming session");
             }
@@ -383,8 +393,10 @@ impl StreamingSessionManager {
         });
 
         // Check session limit
-        if sessions.len() >= MAX_SESSIONS {
-            return Err(StreamingError::TooManySessions);
+        if sessions.len() >= self.max_sessions {
+            return Err(StreamingError::TooManySessions {
+                max: self.max_sessions,
+            });
         }
 
         let id = Self::generate_id();
@@ -406,6 +418,9 @@ impl StreamingSessionManager {
             chunk_size: session.chunk_size,
             commit: session.commit.clone(),
             branch: session.branch.clone(),
+            delivered_chunks: 0,
+            next_missing_chunk: session.next_missing_chunk(),
+            progress_percent: session.progress(),
         };
 
         info!(
@@ -423,6 +438,10 @@ impl StreamingSessionManager {
 
     /// Get a chunk from a session.
     ///
+    /// Returns a tuple of `(ChunkData, Option<usize>)` where the second element
+    /// is the index of the next missing chunk (for resume support). This value
+    /// is computed before any auto-cleanup of completed sessions.
+    ///
     /// # Errors
     ///
     /// Returns an error if the session doesn't exist or the chunk index is invalid.
@@ -431,7 +450,7 @@ impl StreamingSessionManager {
         &self,
         session_id: &str,
         chunk_index: usize,
-    ) -> Result<ChunkData, StreamingError> {
+    ) -> Result<(ChunkData, Option<usize>), StreamingError> {
         let mut sessions = self
             .sessions
             .write()
@@ -441,7 +460,7 @@ impl StreamingSessionManager {
             .get_mut(session_id)
             .ok_or_else(|| StreamingError::SessionNotFound(session_id.to_string()))?;
 
-        if session.is_expired() {
+        if session.is_expired(self.session_timeout) {
             sessions.remove(session_id);
             return Err(StreamingError::SessionExpired(session_id.to_string()));
         }
@@ -454,6 +473,9 @@ impl StreamingSessionManager {
                 total,
             })?;
 
+        // Compute next missing chunk BEFORE auto-cleanup
+        let next_missing = session.next_missing_chunk();
+
         // Auto-cleanup completed sessions
         if session.is_complete() {
             info!(
@@ -463,7 +485,7 @@ impl StreamingSessionManager {
             sessions.remove(session_id);
         }
 
-        Ok(chunk)
+        Ok((chunk, next_missing))
     }
 
     /// Get session info without retrieving a chunk.
@@ -485,6 +507,8 @@ impl StreamingSessionManager {
             .get(session_id)
             .ok_or_else(|| StreamingError::SessionNotFound(session_id.to_string()))?;
 
+        let delivered = session.retrieved_chunks.iter().filter(|&&r| r).count();
+
         Ok(StreamingSessionInfo {
             session_id: session.id.clone(),
             total_chunks: session.total_chunks(),
@@ -492,6 +516,9 @@ impl StreamingSessionManager {
             chunk_size: session.chunk_size,
             commit: session.commit.clone(),
             branch: session.branch.clone(),
+            delivered_chunks: delivered,
+            next_missing_chunk: session.next_missing_chunk(),
+            progress_percent: session.progress(),
         })
     }
 
@@ -514,6 +541,40 @@ impl StreamingSessionManager {
         }
 
         Ok(removed)
+    }
+
+    /// Get resume information for a session.
+    ///
+    /// Returns detailed status about which chunks have been delivered,
+    /// enabling the AI to resume an interrupted transfer.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the session doesn't exist or the lock is poisoned.
+    #[allow(clippy::significant_drop_tightening)]
+    pub fn get_session_status(
+        &self,
+        session_id: &str,
+    ) -> Result<SessionResumeInfo, StreamingError> {
+        let sessions = self
+            .sessions
+            .read()
+            .map_err(|_| StreamingError::LockPoisoned)?;
+
+        let session = sessions
+            .get(session_id)
+            .ok_or_else(|| StreamingError::SessionNotFound(session_id.to_string()))?;
+
+        let delivered = session.retrieved_chunks.iter().filter(|&&r| r).count();
+
+        Ok(SessionResumeInfo {
+            session_id: session.id.clone(),
+            total_chunks: session.total_chunks(),
+            delivered_chunks: delivered,
+            next_missing_chunk: session.next_missing_chunk(),
+            progress_percent: session.progress(),
+            is_complete: session.is_complete(),
+        })
     }
 
     /// Get the number of active sessions.
@@ -540,9 +601,10 @@ impl StreamingSessionManager {
             .write()
             .map_err(|_| StreamingError::LockPoisoned)?;
 
+        let timeout = self.session_timeout;
         let before = sessions.len();
         sessions.retain(|id, session| {
-            let keep = !session.is_expired();
+            let keep = !session.is_expired(timeout);
             if !keep {
                 warn!(session_id = %id, "cleaning up expired streaming session");
             }
@@ -573,6 +635,38 @@ pub struct StreamingSessionInfo {
 
     /// Branch that was cloned
     pub branch: String,
+
+    /// Number of chunks successfully delivered so far
+    pub delivered_chunks: usize,
+
+    /// Index of the next chunk that has not yet been retrieved
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_missing_chunk: Option<usize>,
+
+    /// Progress as a percentage (0.0 to 100.0)
+    pub progress_percent: f64,
+}
+
+/// Resume information for a streaming session.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionResumeInfo {
+    /// Session ID
+    pub session_id: String,
+
+    /// Total number of chunks
+    pub total_chunks: usize,
+
+    /// Number of chunks successfully delivered so far
+    pub delivered_chunks: usize,
+
+    /// Index of the next chunk that has not yet been retrieved
+    pub next_missing_chunk: Option<usize>,
+
+    /// Progress as a percentage (0.0 to 100.0)
+    pub progress_percent: f64,
+
+    /// Whether all chunks have been retrieved
+    pub is_complete: bool,
 }
 
 /// Errors from streaming operations.
@@ -588,7 +682,7 @@ pub enum StreamingError {
     InvalidChunkIndex { index: usize, total: usize },
 
     /// Too many active sessions
-    TooManySessions,
+    TooManySessions { max: usize },
 
     /// Lock poisoned (should never happen in normal operation)
     LockPoisoned,
@@ -605,8 +699,8 @@ impl std::fmt::Display for StreamingError {
             Self::InvalidChunkIndex { index, total } => {
                 write!(f, "invalid chunk index {index} (total chunks: {total})")
             }
-            Self::TooManySessions => {
-                write!(f, "too many active streaming sessions (max {MAX_SESSIONS})")
+            Self::TooManySessions { max } => {
+                write!(f, "too many active streaming sessions (max {max})")
             }
             Self::LockPoisoned => write!(f, "internal error: session lock poisoned"),
             Self::IoError(msg) => write!(f, "I/O error: {msg}"),
@@ -715,7 +809,7 @@ mod tests {
 
     #[test]
     fn session_manager_create_and_get() {
-        let manager = StreamingSessionManager::new();
+        let manager = StreamingSessionManager::default();
 
         // Create data that will result in 3 chunks with min chunk_size of 1024
         // 2500 bytes / 1024 = 3 chunks (1024 + 1024 + 452)
@@ -735,15 +829,15 @@ mod tests {
         assert_eq!(info.chunk_size, 1024);
 
         // Get chunks
-        let chunk0 = manager.get_chunk(&info.session_id, 0).unwrap();
+        let (chunk0, _) = manager.get_chunk(&info.session_id, 0).unwrap();
         assert_eq!(chunk0.data.len(), 1024);
         assert!(!chunk0.is_last);
 
-        let chunk1 = manager.get_chunk(&info.session_id, 1).unwrap();
+        let (chunk1, _) = manager.get_chunk(&info.session_id, 1).unwrap();
         assert_eq!(chunk1.data.len(), 1024);
         assert!(!chunk1.is_last);
 
-        let chunk2 = manager.get_chunk(&info.session_id, 2).unwrap();
+        let (chunk2, _) = manager.get_chunk(&info.session_id, 2).unwrap();
         assert_eq!(chunk2.data.len(), 452); // Remaining bytes
         assert!(chunk2.is_last);
 
@@ -753,7 +847,7 @@ mod tests {
 
     #[test]
     fn session_manager_invalid_session() {
-        let manager = StreamingSessionManager::new();
+        let manager = StreamingSessionManager::default();
 
         let result = manager.get_chunk("nonexistent", 0);
         assert!(matches!(result, Err(StreamingError::SessionNotFound(_))));
@@ -810,5 +904,133 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn next_missing_chunk_tracks_retrieval() {
+        let data = vec![0u8; 300];
+        let mut session = StreamingSession::new(
+            "test".to_string(),
+            "url".to_string(),
+            "main".to_string(),
+            "abc123".to_string(),
+            data,
+            100,
+        )
+        .unwrap();
+
+        // Initially, the first missing chunk is 0
+        assert_eq!(session.next_missing_chunk(), Some(0));
+
+        // Retrieve chunk 0 — next missing should be 1
+        session.get_chunk(0);
+        assert_eq!(session.next_missing_chunk(), Some(1));
+
+        // Retrieve chunk 2 (out of order) — next missing should still be 1
+        session.get_chunk(2);
+        assert_eq!(session.next_missing_chunk(), Some(1));
+
+        // Retrieve chunk 1 — all retrieved, next missing should be None
+        session.get_chunk(1);
+        assert_eq!(session.next_missing_chunk(), None);
+    }
+
+    #[test]
+    fn get_chunk_returns_next_missing() {
+        let manager = StreamingSessionManager::default();
+
+        let data: Vec<u8> = (0u8..=255).cycle().take(3072).collect();
+        let info = manager
+            .create_session(
+                "https://github.com/owner/repo.git",
+                "main",
+                "abc123",
+                data,
+                1024,
+            )
+            .unwrap();
+
+        assert_eq!(info.total_chunks, 3);
+
+        // Get chunk 0 — next missing should be 1
+        let (_, next_missing) = manager.get_chunk(&info.session_id, 0).unwrap();
+        assert_eq!(next_missing, Some(1));
+
+        // Get chunk 1 — next missing should be 2
+        let (_, next_missing) = manager.get_chunk(&info.session_id, 1).unwrap();
+        assert_eq!(next_missing, Some(2));
+
+        // Get chunk 2 (last) — next missing should be None (all retrieved)
+        let (_, next_missing) = manager.get_chunk(&info.session_id, 2).unwrap();
+        assert_eq!(next_missing, None);
+    }
+
+    #[test]
+    fn get_session_status_returns_resume_info() {
+        let manager = StreamingSessionManager::default();
+
+        let data: Vec<u8> = (0u8..=255).cycle().take(3072).collect();
+        let info = manager
+            .create_session(
+                "https://github.com/owner/repo.git",
+                "main",
+                "abc123",
+                data,
+                1024,
+            )
+            .unwrap();
+
+        // Check initial status
+        let status = manager.get_session_status(&info.session_id).unwrap();
+        assert_eq!(status.total_chunks, 3);
+        assert_eq!(status.delivered_chunks, 0);
+        assert_eq!(status.next_missing_chunk, Some(0));
+        assert!((status.progress_percent - 0.0).abs() < f64::EPSILON);
+        assert!(!status.is_complete);
+
+        // Retrieve chunk 0
+        manager.get_chunk(&info.session_id, 0).unwrap();
+
+        let status = manager.get_session_status(&info.session_id).unwrap();
+        assert_eq!(status.delivered_chunks, 1);
+        assert_eq!(status.next_missing_chunk, Some(1));
+        assert!((status.progress_percent - 33.333_333_333_333_336).abs() < 0.1);
+        assert!(!status.is_complete);
+
+        // Retrieve chunk 1
+        manager.get_chunk(&info.session_id, 1).unwrap();
+
+        let status = manager.get_session_status(&info.session_id).unwrap();
+        assert_eq!(status.delivered_chunks, 2);
+        assert_eq!(status.next_missing_chunk, Some(2));
+        assert!(!status.is_complete);
+    }
+
+    #[test]
+    fn get_session_status_not_found() {
+        let manager = StreamingSessionManager::default();
+        let result = manager.get_session_status("nonexistent");
+        assert!(matches!(result, Err(StreamingError::SessionNotFound(_))));
+    }
+
+    #[test]
+    fn session_info_has_resume_fields() {
+        let manager = StreamingSessionManager::default();
+
+        let data: Vec<u8> = (0u8..=255).cycle().take(2048).collect();
+        let info = manager
+            .create_session(
+                "https://github.com/owner/repo.git",
+                "main",
+                "abc123",
+                data,
+                1024,
+            )
+            .unwrap();
+
+        // New session should have resume fields initialised
+        assert_eq!(info.delivered_chunks, 0);
+        assert_eq!(info.next_missing_chunk, Some(0));
+        assert!((info.progress_percent - 0.0).abs() < f64::EPSILON);
     }
 }

@@ -105,7 +105,7 @@ src/
 │       ├── repo_clone.rs       # Tier 1: repo/clone
 │       ├── repo_push.rs        # Tier 1: repo/push
 │       ├── repo_clone_start.rs # Tier 2: repo/clone_start
-│       ├── repo_clone_chunk.rs # Tier 2: repo/clone_chunk + cancel
+│       ├── repo_clone_chunk.rs # Tier 2: repo/clone_chunk + cancel + status
 │       ├── repo_pull.rs        # repo/pull
 │       ├── repo_diff.rs        # repo/diff
 │       ├── repo_refs.rs        # repo/refs
