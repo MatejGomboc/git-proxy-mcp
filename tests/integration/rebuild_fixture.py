@@ -102,11 +102,13 @@ def write_file(path, content, binary=False):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     mode = "wb" if binary else "w"
     newline = None if binary else "\n"
-    with open(path, mode, newline=newline) as f:
+    encoding = None if binary else "utf-8"
+    with open(path, mode, newline=newline, encoding=encoding) as f:
         f.write(content)
 
 
 def main():
+    """Rebuild the test fixture repository from scratch."""
     if not REPO_URL:
         print("FATAL: TEST_REPO_URL not set")
         sys.exit(1)
@@ -164,31 +166,37 @@ def main():
 
     # --- Commit 2: add subtract function + generated data files ---
     lib_path = os.path.join(repo_dir, "src", "lib.rs")
-    with open(lib_path, "a", newline="\n") as f:
+    with open(lib_path, "a", newline="\n", encoding="utf-8") as f:
         f.write(LIB_RS_ADDITION)
 
     design_path = os.path.join(repo_dir, "docs", "DESIGN.md")
-    with open(design_path, "a", newline="\n") as f:
+    with open(design_path, "a", newline="\n", encoding="utf-8") as f:
         f.write("Second commit for diff testing.\n")
 
     # Generate data files to make the archive large enough for
-    # multi-chunk streaming tests (each ~200 bytes, 20 files).
+    # multi-chunk streaming tests. Minimum chunk_size is 1024, so we
+    # need the compressed archive to exceed 2048 bytes for 3+ chunks.
+    # Each file is ~200 bytes, 40 files = ~8KB uncompressed.
     data_dir = os.path.join(repo_dir, "data")
     os.makedirs(data_dir, exist_ok=True)
-    for i in range(20):
-        content = f"# Data file {i:03d}\n" + f"Generated content for multi-chunk testing.\n" * 4
+    for i in range(40):
+        content = f"# Data file {i:03d}\n" + f"Line {i} generated content.\n" * 6
         write_file(os.path.join(data_dir, f"file_{i:03d}.txt"), content)
 
     run(["git", "add", "-A"], cwd=repo_dir)
-    run(["git", "commit", "-m", "Add subtract function, update docs, and add data files"], cwd=repo_dir)
+    run(
+        ["git", "commit", "-m", "Add subtract function, docs, and data files"],
+        cwd=repo_dir,
+    )
 
     v2_sha = get_sha(repo_dir)
     print(f"Commit 2 (v0.2.0): {v2_sha}")
 
     # --- Commit 3: add a submodule ---
     # Use a small, stable public repo as a submodule.
+    submodule_url = "https://github.com/nickel-org/rust-mustache.git"
     run(
-        ["git", "submodule", "add", "https://github.com/nickel-org/rust-mustache.git", "vendor/mustache"],
+        ["git", "submodule", "add", submodule_url, "vendor/mustache"],
         cwd=repo_dir,
     )
     run(["git", "commit", "-m", "Add submodule for integration testing"], cwd=repo_dir)
@@ -215,7 +223,7 @@ def main():
     env_dir = os.path.join(tempfile.gettempdir(), "mcp-test")
     os.makedirs(env_dir, exist_ok=True)
     env_path = os.path.join(env_dir, "fixture-shas.env")
-    with open(env_path, "w", newline="\n") as f:
+    with open(env_path, "w", newline="\n", encoding="utf-8") as f:
         f.write(f"V1_SHA={v1_sha}\n")
         f.write(f"V2_SHA={v2_sha}\n")
         f.write(f"V3_SHA={v3_sha}\n")
