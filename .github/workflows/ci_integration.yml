@@ -17,8 +17,6 @@ concurrency:
 env:
     CARGO_TERM_COLOR: always
     RUSTFLAGS: "-Dwarnings"
-    CARGO_HOME: /home/runner/.cargo
-    CARGO_INCREMENTAL: 0
 
 jobs:
     integration:
@@ -35,6 +33,11 @@ jobs:
               with:
                 toolchain: stable
 
+            - name: Get Rust version
+              id: rust-version
+              shell: bash
+              run: echo "version=$(rustc --version | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
             - name: Restore Rust cache
               uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
               with:
@@ -49,9 +52,9 @@ jobs:
                     target/release/build/
                     target/release/.fingerprint/
                     target/release/incremental/
-                key: rust-${{ runner.os }}-integration-${{ hashFiles('**/Cargo.lock') }}
+                key: rust-${{ runner.os }}-${{ steps.rust-version.outputs.version }}-${{ hashFiles('**/Cargo.lock') }}
                 restore-keys: |
-                    rust-${{ runner.os }}-integration-
+                    rust-${{ runner.os }}-${{ steps.rust-version.outputs.version }}-
 
             - name: Build (release)
               run: cargo build --release
@@ -67,37 +70,12 @@ jobs:
             - name: Rebuild test fixture repo
               env:
                 TEST_REPO_URL: ${{ secrets.TEST_REPO_URL }}
-              run: bash .github/scripts/rebuild-test-fixture.sh
-
-            - name: Create test config
-              run: |
-                mkdir -p /tmp/mcp-test
-                cat > /tmp/mcp-test/config.json << 'CFGEOF'
-                {
-                    "security": {
-                        "allow_force_push": true,
-                        "protected_branches": [],
-                        "repo_allowlist": null,
-                        "repo_blocklist": null
-                    },
-                    "logging": {
-                        "level": "debug",
-                        "audit_log_path": null
-                    },
-                    "timeouts": {
-                        "request_timeout_secs": 120
-                    },
-                    "rate_limits": {
-                        "max_burst": 100,
-                        "refill_rate_per_sec": 50.0
-                    }
-                }
-                CFGEOF
+              run: python3 tests/integration/rebuild_fixture.py
 
             - name: Run integration tests
               env:
                 TEST_REPO_URL: ${{ secrets.TEST_REPO_URL }}
-              run: bash .github/scripts/integration-tests.sh
+              run: python3 tests/integration/test_mcp_tools.py
 
             - name: Cleanup credentials
               if: always()
