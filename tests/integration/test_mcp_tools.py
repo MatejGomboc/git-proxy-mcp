@@ -15,6 +15,7 @@ Test fixture repo (git-proxy-mcp-test-dummy) has:
     - v0.1.0 -> v0.2.0 diff: 2 files changed (src/lib.rs, docs/DESIGN.md)
 """
 
+import base64
 import json
 import os
 import select
@@ -356,6 +357,187 @@ def test_helper_script(client, runner):
     runner.check("extract" in text, "helper script contains 'extract'")
 
 
+def test_repo_push(client, runner, refs_content):
+    """Test repo_push by creating a bundle and pushing to a test branch."""
+    print()
+    print("=== Test: repo_push ===")
+
+    # We need the HEAD commit SHA to create a bundle based on it.
+    branches = {b["short_name"]: b["commit"] for b in refs_content.get("branches", [])}
+    head_sha = branches.get("main")
+
+    if not head_sha:
+        print("  SKIP: could not resolve main branch SHA")
+        runner.total += 1
+        runner.failed += 1
+        return
+
+    # Create a local repo, fetch from remote, make a commit, create a bundle.
+    work_dir = os.path.join(tempfile.gettempdir(), "mcp-test", "push-test")
+    if os.path.exists(work_dir):
+        import shutil
+        shutil.rmtree(work_dir)
+    os.makedirs(work_dir)
+
+    try:
+        # Clone the fixture repo.
+        subprocess.run(
+            ["git", "clone", REPO_URL, "repo"],
+            cwd=work_dir, capture_output=True, text=True, check=True,
+        )
+        repo_dir = os.path.join(work_dir, "repo")
+
+        # Create a test branch and add a commit.
+        subprocess.run(
+            ["git", "checkout", "-b", "test/integration-push"],
+            cwd=repo_dir, capture_output=True, text=True, check=True,
+        )
+
+        test_file = os.path.join(repo_dir, "integration-test.txt")
+        with open(test_file, "w", encoding="utf-8") as f:
+            f.write("Integration test commit for repo_push.\n")
+
+        subprocess.run(
+            ["git", "add", "integration-test.txt"],
+            cwd=repo_dir, capture_output=True, text=True, check=True,
+        )
+        subprocess.run(
+            ["git", "commit", "-m", "test: integration push verification"],
+            cwd=repo_dir, capture_output=True, text=True, check=True,
+        )
+
+        # Create a git bundle containing the new commit.
+        bundle_path = os.path.join(work_dir, "push.bundle")
+        subprocess.run(
+            ["git", "bundle", "create", bundle_path, f"{head_sha}..HEAD"],
+            cwd=repo_dir, capture_output=True, text=True, check=True,
+        )
+
+        # Read and base64-encode the bundle.
+        with open(bundle_path, "rb") as f:
+            bundle_b64 = base64.b64encode(f.read()).decode("ascii")
+
+    except subprocess.CalledProcessError as e:
+        print(f"  SKIP: failed to create bundle: {e.stderr}")
+        runner.total += 1
+        runner.failed += 1
+        return
+
+    # Push via MCP.
+    content = client.call_tool(
+        "repo_push",
+        {
+            "bundle": bundle_b64,
+            "url": REPO_URL,
+            "branch": "test/integration-push",
+            "force": False,
+        },
+    )
+
+    runner.check(
+        content.get("branch") == "test/integration-push",
+        "pushed to correct branch",
+        actual=content.get("branch"),
+        expected="test/integration-push",
+    )
+    runner.check(
+        len(content.get("commit", "")) == 40,
+        "got valid commit SHA",
+        actual=len(content.get("commit", "")),
+    )
+    runner.check(
+        content.get("force") is False,
+        "force=false",
+        actual=content.get("force"),
+    )
+
+    # Clean up: delete the test branch from remote.
+    subprocess.run(
+        ["git", "push", "origin", "--delete", "test/integration-push"],
+        cwd=repo_dir, capture_output=True, text=True, check=False,
+    )
+
+
+def test_push_protected_branch(client, runner, refs_content):
+    """Test that pushing to a protected branch is rejected."""
+    print()
+    print("=== Test: push to protected branch ===")
+
+    branches = {b["short_name"]: b["commit"] for b in refs_content.get("branches", [])}
+    head_sha = branches.get("main")
+
+    if not head_sha:
+        print("  SKIP: could not resolve main branch SHA")
+        runner.total += 1
+        runner.failed += 1
+        return
+
+    # Create a minimal bundle (same flow as test_repo_push).
+    work_dir = os.path.join(tempfile.gettempdir(), "mcp-test", "push-protected")
+    if os.path.exists(work_dir):
+        import shutil
+        shutil.rmtree(work_dir)
+    os.makedirs(work_dir)
+
+    try:
+        subprocess.run(
+            ["git", "clone", REPO_URL, "repo"],
+            cwd=work_dir, capture_output=True, text=True, check=True,
+        )
+        repo_dir = os.path.join(work_dir, "repo")
+
+        test_file = os.path.join(repo_dir, "protected-test.txt")
+        with open(test_file, "w", encoding="utf-8") as f:
+            f.write("Should not be pushed.\n")
+
+        subprocess.run(
+            ["git", "add", "protected-test.txt"],
+            cwd=repo_dir, capture_output=True, text=True, check=True,
+        )
+        subprocess.run(
+            ["git", "commit", "-m", "test: should be rejected"],
+            cwd=repo_dir, capture_output=True, text=True, check=True,
+        )
+
+        bundle_path = os.path.join(work_dir, "push.bundle")
+        subprocess.run(
+            ["git", "bundle", "create", bundle_path, f"{head_sha}..HEAD"],
+            cwd=repo_dir, capture_output=True, text=True, check=True,
+        )
+
+        with open(bundle_path, "rb") as f:
+            bundle_b64 = base64.b64encode(f.read()).decode("ascii")
+
+    except subprocess.CalledProcessError as e:
+        print(f"  SKIP: failed to create bundle: {e.stderr}")
+        runner.total += 1
+        runner.failed += 1
+        return
+
+    # Attempt push to main (protected).
+    response = client.send(
+        "tools/call",
+        {
+            "name": "repo_push",
+            "arguments": {
+                "bundle": bundle_b64,
+                "url": REPO_URL,
+                "branch": "main",
+                "force": False,
+            },
+        },
+    )
+
+    runner.check("error" not in response, "no protocol error")
+
+    is_error = response.get("result", {}).get("isError", False)
+    runner.check(
+        is_error is True,
+        "push to protected branch rejected",
+        actual=is_error,
+    )
+
+
 # --- Error handling and edge case tests ---
 
 
@@ -627,6 +809,10 @@ def main():
         test_repo_pull(client, runner, refs_content)
         test_tier2_streaming(client, runner)
         test_helper_script(client, runner)
+
+        # Push tests.
+        test_repo_push(client, runner, refs_content)
+        test_push_protected_branch(client, runner, refs_content)
 
         # Edge case and error handling tests.
         test_unknown_tool(client, runner)
