@@ -5,7 +5,11 @@ permissions:
 
 on:
     pull_request:
-        branches: ["**"]
+        branches: [main]
+
+concurrency:
+    group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+    cancel-in-progress: true
 
 env:
     CARGO_TERM_COLOR: always
@@ -15,14 +19,16 @@ jobs:
     quick-checks:
         name: Quick Checks (fmt, docs, markdown)
         runs-on: ubuntu-latest
+        timeout-minutes: 10
 
         steps:
             - name: Checkout repository
               uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
             - name: Install Rust toolchain
-              uses: dtolnay/rust-toolchain@stable
+              uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
               with:
+                toolchain: stable
                 components: rustfmt
 
             - name: Setup Node.js
@@ -73,8 +79,9 @@ jobs:
               uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
             - name: Install Rust toolchain
-              uses: dtolnay/rust-toolchain@stable
+              uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
               with:
+                toolchain: stable
                 components: clippy
 
             - name: Get Rust version
@@ -128,7 +135,8 @@ jobs:
         name: CI Success
         needs: [quick-checks, build]
         runs-on: ubuntu-latest
-        if: always()
+        timeout-minutes: 5
+        if: ${{ !cancelled() }}
 
         steps:
             - name: Check if all jobs succeeded

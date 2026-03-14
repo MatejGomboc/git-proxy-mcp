@@ -19,6 +19,7 @@ jobs:
     validate:
         name: Validate Release
         runs-on: ubuntu-latest
+        timeout-minutes: 5
 
         outputs:
             version: ${{ steps.version.outputs.version }}
@@ -97,8 +98,9 @@ jobs:
               uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
             - name: Install Rust toolchain
-              uses: dtolnay/rust-toolchain@stable
+              uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
               with:
+                toolchain: stable
                 targets: ${{ matrix.target }}
 
             # No caching for release builds - they're one-off events triggered by
@@ -154,6 +156,7 @@ jobs:
         name: Create Release
         needs: [validate, build]
         runs-on: ubuntu-latest
+        timeout-minutes: 10
 
         steps:
             - name: Checkout repository
@@ -220,15 +223,17 @@ jobs:
 
                 # Determine if this is a prerelease
                 PRERELEASE_FLAG=""
+                LATEST_FLAG="--latest"
                 if [[ "$VERSION" == *-* ]]; then
                     PRERELEASE_FLAG="--prerelease"
+                    LATEST_FLAG="--latest=false"
                 fi
 
                 # Create the release with gh CLI (more reliable than third-party actions)
                 gh release create "$TAG" \
                     --title "$TAG" \
                     --notes-file release_notes.md \
-                    --latest \
+                    $LATEST_FLAG \
                     $PRERELEASE_FLAG \
                     artifacts/*.tar.gz \
                     artifacts/*.zip \
