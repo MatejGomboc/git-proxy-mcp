@@ -28,6 +28,7 @@ use git2::{ObjectType, Oid, Repository, TreeWalkMode, TreeWalkResult};
 use glob::{MatchOptions, Pattern};
 use tracing::{debug, trace, warn};
 
+use crate::config::LfsConfig;
 use crate::git2_ops::error::Git2Error;
 use crate::git2_ops::lfs::{is_lfs_pointer, parse_lfs_pointer, LfsClient};
 use crate::git2_ops::submodule::fetch_all_submodules;
@@ -73,6 +74,10 @@ pub struct TarOptions {
 
     /// Optional progress sender for real-time updates during tar creation.
     pub progress: Option<ProgressSender>,
+
+    /// Optional LFS configuration (retry behaviour, size limits).
+    /// When `None`, defaults are used.
+    pub lfs_config: Option<LfsConfig>,
 }
 
 /// Compiled sparse patterns for efficient matching.
@@ -274,6 +279,9 @@ pub fn create_tar_from_tree_with_options(
     let max_file_size = options.max_file_size;
     let resolve_lfs = options.resolve_lfs.unwrap_or(false);
 
+    // Get LFS config (use default if not provided)
+    let lfs_config = options.lfs_config.clone().unwrap_or_default();
+
     // Create LFS client if needed
     let lfs_client = if resolve_lfs {
         if let Some(ref url) = options.repo_url {
@@ -282,6 +290,8 @@ pub fn create_tar_from_tree_with_options(
                 options.lfs_credentials.clone(),
                 options.proxy_url.as_deref(),
                 options.no_proxy.as_deref(),
+                &lfs_config,
+                options.progress.clone(),
             ) {
                 Ok(client) => Some(client),
                 Err(e) => {

@@ -34,7 +34,7 @@
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 
-use crate::config::ProxyConfig;
+use crate::config::{LfsConfig, ProxyConfig};
 use crate::git2_ops::auth::{get_credentials_for_url, sanitize_url_for_logging};
 use crate::git2_ops::clone::{fetch_bare, FetchOptions2};
 use crate::git2_ops::error::Git2Error;
@@ -208,6 +208,7 @@ impl From<StreamingError> for RepoCloneStartError {
 pub fn handle_repo_clone_start(
     args: RepoCloneStartArgs,
     proxy_config: &ProxyConfig,
+    lfs_config: &LfsConfig,
     session_manager: &StreamingSessionManager,
 ) -> Result<RepoCloneStartResult, RepoCloneStartError> {
     let sanitized_url = sanitize_url_for_logging(&args.url);
@@ -286,6 +287,7 @@ pub fn handle_repo_clone_start(
         proxy_url: proxy_config.url.clone(),
         no_proxy: proxy_config.no_proxy.clone(),
         progress: None,
+        lfs_config: Some(lfs_config.clone()),
     };
 
     let tar_result = create_tar_from_tree_with_options(

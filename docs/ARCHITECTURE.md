@@ -244,7 +244,7 @@ src/
 │   ├── pull.rs                  # Incremental sync operations
 │   ├── diff.rs                  # Diff generation between commits
 │   ├── refs.rs                  # Remote reference listing
-│   ├── lfs.rs                   # Git LFS support
+│   ├── lfs.rs                   # Git LFS support (retry, progress, size limits)
 │   ├── submodule.rs             # Submodule detection + fetching
 │   └── error.rs                 # Error types with credential sanitisation
 │

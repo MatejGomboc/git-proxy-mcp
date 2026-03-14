@@ -38,7 +38,7 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::config::{ProxyConfig, SessionConfig};
+use crate::config::{LfsConfig, ProxyConfig, SessionConfig};
 use crate::mcp::protocol::{
     ErrorCode, IncomingMessage, JsonRpcError, JsonRpcErrorData, JsonRpcNotification,
     JsonRpcRequest, JsonRpcResponse, RequestId, MCP_PROTOCOL_VERSION, SERVER_NAME,
@@ -276,6 +276,8 @@ pub struct McpServer {
     git_identity: GitIdentity,
     /// Proxy configuration for network connections.
     proxy_config: ProxyConfig,
+    /// Git LFS configuration (retry behaviour, size limits).
+    lfs_config: LfsConfig,
 }
 
 impl McpServer {
@@ -288,6 +290,7 @@ impl McpServer {
     /// * `audit_logger` — Audit logger for recording operations
     /// * `proxy_config` — Proxy configuration for network connections
     /// * `session_config` — Session management settings
+    /// * `lfs_config` — Git LFS configuration (retry behaviour, size limits)
     #[must_use]
     pub fn new(
         security_config: SecurityConfig,
@@ -295,6 +298,7 @@ impl McpServer {
         audit_logger: AuditLogger,
         proxy_config: ProxyConfig,
         session_config: &SessionConfig,
+        lfs_config: LfsConfig,
     ) -> Self {
         // Build branch guard from protected branches
         let branch_guard = if security_config.protected_branches.is_empty() {
@@ -350,6 +354,7 @@ impl McpServer {
             ),
             git_identity,
             proxy_config,
+            lfs_config,
         }
     }
 
@@ -969,7 +974,7 @@ impl McpServer {
 
         // Execute the clone with timing
         let start = Instant::now();
-        match handle_repo_clone(args, &self.proxy_config) {
+        match handle_repo_clone(args, &self.proxy_config, &self.lfs_config) {
             Ok(result) => {
                 let duration = start.elapsed();
                 self.audit_logger
@@ -1138,7 +1143,12 @@ impl McpServer {
 
         // Execute the clone_start
         let start = Instant::now();
-        match handle_repo_clone_start(args, &self.proxy_config, &self.streaming_sessions) {
+        match handle_repo_clone_start(
+            args,
+            &self.proxy_config,
+            &self.lfs_config,
+            &self.streaming_sessions,
+        ) {
             Ok(result) => {
                 let duration = start.elapsed();
                 self.audit_logger
@@ -1496,6 +1506,7 @@ mod tests {
             audit_logger,
             ProxyConfig::default(),
             &SessionConfig::default(),
+            LfsConfig::default(),
         )
     }
 

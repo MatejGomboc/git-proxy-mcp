@@ -23,7 +23,7 @@
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 
-use crate::config::ProxyConfig;
+use crate::config::{LfsConfig, ProxyConfig};
 use crate::git2_ops::auth::{get_credentials_for_url, sanitize_url_for_logging};
 use crate::git2_ops::clone::{fetch_bare, FetchOptions2};
 use crate::git2_ops::error::Git2Error;
@@ -179,8 +179,9 @@ impl From<Git2Error> for RepoCloneError {
 pub fn handle_repo_clone(
     args: RepoCloneArgs,
     proxy_config: &ProxyConfig,
+    lfs_config: &LfsConfig,
 ) -> Result<RepoCloneResult, RepoCloneError> {
-    handle_repo_clone_with_progress(args, proxy_config, None)
+    handle_repo_clone_with_progress(args, proxy_config, lfs_config, None)
 }
 
 /// Handle the `repo_clone` tool call with optional progress reporting.
@@ -205,6 +206,7 @@ pub fn handle_repo_clone(
 pub fn handle_repo_clone_with_progress(
     args: RepoCloneArgs,
     proxy_config: &ProxyConfig,
+    lfs_config: &LfsConfig,
     progress: Option<ProgressSender>,
 ) -> Result<RepoCloneResult, RepoCloneError> {
     info!(
@@ -271,6 +273,7 @@ pub fn handle_repo_clone_with_progress(
         proxy_url: proxy_config.url.clone(),
         no_proxy: proxy_config.no_proxy.clone(),
         progress,
+        lfs_config: Some(lfs_config.clone()),
     };
 
     let tar_result = create_tar_from_tree_with_options(
