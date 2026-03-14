@@ -87,7 +87,7 @@ src/
 │   ├── pull.rs         # Incremental sync
 │   ├── diff.rs         # Commit comparison
 │   ├── refs.rs         # Remote ref listing
-│   ├── lfs.rs          # Git LFS support
+│   ├── lfs.rs          # Git LFS support (retry, progress, size limits)
 │   └── submodule.rs    # Submodule handling
 ├── streaming/          # Transfer formats
 │   ├── mod.rs          # Module exports

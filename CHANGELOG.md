@@ -16,6 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Configurable session management** — new `sessions` section in `config.json` for
   setting session timeout, max concurrent streaming sessions, and max repo sessions.
   Previously hardcoded to 1 hour / 10 / 100 respectively.
+- **LFS improvements** — new `lfs` section in `config.json` with retry logic
+  (exponential backoff for transient failures), per-object and total size limits,
+  and byte-level progress tracking during LFS downloads.
+- **Submodule configuration** — new `submodules` section in `config.json` for
+  controlling recursion depth, concurrency, failure limits, and include/exclude
+  patterns (configuration only — implementation in a future release).
 - **Chunk-level resume** — new `repo_clone_status` tool to check progress and identify
   missing chunks in a Tier 2 streaming session. `repo/clone_chunk` responses now include
   `next_missing_chunk` so the AI can resume interrupted transfers without re-downloading

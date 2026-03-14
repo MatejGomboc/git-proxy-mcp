@@ -159,6 +159,7 @@ fn main() -> ExitCode {
         audit_logger,
         cfg.proxy,
         &cfg.sessions,
+        cfg.lfs,
     );
 
     info!("MCP server ready, waiting for client connection...");

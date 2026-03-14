@@ -63,6 +63,14 @@ pub struct Config {
     /// Session management settings.
     #[serde(default)]
     pub sessions: SessionConfig,
+
+    /// Git LFS settings.
+    #[serde(default)]
+    pub lfs: LfsConfig,
+
+    /// Submodule settings.
+    #[serde(default)]
+    pub submodules: SubmoduleConfig,
 }
 
 impl Config {
@@ -326,6 +334,166 @@ impl SessionConfig {
     #[must_use]
     pub const fn timeout(&self) -> Duration {
         Duration::from_secs(self.timeout_secs)
+    }
+}
+
+/// Default LFS retry max attempts.
+const fn default_lfs_retry_max_attempts() -> u32 {
+    3
+}
+
+/// Default LFS retry initial backoff in milliseconds.
+const fn default_lfs_retry_initial_backoff_ms() -> u64 {
+    500
+}
+
+/// Default LFS retry max backoff in milliseconds.
+const fn default_lfs_retry_max_backoff_ms() -> u64 {
+    30_000
+}
+
+/// Default LFS retry backoff multiplier.
+const fn default_lfs_retry_backoff_multiplier() -> f64 {
+    2.0
+}
+
+/// Git LFS configuration.
+///
+/// Controls retry behaviour, size limits, and download settings
+/// for LFS object fetching.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LfsConfig {
+    /// Maximum number of retry attempts for failed LFS downloads.
+    ///
+    /// Only transient errors (HTTP 429, 500, 502, 503, 504, connection
+    /// errors) are retried. Client errors (401, 403, 404) are not.
+    ///
+    /// Default: 3.
+    #[serde(default = "default_lfs_retry_max_attempts")]
+    pub retry_max_attempts: u32,
+
+    /// Initial backoff delay in milliseconds before the first retry.
+    ///
+    /// Subsequent retries use exponential backoff up to `retry_max_backoff_ms`.
+    ///
+    /// Default: 500.
+    #[serde(default = "default_lfs_retry_initial_backoff_ms")]
+    pub retry_initial_backoff_ms: u64,
+
+    /// Maximum backoff delay in milliseconds between retries.
+    ///
+    /// Default: 30000 (30 seconds).
+    #[serde(default = "default_lfs_retry_max_backoff_ms")]
+    pub retry_max_backoff_ms: u64,
+
+    /// Multiplier applied to backoff delay after each retry.
+    ///
+    /// Default: 2.0.
+    #[serde(default = "default_lfs_retry_backoff_multiplier")]
+    pub retry_backoff_multiplier: f64,
+
+    /// Maximum size in bytes for a single LFS object.
+    ///
+    /// Objects exceeding this limit are skipped (the pointer file is
+    /// included in the archive instead). Set to `null` for unlimited.
+    ///
+    /// Default: unlimited.
+    #[serde(default)]
+    pub max_object_size: Option<u64>,
+
+    /// Maximum total size in bytes for all LFS objects in a single operation.
+    ///
+    /// Once this limit is reached, remaining LFS objects are skipped.
+    /// Set to `null` for unlimited.
+    ///
+    /// Default: unlimited.
+    #[serde(default)]
+    pub max_total_size: Option<u64>,
+}
+
+impl Default for LfsConfig {
+    fn default() -> Self {
+        Self {
+            retry_max_attempts: default_lfs_retry_max_attempts(),
+            retry_initial_backoff_ms: default_lfs_retry_initial_backoff_ms(),
+            retry_max_backoff_ms: default_lfs_retry_max_backoff_ms(),
+            retry_backoff_multiplier: default_lfs_retry_backoff_multiplier(),
+            max_object_size: None,
+            max_total_size: None,
+        }
+    }
+}
+
+/// Default maximum submodule recursion depth.
+const fn default_submodule_max_depth() -> u32 {
+    1
+}
+
+/// Default maximum concurrent submodule fetches.
+const fn default_submodule_max_concurrent() -> usize {
+    4
+}
+
+/// Default maximum submodule fetch failures before stopping.
+const fn default_submodule_max_failures() -> usize {
+    3
+}
+
+/// Submodule configuration.
+///
+/// Controls depth, filtering, and concurrency for submodule fetching.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SubmoduleConfig {
+    /// Maximum recursion depth for nested submodules.
+    ///
+    /// A depth of 1 fetches only top-level submodules (current behaviour).
+    /// Higher values enable recursive fetching of nested submodules.
+    ///
+    /// Default: 1.
+    #[serde(default = "default_submodule_max_depth")]
+    pub max_depth: u32,
+
+    /// Maximum number of submodules fetched in parallel.
+    ///
+    /// Default: 4.
+    #[serde(default = "default_submodule_max_concurrent")]
+    pub max_concurrent: usize,
+
+    /// Maximum number of submodule fetch failures before stopping.
+    ///
+    /// Once this many submodules fail, the remaining are skipped.
+    ///
+    /// Default: 3.
+    #[serde(default = "default_submodule_max_failures")]
+    pub max_failures: usize,
+
+    /// Glob patterns for submodule paths to include.
+    ///
+    /// If set, only submodules matching at least one pattern are fetched.
+    /// Example: `["lib/*", "deps/core"]`.
+    #[serde(default)]
+    pub include_patterns: Option<Vec<String>>,
+
+    /// Glob patterns for submodule paths to exclude.
+    ///
+    /// Submodules matching any pattern are skipped. Exclusions take
+    /// precedence over inclusions.
+    /// Example: `["vendor/*", "third_party/*"]`.
+    #[serde(default)]
+    pub exclude_patterns: Option<Vec<String>>,
+}
+
+impl Default for SubmoduleConfig {
+    fn default() -> Self {
+        Self {
+            max_depth: default_submodule_max_depth(),
+            max_concurrent: default_submodule_max_concurrent(),
+            max_failures: default_submodule_max_failures(),
+            include_patterns: None,
+            exclude_patterns: None,
+        }
     }
 }
 
@@ -696,6 +864,143 @@ mod tests {
         assert_eq!(
             config.git_identity.email,
             Some("claude@anthropic.com".to_string())
+        );
+    }
+
+    #[test]
+    fn lfs_config_defaults() {
+        let config = LfsConfig::default();
+        assert_eq!(config.retry_max_attempts, 3);
+        assert_eq!(config.retry_initial_backoff_ms, 500);
+        assert_eq!(config.retry_max_backoff_ms, 30_000);
+        assert!((config.retry_backoff_multiplier - 2.0).abs() < f64::EPSILON);
+        assert!(config.max_object_size.is_none());
+        assert!(config.max_total_size.is_none());
+    }
+
+    #[test]
+    fn parse_lfs_config() {
+        let json = r#"{
+            "lfs": {
+                "retry_max_attempts": 5,
+                "retry_initial_backoff_ms": 1000,
+                "retry_max_backoff_ms": 60000,
+                "retry_backoff_multiplier": 3.0,
+                "max_object_size": 104857600,
+                "max_total_size": 524288000
+            }
+        }"#;
+
+        let config: Config = serde_json::from_str(json).unwrap();
+        assert_eq!(config.lfs.retry_max_attempts, 5);
+        assert_eq!(config.lfs.retry_initial_backoff_ms, 1000);
+        assert_eq!(config.lfs.retry_max_backoff_ms, 60_000);
+        assert!((config.lfs.retry_backoff_multiplier - 3.0).abs() < f64::EPSILON);
+        assert_eq!(config.lfs.max_object_size, Some(104_857_600));
+        assert_eq!(config.lfs.max_total_size, Some(524_288_000));
+    }
+
+    #[test]
+    fn parse_lfs_config_partial() {
+        let json = r#"{
+            "lfs": {
+                "retry_max_attempts": 10
+            }
+        }"#;
+
+        let config: Config = serde_json::from_str(json).unwrap();
+        assert_eq!(config.lfs.retry_max_attempts, 10);
+        // Other fields should use defaults
+        assert_eq!(config.lfs.retry_initial_backoff_ms, 500);
+        assert_eq!(config.lfs.retry_max_backoff_ms, 30_000);
+        assert!((config.lfs.retry_backoff_multiplier - 2.0).abs() < f64::EPSILON);
+        assert!(config.lfs.max_object_size.is_none());
+        assert!(config.lfs.max_total_size.is_none());
+    }
+
+    #[test]
+    fn submodule_config_defaults() {
+        let config = SubmoduleConfig::default();
+        assert_eq!(config.max_depth, 1);
+        assert_eq!(config.max_concurrent, 4);
+        assert_eq!(config.max_failures, 3);
+        assert!(config.include_patterns.is_none());
+        assert!(config.exclude_patterns.is_none());
+    }
+
+    #[test]
+    fn parse_submodule_config() {
+        let json = r#"{
+            "submodules": {
+                "max_depth": 3,
+                "max_concurrent": 8,
+                "max_failures": 5,
+                "include_patterns": ["lib/*", "deps/core"],
+                "exclude_patterns": ["vendor/*"]
+            }
+        }"#;
+
+        let config: Config = serde_json::from_str(json).unwrap();
+        assert_eq!(config.submodules.max_depth, 3);
+        assert_eq!(config.submodules.max_concurrent, 8);
+        assert_eq!(config.submodules.max_failures, 5);
+        assert_eq!(
+            config.submodules.include_patterns,
+            Some(vec!["lib/*".to_string(), "deps/core".to_string()])
+        );
+        assert_eq!(
+            config.submodules.exclude_patterns,
+            Some(vec!["vendor/*".to_string()])
+        );
+    }
+
+    #[test]
+    fn parse_submodule_config_partial() {
+        let json = r#"{
+            "submodules": {
+                "max_depth": 2
+            }
+        }"#;
+
+        let config: Config = serde_json::from_str(json).unwrap();
+        assert_eq!(config.submodules.max_depth, 2);
+        // Other fields should use defaults
+        assert_eq!(config.submodules.max_concurrent, 4);
+        assert_eq!(config.submodules.max_failures, 3);
+        assert!(config.submodules.include_patterns.is_none());
+        assert!(config.submodules.exclude_patterns.is_none());
+    }
+
+    #[test]
+    fn parse_full_config_with_lfs_and_submodules() {
+        let json = r#"{
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "_comment": "Test config",
+            "security": {
+                "allow_force_push": false,
+                "protected_branches": ["main"]
+            },
+            "logging": {
+                "level": "debug"
+            },
+            "lfs": {
+                "retry_max_attempts": 5,
+                "max_object_size": 104857600
+            },
+            "submodules": {
+                "max_depth": 2,
+                "exclude_patterns": ["vendor/*"]
+            }
+        }"#;
+
+        let config: Config = serde_json::from_str(json).unwrap();
+        assert!(config.validate().is_ok());
+        assert_eq!(config.lfs.retry_max_attempts, 5);
+        assert_eq!(config.lfs.max_object_size, Some(104_857_600));
+        assert_eq!(config.submodules.max_depth, 2);
+        assert_eq!(
+            config.submodules.exclude_patterns,
+            Some(vec!["vendor/*".to_string()])
         );
     }
 }

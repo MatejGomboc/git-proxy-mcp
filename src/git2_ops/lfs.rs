@@ -24,9 +24,12 @@ use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, CONTENT_TYP
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::Read;
+use std::time::Duration;
 use tracing::{debug, trace, warn};
 
 use super::error::Git2Error;
+use crate::config::LfsConfig;
+use crate::mcp::ProgressSender;
 
 /// Maximum size of an LFS pointer file (per spec).
 const MAX_POINTER_SIZE: usize = 1024;
@@ -167,6 +170,18 @@ struct LfsError {
     message: String,
 }
 
+/// Size of chunks used for LFS content download with progress reporting.
+const LFS_DOWNLOAD_CHUNK_SIZE: usize = 64 * 1024; // 64 KB
+
+/// Result of a batch fetch operation.
+#[derive(Debug)]
+pub struct LfsBatchResult {
+    /// Map from OID to content bytes.
+    pub contents: HashMap<String, Vec<u8>>,
+    /// Number of objects skipped because they exceeded size limits.
+    pub skipped_too_large: usize,
+}
+
 /// Client for fetching LFS content (blocking/sync).
 pub struct LfsClient {
     /// HTTP client.
@@ -175,6 +190,20 @@ pub struct LfsClient {
     lfs_url: String,
     /// Basic auth credentials (username, password).
     credentials: Option<(String, String)>,
+    /// Optional progress sender for real-time updates.
+    progress: Option<ProgressSender>,
+    /// Maximum number of retry attempts for transient errors.
+    retry_max_attempts: u32,
+    /// Initial backoff delay in milliseconds before the first retry.
+    retry_initial_backoff_ms: u64,
+    /// Maximum backoff delay in milliseconds between retries.
+    retry_max_backoff_ms: u64,
+    /// Multiplier applied to backoff delay after each retry.
+    retry_backoff_multiplier: f64,
+    /// Maximum size in bytes for a single LFS object (None = unlimited).
+    max_object_size: Option<u64>,
+    /// Maximum total size in bytes for all LFS objects (None = unlimited).
+    max_total_size: Option<u64>,
 }
 
 impl LfsClient {
@@ -184,6 +213,10 @@ impl LfsClient {
     ///
     /// * `repo_url` - Git repository URL (used to derive LFS server URL)
     /// * `credentials` - Optional (username, password) for authentication
+    /// * `proxy_url` - Optional proxy URL for HTTP requests
+    /// * `no_proxy` - Optional comma-separated list of hosts to bypass proxy
+    /// * `lfs_config` - LFS configuration (retry behaviour, size limits)
+    /// * `progress` - Optional progress sender for real-time updates
     ///
     /// # Errors
     ///
@@ -193,6 +226,8 @@ impl LfsClient {
         credentials: Option<(String, String)>,
         proxy_url: Option<&str>,
         no_proxy: Option<&str>,
+        lfs_config: &LfsConfig,
+        progress: Option<ProgressSender>,
     ) -> Result<Self, Git2Error> {
         let lfs_url = derive_lfs_url(repo_url)?;
 
@@ -219,7 +254,168 @@ impl LfsClient {
             client,
             lfs_url,
             credentials,
+            progress,
+            retry_max_attempts: lfs_config.retry_max_attempts,
+            retry_initial_backoff_ms: lfs_config.retry_initial_backoff_ms,
+            retry_max_backoff_ms: lfs_config.retry_max_backoff_ms,
+            retry_backoff_multiplier: lfs_config.retry_backoff_multiplier,
+            max_object_size: lfs_config.max_object_size,
+            max_total_size: lfs_config.max_total_size,
         })
+    }
+
+    /// Determines whether an HTTP status code is transient and should be retried.
+    #[allow(clippy::missing_const_for_fn)] // matches! macro prevents const
+    fn is_transient_status(status: reqwest::StatusCode) -> bool {
+        matches!(status.as_u16(), 429 | 500 | 502 | 503 | 504)
+    }
+
+    /// Determines whether a reqwest error is transient (connection/timeout).
+    fn is_transient_error(err: &reqwest::Error) -> bool {
+        err.is_connect() || err.is_timeout()
+    }
+
+    /// Calculates the next backoff delay using exponential backoff.
+    ///
+    /// Returns the new delay in milliseconds, capped at `max_backoff_ms`.
+    /// Precision loss from `u64 -> f64` is acceptable for backoff timing.
+    #[allow(clippy::cast_precision_loss)]
+    #[allow(clippy::cast_possible_truncation)]
+    #[allow(clippy::cast_sign_loss)]
+    fn next_backoff(&self, current_ms: u64) -> u64 {
+        ((current_ms as f64 * self.retry_backoff_multiplier) as u64).min(self.retry_max_backoff_ms)
+    }
+
+    /// Downloads content from a URL with retry and exponential backoff.
+    ///
+    /// Only transient errors (HTTP 429, 500, 502, 503, 504, and
+    /// connection/timeout errors) are retried. Client errors such as
+    /// 401, 403, 404 are not retried.
+    fn download_with_retry(&self, url: &str, headers: &HeaderMap) -> Result<Vec<u8>, Git2Error> {
+        let mut attempt = 0u32;
+        let mut delay_ms = self.retry_initial_backoff_ms;
+
+        loop {
+            let result = self.client.get(url).headers(headers.clone()).send();
+
+            match result {
+                Ok(mut response) => {
+                    if response.status().is_success() {
+                        let mut content = Vec::new();
+                        response.read_to_end(&mut content).map_err(|e| {
+                            Git2Error::Git2(format!("failed to read LFS content: {e}"))
+                        })?;
+                        return Ok(content);
+                    }
+
+                    let status = response.status();
+                    if Self::is_transient_status(status) && attempt + 1 < self.retry_max_attempts {
+                        attempt += 1;
+                        warn!(
+                            attempt = attempt,
+                            max_attempts = self.retry_max_attempts,
+                            status = %status,
+                            url = %url,
+                            delay_ms = delay_ms,
+                            "LFS download returned transient error, retrying"
+                        );
+                        std::thread::sleep(Duration::from_millis(delay_ms));
+                        delay_ms = self.next_backoff(delay_ms);
+                        continue;
+                    }
+
+                    return Err(Git2Error::Git2(format!(
+                        "LFS download returned status {status}"
+                    )));
+                }
+                Err(e) => {
+                    if Self::is_transient_error(&e) && attempt + 1 < self.retry_max_attempts {
+                        attempt += 1;
+                        warn!(
+                            attempt = attempt,
+                            max_attempts = self.retry_max_attempts,
+                            error = %e,
+                            url = %url,
+                            delay_ms = delay_ms,
+                            "LFS download failed with transient error, retrying"
+                        );
+                        std::thread::sleep(Duration::from_millis(delay_ms));
+                        delay_ms = self.next_backoff(delay_ms);
+                        continue;
+                    }
+
+                    return Err(Git2Error::Git2(format!("LFS download failed: {e}")));
+                }
+            }
+        }
+    }
+
+    /// Sends a POST request with retry and exponential backoff.
+    ///
+    /// Used for the Batch API POST request.
+    fn post_with_retry(
+        &self,
+        url: &str,
+        headers: &HeaderMap,
+        body: &impl Serialize,
+    ) -> Result<reqwest::blocking::Response, Git2Error> {
+        let mut attempt = 0u32;
+        let mut delay_ms = self.retry_initial_backoff_ms;
+
+        loop {
+            let result = self
+                .client
+                .post(url)
+                .headers(headers.clone())
+                .json(body)
+                .send();
+
+            match result {
+                Ok(response) => {
+                    if response.status().is_success() {
+                        return Ok(response);
+                    }
+
+                    let status = response.status();
+                    if Self::is_transient_status(status) && attempt + 1 < self.retry_max_attempts {
+                        attempt += 1;
+                        warn!(
+                            attempt = attempt,
+                            max_attempts = self.retry_max_attempts,
+                            status = %status,
+                            url = %url,
+                            delay_ms = delay_ms,
+                            "LFS batch POST returned transient error, retrying"
+                        );
+                        std::thread::sleep(Duration::from_millis(delay_ms));
+                        delay_ms = self.next_backoff(delay_ms);
+                        continue;
+                    }
+
+                    return Err(Git2Error::Git2(format!(
+                        "LFS batch API returned status {status}"
+                    )));
+                }
+                Err(e) => {
+                    if Self::is_transient_error(&e) && attempt + 1 < self.retry_max_attempts {
+                        attempt += 1;
+                        warn!(
+                            attempt = attempt,
+                            max_attempts = self.retry_max_attempts,
+                            error = %e,
+                            url = %url,
+                            delay_ms = delay_ms,
+                            "LFS batch POST failed with transient error, retrying"
+                        );
+                        std::thread::sleep(Duration::from_millis(delay_ms));
+                        delay_ms = self.next_backoff(delay_ms);
+                        continue;
+                    }
+
+                    return Err(Git2Error::Git2(format!("LFS batch request failed: {e}")));
+                }
+            }
+        }
     }
 
     /// Fetch the actual content for an LFS pointer (blocking).
@@ -234,9 +430,20 @@ impl LfsClient {
     ///
     /// # Errors
     ///
-    /// Returns error if the LFS API request fails or content download fails.
+    /// Returns error if the LFS API request fails, content download fails,
+    /// or the object exceeds `max_object_size`.
     pub fn fetch_content(&self, pointer: &LfsPointer) -> Result<Vec<u8>, Git2Error> {
         trace!(oid = %pointer.oid, size = pointer.size, "fetching LFS content");
+
+        // Check per-object size limit before downloading
+        if let Some(max_size) = self.max_object_size {
+            if pointer.size > max_size {
+                return Err(Git2Error::Git2(format!(
+                    "LFS object {} exceeds max_object_size ({} > {})",
+                    pointer.oid, pointer.size, max_size
+                )));
+            }
+        }
 
         // Step 1: Call Batch API to get download URL
         let batch_url = format!("{}/objects/batch", self.lfs_url);
@@ -277,20 +484,7 @@ impl LfsClient {
             );
         }
 
-        let response = self
-            .client
-            .post(&batch_url)
-            .headers(headers)
-            .json(&request)
-            .send()
-            .map_err(|e| Git2Error::Git2(format!("LFS batch request failed: {e}")))?;
-
-        if !response.status().is_success() {
-            return Err(Git2Error::Git2(format!(
-                "LFS batch API returned status {}",
-                response.status()
-            )));
-        }
+        let response = self.post_with_retry(&batch_url, &headers, &request)?;
 
         let batch_response: LfsBatchResponse = response
             .json()
@@ -316,7 +510,7 @@ impl LfsClient {
 
         trace!(href = %download.href, "downloading LFS content");
 
-        // Step 2: Download actual content
+        // Step 2: Download actual content with retry
         let mut download_headers = HeaderMap::new();
         for (key, value) in &download.header {
             if let (Ok(name), Ok(val)) = (
@@ -327,28 +521,12 @@ impl LfsClient {
             }
         }
 
-        let mut content_response = self
-            .client
-            .get(&download.href)
-            .headers(download_headers)
-            .send()
-            .map_err(|e| Git2Error::Git2(format!("LFS download failed: {e}")))?;
-
-        if !content_response.status().is_success() {
-            return Err(Git2Error::Git2(format!(
-                "LFS download returned status {}",
-                content_response.status()
-            )));
-        }
-
-        // Read content into buffer
-        // On 32-bit systems, this may truncate for very large files (>4GB)
-        #[allow(clippy::cast_possible_truncation)]
-        let capacity = pointer.size as usize;
-        let mut content = Vec::with_capacity(capacity);
-        content_response
-            .read_to_end(&mut content)
-            .map_err(|e| Git2Error::Git2(format!("failed to read LFS content: {e}")))?;
+        // Use chunked reading with progress if a progress sender is available
+        let content = if self.progress.is_some() {
+            self.download_with_progress(&download.href, &download_headers, pointer)?
+        } else {
+            self.download_with_retry(&download.href, &download_headers)?
+        };
 
         // Verify size
         if content.len() as u64 != pointer.size {
@@ -364,10 +542,105 @@ impl LfsClient {
         Ok(content)
     }
 
+    /// Downloads content with chunked reading and progress reporting.
+    ///
+    /// Reads in 64KB chunks, sending progress updates via the `ProgressSender`.
+    /// Falls back to retry logic for the initial request.
+    fn download_with_progress(
+        &self,
+        url: &str,
+        headers: &HeaderMap,
+        pointer: &LfsPointer,
+    ) -> Result<Vec<u8>, Git2Error> {
+        // We use retry logic for the initial request establishment
+        let mut attempt = 0u32;
+        let mut delay_ms = self.retry_initial_backoff_ms;
+
+        loop {
+            let result = self.client.get(url).headers(headers.clone()).send();
+
+            match result {
+                Ok(mut response) => {
+                    if response.status().is_success() {
+                        // Read in chunks with progress
+                        // On 32-bit systems, this may truncate for very large files (>4GB)
+                        #[allow(clippy::cast_possible_truncation)]
+                        let capacity = pointer.size as usize;
+                        let mut content = Vec::with_capacity(capacity);
+                        let mut buf = vec![0u8; LFS_DOWNLOAD_CHUNK_SIZE];
+                        let mut bytes_read = 0usize;
+
+                        loop {
+                            let n = response.read(&mut buf).map_err(|e| {
+                                Git2Error::Git2(format!("failed to read LFS content: {e}"))
+                            })?;
+                            if n == 0 {
+                                break;
+                            }
+                            content.extend_from_slice(&buf[..n]);
+                            bytes_read += n;
+
+                            if let Some(ref sender) = self.progress {
+                                // Truncation is acceptable: only used for progress display
+                                #[allow(clippy::cast_possible_truncation)]
+                                sender.send_lfs_progress(
+                                    0,
+                                    1,
+                                    None,
+                                    bytes_read,
+                                    pointer.size as usize,
+                                );
+                            }
+                        }
+
+                        return Ok(content);
+                    }
+
+                    let status = response.status();
+                    if Self::is_transient_status(status) && attempt + 1 < self.retry_max_attempts {
+                        attempt += 1;
+                        warn!(
+                            attempt = attempt,
+                            max_attempts = self.retry_max_attempts,
+                            status = %status,
+                            delay_ms = delay_ms,
+                            "LFS download returned transient error, retrying"
+                        );
+                        std::thread::sleep(Duration::from_millis(delay_ms));
+                        delay_ms = self.next_backoff(delay_ms);
+                        continue;
+                    }
+
+                    return Err(Git2Error::Git2(format!(
+                        "LFS download returned status {status}"
+                    )));
+                }
+                Err(e) => {
+                    if Self::is_transient_error(&e) && attempt + 1 < self.retry_max_attempts {
+                        attempt += 1;
+                        warn!(
+                            attempt = attempt,
+                            max_attempts = self.retry_max_attempts,
+                            error = %e,
+                            delay_ms = delay_ms,
+                            "LFS download failed with transient error, retrying"
+                        );
+                        std::thread::sleep(Duration::from_millis(delay_ms));
+                        delay_ms = self.next_backoff(delay_ms);
+                        continue;
+                    }
+
+                    return Err(Git2Error::Git2(format!("LFS download failed: {e}")));
+                }
+            }
+        }
+    }
+
     /// Batch fetch multiple LFS objects.
     ///
     /// This is more efficient than calling `fetch_content` multiple times
-    /// as it uses a single Batch API request.
+    /// as it uses a single Batch API request. Objects that exceed size
+    /// limits are skipped with a warning.
     ///
     /// # Arguments
     ///
@@ -375,17 +648,18 @@ impl LfsClient {
     ///
     /// # Returns
     ///
-    /// Map from OID to content bytes. Missing/failed objects are omitted.
+    /// An `LfsBatchResult` containing the fetched content and skip counts.
     ///
     /// # Errors
     ///
     /// Returns `Git2Error` if the batch API request fails or returns an error.
-    pub fn fetch_batch(
-        &self,
-        pointers: &[LfsPointer],
-    ) -> Result<HashMap<String, Vec<u8>>, Git2Error> {
+    #[allow(clippy::too_many_lines)] // Batch fetch with size checks is naturally verbose
+    pub fn fetch_batch(&self, pointers: &[LfsPointer]) -> Result<LfsBatchResult, Git2Error> {
         if pointers.is_empty() {
-            return Ok(HashMap::new());
+            return Ok(LfsBatchResult {
+                contents: HashMap::new(),
+                skipped_too_large: 0,
+            });
         }
 
         debug!(count = pointers.len(), "batch fetching LFS content");
@@ -429,20 +703,7 @@ impl LfsClient {
             }
         }
 
-        let response = self
-            .client
-            .post(&batch_url)
-            .headers(headers)
-            .json(&request)
-            .send()
-            .map_err(|e| Git2Error::Git2(format!("LFS batch request failed: {e}")))?;
-
-        if !response.status().is_success() {
-            return Err(Git2Error::Git2(format!(
-                "LFS batch API returned status {}",
-                response.status()
-            )));
-        }
+        let response = self.post_with_retry(&batch_url, &headers, &request)?;
 
         let batch_response: LfsBatchResponse = response
             .json()
@@ -450,11 +711,43 @@ impl LfsClient {
 
         // Download each object
         let mut results = HashMap::new();
+        let mut skipped_too_large = 0usize;
+        let mut cumulative_bytes = 0u64;
+        let total_objects = batch_response.objects.len();
 
-        for obj in batch_response.objects {
+        for (index, obj) in batch_response.objects.into_iter().enumerate() {
             if obj.error.is_some() {
                 warn!(oid = %obj.oid, "LFS object has error, skipping");
                 continue;
+            }
+
+            // Check per-object size limit
+            if let Some(max_size) = self.max_object_size {
+                if obj.size > max_size {
+                    warn!(
+                        oid = %obj.oid,
+                        size = obj.size,
+                        max_object_size = max_size,
+                        "LFS object exceeds max_object_size, skipping"
+                    );
+                    skipped_too_large += 1;
+                    continue;
+                }
+            }
+
+            // Check cumulative total size limit
+            if let Some(max_total) = self.max_total_size {
+                if cumulative_bytes + obj.size > max_total {
+                    warn!(
+                        oid = %obj.oid,
+                        size = obj.size,
+                        cumulative = cumulative_bytes,
+                        max_total_size = max_total,
+                        "LFS total size would exceed max_total_size, skipping"
+                    );
+                    skipped_too_large += 1;
+                    continue;
+                }
             }
 
             let Some(download) = obj.actions.and_then(|a| a.download) else {
@@ -473,22 +766,17 @@ impl LfsClient {
                 }
             }
 
-            // Download content
-            match self
-                .client
-                .get(&download.href)
-                .headers(download_headers)
-                .send()
-            {
-                Ok(mut resp) if resp.status().is_success() => {
-                    let mut content = Vec::new();
-                    if resp.read_to_end(&mut content).is_ok() {
-                        trace!(oid = %obj.oid, size = content.len(), "downloaded LFS object");
-                        results.insert(obj.oid, content);
+            // Download content with retry
+            match self.download_with_retry(&download.href, &download_headers) {
+                Ok(content) => {
+                    cumulative_bytes += content.len() as u64;
+                    trace!(oid = %obj.oid, size = content.len(), "downloaded LFS object");
+                    results.insert(obj.oid, content);
+
+                    // Report per-file progress
+                    if let Some(ref sender) = self.progress {
+                        sender.send_lfs_progress(index + 1, total_objects, None, 0, 0);
                     }
-                }
-                Ok(resp) => {
-                    warn!(oid = %obj.oid, status = %resp.status(), "LFS download failed");
                 }
                 Err(e) => {
                     warn!(oid = %obj.oid, error = %e, "LFS download failed");
@@ -499,10 +787,14 @@ impl LfsClient {
         debug!(
             requested = pointers.len(),
             fetched = results.len(),
+            skipped_too_large = skipped_too_large,
             "batch fetch complete"
         );
 
-        Ok(results)
+        Ok(LfsBatchResult {
+            contents: results,
+            skipped_too_large,
+        })
     }
 }
 
@@ -618,18 +910,90 @@ mod tests {
 
     #[test]
     fn lfs_client_creation() {
-        let client = LfsClient::new("https://github.com/owner/repo.git", None, None, None);
+        let config = LfsConfig::default();
+        let client = LfsClient::new(
+            "https://github.com/owner/repo.git",
+            None,
+            None,
+            None,
+            &config,
+            None,
+        );
         assert!(client.is_ok());
     }
 
     #[test]
     fn lfs_client_with_credentials() {
+        let config = LfsConfig::default();
         let client = LfsClient::new(
             "https://github.com/owner/repo.git",
             Some(("user".to_string(), "pass".to_string())),
             None,
             None,
+            &config,
+            None,
         );
         assert!(client.is_ok());
+    }
+
+    #[test]
+    fn lfs_client_with_custom_config() {
+        let config = LfsConfig {
+            retry_max_attempts: 5,
+            retry_initial_backoff_ms: 1000,
+            retry_max_backoff_ms: 60_000,
+            retry_backoff_multiplier: 3.0,
+            max_object_size: Some(100 * 1024 * 1024),
+            max_total_size: Some(500 * 1024 * 1024),
+        };
+        let client = LfsClient::new(
+            "https://github.com/owner/repo.git",
+            None,
+            None,
+            None,
+            &config,
+            None,
+        );
+        assert!(client.is_ok());
+        let client = client.unwrap();
+        assert_eq!(client.retry_max_attempts, 5);
+        assert_eq!(client.retry_initial_backoff_ms, 1000);
+        assert_eq!(client.max_object_size, Some(100 * 1024 * 1024));
+        assert_eq!(client.max_total_size, Some(500 * 1024 * 1024));
+    }
+
+    #[test]
+    fn is_transient_status_identifies_retryable_codes() {
+        assert!(LfsClient::is_transient_status(
+            reqwest::StatusCode::TOO_MANY_REQUESTS
+        ));
+        assert!(LfsClient::is_transient_status(
+            reqwest::StatusCode::INTERNAL_SERVER_ERROR
+        ));
+        assert!(LfsClient::is_transient_status(
+            reqwest::StatusCode::BAD_GATEWAY
+        ));
+        assert!(LfsClient::is_transient_status(
+            reqwest::StatusCode::SERVICE_UNAVAILABLE
+        ));
+        assert!(LfsClient::is_transient_status(
+            reqwest::StatusCode::GATEWAY_TIMEOUT
+        ));
+    }
+
+    #[test]
+    fn is_transient_status_rejects_client_errors() {
+        assert!(!LfsClient::is_transient_status(
+            reqwest::StatusCode::UNAUTHORIZED
+        ));
+        assert!(!LfsClient::is_transient_status(
+            reqwest::StatusCode::FORBIDDEN
+        ));
+        assert!(!LfsClient::is_transient_status(
+            reqwest::StatusCode::NOT_FOUND
+        ));
+        assert!(!LfsClient::is_transient_status(
+            reqwest::StatusCode::BAD_REQUEST
+        ));
     }
 }

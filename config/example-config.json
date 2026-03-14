@@ -34,5 +34,20 @@
         "timeout_secs": 3600,
         "max_streaming_sessions": 10,
         "max_repo_sessions": 100
+    },
+    "lfs": {
+        "retry_max_attempts": 3,
+        "retry_initial_backoff_ms": 500,
+        "retry_max_backoff_ms": 30000,
+        "retry_backoff_multiplier": 2.0,
+        "max_object_size": null,
+        "max_total_size": null
+    },
+    "submodules": {
+        "max_depth": 1,
+        "max_concurrent": 4,
+        "max_failures": 3,
+        "include_patterns": null,
+        "exclude_patterns": null
     }
 }

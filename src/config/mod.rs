@@ -25,7 +25,8 @@
 mod settings;
 
 pub use settings::{
-    Config, LoggingConfig, ProxyConfig, SecurityConfig, SessionConfig, TimeoutConfig,
+    Config, LfsConfig, LoggingConfig, ProxyConfig, SecurityConfig, SessionConfig, SubmoduleConfig,
+    TimeoutConfig,
 };
 
 use std::path::{Path, PathBuf};

@@ -345,27 +345,35 @@ Configuration file location:
 
 ```json
 {
-  "git_identity": {
-    "name": "Claude AI",
-    "email": "ai-assistant@your-domain.com"
-  },
-  "security": {
-    "allow_force_push": false,
-    "protected_branches": ["main", "master"]
-  },
-  "logging": {
-    "level": "warn",
-    "audit_log_path": "~/.git-proxy-mcp/audit.log"
-  },
-  "proxy": {
-    "url": "http://proxy.example.com:8080",
-    "no_proxy": "*.internal.com,localhost"
-  },
-  "sessions": {
-    "timeout_secs": 3600,
-    "max_streaming_sessions": 10,
-    "max_repo_sessions": 100
-  }
+    "git_identity": {
+        "name": "Claude AI",
+        "email": "ai-assistant@your-domain.com"
+    },
+    "security": {
+        "allow_force_push": false,
+        "protected_branches": ["main", "master"]
+    },
+    "logging": {
+        "level": "warn",
+        "audit_log_path": "~/.git-proxy-mcp/audit.log"
+    },
+    "proxy": {
+        "url": "http://proxy.example.com:8080",
+        "no_proxy": "*.internal.com,localhost"
+    },
+    "sessions": {
+        "timeout_secs": 3600,
+        "max_streaming_sessions": 10,
+        "max_repo_sessions": 100
+    },
+    "lfs": {
+        "retry_max_attempts": 3,
+        "max_object_size": 104857600
+    },
+    "submodules": {
+        "max_depth": 1,
+        "exclude_patterns": ["vendor/*"]
+    }
 }
 ```
 
@@ -389,6 +397,13 @@ Configuration file location:
 | `sessions` | `timeout_secs` | Session inactivity timeout (default: 3600) |
 | `sessions` | `max_streaming_sessions` | Max Tier 2 streaming sessions (default: 10) |
 | `sessions` | `max_repo_sessions` | Max repo tracking sessions (default: 100) |
+| `lfs` | `retry_max_attempts` | Max LFS download retries (default: 3) |
+| `lfs` | `max_object_size` | Max single LFS object size in bytes |
+| `lfs` | `max_total_size` | Max total LFS size per operation |
+| `submodules` | `max_depth` | Submodule recursion depth (default: 1) |
+| `submodules` | `max_concurrent` | Parallel submodule fetches (default: 4) |
+| `submodules` | `include_patterns` | Glob patterns to include |
+| `submodules` | `exclude_patterns` | Glob patterns to exclude |
 
 ---
 
