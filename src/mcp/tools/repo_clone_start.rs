@@ -49,7 +49,7 @@ pub struct RepoCloneStartArgs {
     /// Repository URL (https:// or git@)
     pub url: String,
 
-    /// Branch to clone (defaults to "main")
+    /// Branch to clone (defaults to the remote's default branch)
     #[serde(default)]
     pub branch: Option<String>,
 
@@ -290,7 +290,6 @@ pub fn handle_repo_clone_start(
 
     // Build effective submodule config: merge per-request overrides with server defaults
     let effective_sub_config = SubmoduleConfig {
-        max_depth: args.submodule_depth.unwrap_or(submodule_config.max_depth),
         max_concurrent: submodule_config.max_concurrent,
         max_failures: submodule_config.max_failures,
         include_patterns: args
@@ -319,6 +318,7 @@ pub fn handle_repo_clone_start(
         progress: None,
         lfs_config: Some(lfs_config.clone()),
         submodule_config: Some(effective_sub_config),
+        submodule_depth: args.submodule_depth,
     };
 
     let tar_result = create_tar_from_tree_with_options(

@@ -371,7 +371,6 @@ Configuration file location:
         "max_object_size": 104857600
     },
     "submodules": {
-        "max_depth": 1,
         "exclude_patterns": ["vendor/*"]
     }
 }
@@ -400,7 +399,6 @@ Configuration file location:
 | `lfs` | `retry_max_attempts` | Max LFS download retries (default: 3) |
 | `lfs` | `max_object_size` | Max single LFS object size in bytes |
 | `lfs` | `max_total_size` | Max total LFS size per operation |
-| `submodules` | `max_depth` | Submodule recursion depth (default: 1) |
 | `submodules` | `max_concurrent` | Parallel submodule fetches (default: 4) |
 | `submodules` | `include_patterns` | Glob patterns to include |
 | `submodules` | `exclude_patterns` | Glob patterns to exclude |

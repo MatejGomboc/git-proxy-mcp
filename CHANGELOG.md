@@ -19,11 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **LFS improvements** — new `lfs` section in `config.json` with retry logic
   (exponential backoff for transient failures), per-object and total size limits,
   and byte-level progress tracking during LFS downloads.
-- **Submodule improvements** — recursive submodule fetching with configurable
-  depth limit, include/exclude glob pattern filtering, cycle detection, and
-  early termination after configurable failure count. New `submodule_depth`,
-  `submodule_include`, and `submodule_exclude` tool arguments for `repo/clone`
-  and `repo/clone_start`.
+- **Submodule improvements** — recursive submodule fetching with per-request
+  depth control (unlimited by default, mirroring git), include/exclude glob
+  pattern filtering, cycle detection, and early termination after configurable
+  failure count. New `submodule_depth`, `submodule_include`, and
+  `submodule_exclude` tool arguments for `repo/clone` and `repo/clone_start`.
 - **Parallel submodule fetching** — submodules at each depth level are now
   fetched in parallel using `std::thread::scope`, controlled by the existing
   `max_concurrent` setting (default 4). When `max_concurrent` is 1, behaviour
@@ -40,6 +40,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to `main` branch only, improved cancellation handling with `!cancelled()`.
 - Pre-release tags (e.g., `v1.0.0-rc1`) no longer get marked as the "latest" GitHub
   release.
+- Submodule recursion depth is now a per-request tool argument (`submodule_depth`)
+  rather than a server config setting, mirroring how `git clone --recurse-submodules`
+  works. Default is unlimited (git default).
+- Branch default description updated to "remote's default branch" instead of
+  hardcoded "main", matching git's actual behaviour.
 
 ### Fixed
 

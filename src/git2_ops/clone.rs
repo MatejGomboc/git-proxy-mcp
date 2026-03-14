@@ -43,7 +43,7 @@ pub struct FetchResult {
 /// Options for fetch operations.
 #[derive(Debug, Clone, Default)]
 pub struct FetchOptions2 {
-    /// Branch to fetch (defaults to "main")
+    /// Branch to fetch (defaults to the remote's default branch)
     pub branch: Option<String>,
     /// Shallow clone depth (None = full history)
     pub depth: Option<u32>,

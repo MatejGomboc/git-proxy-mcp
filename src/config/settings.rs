@@ -425,11 +425,6 @@ impl Default for LfsConfig {
     }
 }
 
-/// Default maximum submodule recursion depth.
-const fn default_submodule_max_depth() -> u32 {
-    1
-}
-
 /// Default maximum concurrent submodule fetches.
 const fn default_submodule_max_concurrent() -> usize {
     4
@@ -442,19 +437,12 @@ const fn default_submodule_max_failures() -> usize {
 
 /// Submodule configuration.
 ///
-/// Controls depth, filtering, and concurrency for submodule fetching.
+/// Controls filtering and concurrency for submodule fetching.
+/// Recursion depth is a per-request argument on the MCP tool,
+/// mirroring how `--recurse-submodules` works in Git.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SubmoduleConfig {
-    /// Maximum recursion depth for nested submodules.
-    ///
-    /// A depth of 1 fetches only top-level submodules (current behaviour).
-    /// Higher values enable recursive fetching of nested submodules.
-    ///
-    /// Default: 1.
-    #[serde(default = "default_submodule_max_depth")]
-    pub max_depth: u32,
-
     /// Maximum number of submodules fetched in parallel.
     ///
     /// Default: 4.
@@ -488,7 +476,6 @@ pub struct SubmoduleConfig {
 impl Default for SubmoduleConfig {
     fn default() -> Self {
         Self {
-            max_depth: default_submodule_max_depth(),
             max_concurrent: default_submodule_max_concurrent(),
             max_failures: default_submodule_max_failures(),
             include_patterns: None,
@@ -921,7 +908,6 @@ mod tests {
     #[test]
     fn submodule_config_defaults() {
         let config = SubmoduleConfig::default();
-        assert_eq!(config.max_depth, 1);
         assert_eq!(config.max_concurrent, 4);
         assert_eq!(config.max_failures, 3);
         assert!(config.include_patterns.is_none());
@@ -932,7 +918,6 @@ mod tests {
     fn parse_submodule_config() {
         let json = r#"{
             "submodules": {
-                "max_depth": 3,
                 "max_concurrent": 8,
                 "max_failures": 5,
                 "include_patterns": ["lib/*", "deps/core"],
@@ -941,7 +926,6 @@ mod tests {
         }"#;
 
         let config: Config = serde_json::from_str(json).unwrap();
-        assert_eq!(config.submodules.max_depth, 3);
         assert_eq!(config.submodules.max_concurrent, 8);
         assert_eq!(config.submodules.max_failures, 5);
         assert_eq!(
@@ -958,14 +942,13 @@ mod tests {
     fn parse_submodule_config_partial() {
         let json = r#"{
             "submodules": {
-                "max_depth": 2
+                "max_concurrent": 2
             }
         }"#;
 
         let config: Config = serde_json::from_str(json).unwrap();
-        assert_eq!(config.submodules.max_depth, 2);
+        assert_eq!(config.submodules.max_concurrent, 2);
         // Other fields should use defaults
-        assert_eq!(config.submodules.max_concurrent, 4);
         assert_eq!(config.submodules.max_failures, 3);
         assert!(config.submodules.include_patterns.is_none());
         assert!(config.submodules.exclude_patterns.is_none());
@@ -988,7 +971,6 @@ mod tests {
                 "max_object_size": 104857600
             },
             "submodules": {
-                "max_depth": 2,
                 "exclude_patterns": ["vendor/*"]
             }
         }"#;
@@ -997,7 +979,6 @@ mod tests {
         assert!(config.validate().is_ok());
         assert_eq!(config.lfs.retry_max_attempts, 5);
         assert_eq!(config.lfs.max_object_size, Some(104_857_600));
-        assert_eq!(config.submodules.max_depth, 2);
         assert_eq!(
             config.submodules.exclude_patterns,
             Some(vec!["vendor/*".to_string()])

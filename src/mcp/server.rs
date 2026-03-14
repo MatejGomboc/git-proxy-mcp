@@ -691,7 +691,7 @@ impl McpServer {
                         },
                         "branch": {
                             "type": "string",
-                            "description": "Branch to clone (defaults to 'main')"
+                            "description": "Branch to clone. Omit to use the remote's default branch (typically 'main' or 'master')."
                         },
                         "depth": {
                             "type": "integer",
@@ -720,7 +720,7 @@ impl McpServer {
                         },
                         "submodule_depth": {
                             "type": "integer",
-                            "description": "Maximum submodule recursion depth (1 = top-level only, default from server config)."
+                            "description": "Maximum submodule recursion depth. Omit for unlimited (git default). 1 = top-level only, 0 = skip submodules."
                         },
                         "submodule_include": {
                             "type": "array",
@@ -787,7 +787,7 @@ impl McpServer {
                         },
                         "branch": {
                             "type": "string",
-                            "description": "Branch to clone (defaults to 'main')"
+                            "description": "Branch to clone. Omit to use the remote's default branch (typically 'main' or 'master')."
                         },
                         "depth": {
                             "type": "integer",
@@ -820,7 +820,7 @@ impl McpServer {
                         },
                         "submodule_depth": {
                             "type": "integer",
-                            "description": "Maximum submodule recursion depth (1 = top-level only, default from server config)."
+                            "description": "Maximum submodule recursion depth. Omit for unlimited (git default). 1 = top-level only, 0 = skip submodules."
                         },
                         "submodule_include": {
                             "type": "array",
