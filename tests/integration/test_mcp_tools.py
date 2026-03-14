@@ -1,0 +1,411 @@
+#!/usr/bin/env python3
+"""Integration tests for git-proxy-mcp MCP server.
+
+Spawns the server, sends JSON-RPC requests over stdin/stdout,
+and validates responses against the test fixture repository.
+
+Requires:
+    - target/release/git-proxy-mcp (built beforehand)
+    - TEST_REPO_URL environment variable (private test fixture repo)
+    - git credentials configured (for private repo access)
+
+Test fixture repo (git-proxy-mcp-test-dummy) has:
+    - 2 commits, 2 tags (v0.1.0, v0.2.0)
+    - 5 files: README.md, src/main.rs, src/lib.rs, docs/DESIGN.md, docs/pixel.png
+    - v0.1.0 -> v0.2.0 diff: 2 files changed (src/lib.rs, docs/DESIGN.md)
+"""
+
+import json
+import os
+import select
+import subprocess
+import sys
+import tempfile
+import time
+
+BINARY = "./target/release/git-proxy-mcp"
+REPO_URL = os.environ.get("TEST_REPO_URL", "")
+REQUEST_TIMEOUT_SECS = 60
+LOG_DIR = os.path.join(tempfile.gettempdir(), "mcp-test")
+SERVER_LOG_PATH = os.path.join(LOG_DIR, "server.log")
+
+TEST_CONFIG = {
+    "security": {
+        "allow_force_push": False,
+        "protected_branches": ["main"],
+        "repo_allowlist": None,
+        "repo_blocklist": None,
+    },
+    "logging": {"level": "debug", "audit_log_path": None},
+    "timeouts": {"request_timeout_secs": 120},
+    "rate_limits": {"max_burst": 100, "refill_rate_per_sec": 50.0},
+}
+
+
+class McpTestClient:
+    """Manages an MCP server subprocess and sends JSON-RPC requests."""
+
+    def __init__(self, binary, config_path):
+        self.binary = binary
+        self.config_path = config_path
+        self.process = None
+        self.log_file = None
+        self.request_id = 0
+
+    def start(self):
+        """Start the MCP server subprocess."""
+        os.makedirs(LOG_DIR, exist_ok=True)
+        self.log_file = open(SERVER_LOG_PATH, "w")
+        try:
+            self.process = subprocess.Popen(
+                [self.binary, "--config", self.config_path],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=self.log_file,
+                text=True,
+            )
+        except OSError:
+            self.log_file.close()
+            raise
+        time.sleep(1)
+
+        if self.process.poll() is not None:
+            self.log_file.close()
+            with open(SERVER_LOG_PATH) as f:
+                log_content = f.read()
+            raise RuntimeError(f"Server failed to start:\n{log_content}")
+
+        print(f"Server started (PID {self.process.pid})")
+
+    def stop(self):
+        """Stop the MCP server."""
+        if self.process and self.process.poll() is None:
+            self.process.stdin.close()
+            try:
+                self.process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+                self.process.wait()
+        if self.log_file:
+            self.log_file.close()
+
+    def send(self, method, params=None):
+        """Send a JSON-RPC request and return the parsed response."""
+        self.request_id += 1
+        request = {
+            "jsonrpc": "2.0",
+            "id": self.request_id,
+            "method": method,
+        }
+        if params is not None:
+            request["params"] = params
+
+        request_str = json.dumps(request)
+        self.process.stdin.write(request_str + "\n")
+        self.process.stdin.flush()
+
+        # Read one line of response with timeout.
+        ready, _, _ = select.select([self.process.stdout], [], [], REQUEST_TIMEOUT_SECS)
+        if not ready:
+            raise RuntimeError(
+                f"Timeout waiting for response after {REQUEST_TIMEOUT_SECS}s "
+                f"(method: {method})"
+            )
+
+        line = self.process.stdout.readline()
+        if not line:
+            raise RuntimeError("No response from server (EOF)")
+
+        return json.loads(line)
+
+    def notify(self, method, params=None):
+        """Send a JSON-RPC notification (no response expected)."""
+        notification = {"jsonrpc": "2.0", "method": method}
+        if params is not None:
+            notification["params"] = params
+
+        self.process.stdin.write(json.dumps(notification) + "\n")
+        self.process.stdin.flush()
+
+    def call_tool(self, name, arguments=None):
+        """Call an MCP tool and return the parsed content."""
+        if arguments is None:
+            arguments = {}
+
+        response = self.send("tools/call", {"name": name, "arguments": arguments})
+
+        if "error" in response:
+            raise RuntimeError(
+                f"Tool {name} returned error: {response['error'].get('message', response['error'])}"
+            )
+
+        text = response["result"]["content"][0]["text"]
+        return json.loads(text)
+
+
+class TestRunner:
+    """Simple test runner that tracks pass/fail counts."""
+
+    def __init__(self):
+        self.passed = 0
+        self.failed = 0
+        self.total = 0
+
+    def check(self, condition, description, actual=None, expected=None):
+        """Assert a condition and record the result."""
+        self.total += 1
+        if condition:
+            detail = f" (got {actual})" if actual is not None else ""
+            print(f"  PASS: {description}{detail}")
+            self.passed += 1
+        else:
+            detail = f" (expected {expected}, got {actual})" if expected is not None else ""
+            print(f"  FAIL: {description}{detail}")
+            self.failed += 1
+
+    def summary(self):
+        """Print the summary and return exit code."""
+        print()
+        print("=" * 44)
+        print(f"Results: {self.passed} passed, {self.failed} failed, {self.total} total")
+        print("=" * 44)
+        return 0 if self.failed == 0 else 1
+
+
+def test_initialise(client, runner):
+    """Test MCP protocol initialisation."""
+    print()
+    print("=== Test: MCP Initialise ===")
+
+    response = client.send(
+        "initialize",
+        {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "clientInfo": {"name": "integration-test", "version": "1.0.0"},
+        },
+    )
+
+    runner.check("error" not in response, "initialise — no error")
+    runner.check(
+        response["result"]["protocolVersion"] == "2024-11-05",
+        "protocol version",
+        actual=response["result"]["protocolVersion"],
+        expected="2024-11-05",
+    )
+    runner.check(
+        response["result"]["serverInfo"]["name"] == "git-proxy-mcp",
+        "server name",
+        actual=response["result"]["serverInfo"]["name"],
+        expected="git-proxy-mcp",
+    )
+
+    # Send initialized notification.
+    client.notify("notifications/initialized")
+    time.sleep(0.5)
+
+
+def test_repo_refs(client, runner):
+    """Test repo_refs tool."""
+    print()
+    print("=== Test: repo_refs ===")
+
+    content = client.call_tool("repo_refs", {"url": REPO_URL})
+
+    branch_count = len(content.get("branches", []))
+    tag_count = len(content.get("tags", []))
+    default_branch = content.get("default_branch", "")
+
+    runner.check(branch_count >= 1, "has branches", actual=branch_count)
+    runner.check(tag_count >= 2, "has >= 2 tags", actual=tag_count)
+    runner.check(
+        default_branch == "main",
+        "default branch is main",
+        actual=default_branch,
+        expected="main",
+    )
+
+    return content
+
+
+def test_repo_clone(client, runner):
+    """Test repo_clone (Tier 1) tool."""
+    print()
+    print("=== Test: repo_clone (Tier 1) ===")
+
+    content = client.call_tool(
+        "repo_clone",
+        {"url": REPO_URL, "branch": "main", "depth": 1, "exclude_binary": True},
+    )
+
+    file_count = content.get("file_count", 0)
+    binary_skipped = content.get("binary_files_skipped", 0)
+
+    runner.check(file_count >= 4, "file count >= 4", actual=file_count)
+    runner.check(binary_skipped >= 1, "binary files skipped", actual=binary_skipped)
+
+
+def test_repo_diff(client, runner, refs_content):
+    """Test repo_diff tool using tag SHAs."""
+    print()
+    print("=== Test: repo_diff ===")
+
+    tags = {t["name"]: t["commit"] for t in refs_content.get("tags", [])}
+    v1_sha = tags.get("v0.1.0")
+    v2_sha = tags.get("v0.2.0")
+
+    if not v1_sha or not v2_sha:
+        print(f"  SKIP: could not resolve tag SHAs (v1={v1_sha}, v2={v2_sha})")
+        runner.total += 1
+        runner.failed += 1
+        return
+
+    content = client.call_tool(
+        "repo_diff",
+        {"url": REPO_URL, "base_commit": v1_sha, "head_commit": v2_sha},
+    )
+
+    files_changed = content.get("stats", {}).get("files_changed", 0)
+    runner.check(
+        files_changed == 2,
+        "files changed",
+        actual=files_changed,
+        expected=2,
+    )
+
+
+def test_repo_pull(client, runner, refs_content):
+    """Test repo_pull tool."""
+    print()
+    print("=== Test: repo_pull ===")
+
+    tags = {t["name"]: t["commit"] for t in refs_content.get("tags", [])}
+    v1_sha = tags.get("v0.1.0")
+
+    if not v1_sha:
+        print("  SKIP: could not resolve v0.1.0 SHA")
+        runner.total += 1
+        runner.failed += 1
+        return
+
+    content = client.call_tool(
+        "repo_pull",
+        {"url": REPO_URL, "branch": "main", "since_commit": v1_sha},
+    )
+
+    commit_count = len(content.get("commits", []))
+    runner.check(commit_count >= 1, "got commits", actual=commit_count)
+
+
+def test_tier2_streaming(client, runner):
+    """Test Tier 2 streaming lifecycle: start -> status -> chunk -> cancel."""
+    print()
+    print("=== Test: Tier 2 streaming (clone_start -> status -> chunk -> cancel) ===")
+
+    # Start chunked clone.
+    start_content = client.call_tool(
+        "repo_clone_start",
+        {"url": REPO_URL, "branch": "main", "chunk_size": 32768},
+    )
+
+    session_id = start_content.get("session_id")
+    total_chunks = start_content.get("total_chunks", 0)
+
+    runner.check(
+        session_id is not None and session_id != "null",
+        "got session_id",
+        actual=session_id,
+    )
+    runner.check(total_chunks >= 1, "total chunks >= 1", actual=total_chunks)
+
+    if not session_id:
+        return
+
+    # Check status (should be 0% before fetching any chunks).
+    status_content = client.call_tool("repo_clone_status", {"session_id": session_id})
+    delivered = status_content.get("delivered_chunks", -1)
+    runner.check(delivered == 0, "0 chunks delivered before fetch", actual=delivered, expected=0)
+
+    # Fetch chunk 0.
+    chunk_content = client.call_tool(
+        "repo_clone_chunk",
+        {"session_id": session_id, "chunk_index": 0},
+    )
+    runner.check("data" in chunk_content, "chunk 0 has data")
+
+    # Cancel session.
+    cancel_content = client.call_tool("repo_clone_cancel", {"session_id": session_id})
+    runner.check(
+        cancel_content.get("cancelled") is True,
+        "session cancelled",
+        actual=cancel_content.get("cancelled"),
+    )
+
+
+def test_helper_script(client, runner):
+    """Test helper_script tool."""
+    print()
+    print("=== Test: helper_script ===")
+
+    response = client.send("tools/call", {"name": "helper_script", "arguments": {}})
+
+    runner.check("error" not in response, "helper_script — no error")
+
+    text = response["result"]["content"][0]["text"]
+    runner.check("extract" in text, "helper script contains 'extract'")
+
+
+def main():
+    if not REPO_URL:
+        print("FATAL: TEST_REPO_URL not set")
+        sys.exit(1)
+
+    # Create test config.
+    os.makedirs(LOG_DIR, exist_ok=True)
+    config_path = os.path.join(LOG_DIR, "config.json")
+    with open(config_path, "w", newline="\n") as f:
+        json.dump(TEST_CONFIG, f, indent=4)
+
+    print("=" * 44)
+    print("git-proxy-mcp Integration Tests")
+    print("=" * 44)
+    print(f"Binary:   {BINARY}")
+    print(f"Config:   {config_path}")
+    print(f"Repo URL: {REPO_URL}")
+
+    client = McpTestClient(BINARY, config_path)
+    runner = TestRunner()
+
+    refs_content = {}
+
+    try:
+        client.start()
+        test_initialise(client, runner)
+        refs_content = test_repo_refs(client, runner)
+        test_repo_clone(client, runner)
+        test_repo_diff(client, runner, refs_content)
+        test_repo_pull(client, runner, refs_content)
+        test_tier2_streaming(client, runner)
+        test_helper_script(client, runner)
+    finally:
+        client.stop()
+
+    exit_code = runner.summary()
+
+    if exit_code != 0:
+        print()
+        print("Server log (last 50 lines):")
+        if os.path.exists(SERVER_LOG_PATH):
+            with open(SERVER_LOG_PATH) as f:
+                lines = f.readlines()
+                for line in lines[-50:]:
+                    print(line, end="")
+
+    if runner.failed == 0:
+        print("All integration tests passed!")
+
+    sys.exit(exit_code)
+
+
+if __name__ == "__main__":
+    main()

@@ -166,9 +166,72 @@ jobs:
                     target/release/incremental/
                 key: rust-${{ runner.os }}-${{ steps.rust-version.outputs.version }}-${{ hashFiles('**/Cargo.lock') }}
 
+    integration:
+        name: Integration Tests (private repo)
+        needs: build
+        runs-on: ubuntu-latest
+        timeout-minutes: 20
+
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+            - name: Install Rust toolchain
+              uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+              with:
+                toolchain: stable
+
+            - name: Get Rust version
+              id: rust-version
+              shell: bash
+              run: echo "version=$(rustc --version | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+            - name: Restore Rust cache
+              uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
+              with:
+                path: |
+                    ~/.cargo/bin/
+                    ~/.cargo/registry/index/
+                    ~/.cargo/registry/cache/
+                    ~/.cargo/git/db/
+                    target/.rustc_info.json
+                    target/.cargo-lock
+                    target/release/deps/
+                    target/release/build/
+                    target/release/.fingerprint/
+                    target/release/incremental/
+                key: rust-${{ runner.os }}-${{ steps.rust-version.outputs.version }}-${{ hashFiles('**/Cargo.lock') }}
+                restore-keys: |
+                    rust-${{ runner.os }}-${{ steps.rust-version.outputs.version }}-
+
+            - name: Build (release)
+              run: cargo build --release
+
+            - name: Configure git credentials
+              run: |
+                git config --global credential.helper store
+                echo "https://x-access-token:${{ secrets.TEST_REPO_PAT }}@github.com" \
+                    >> ~/.git-credentials
+                git config --global user.name "integration-test"
+                git config --global user.email "integration-test@ci.local"
+
+            - name: Rebuild test fixture repo
+              env:
+                TEST_REPO_URL: ${{ secrets.TEST_REPO_URL }}
+              run: python3 tests/integration/rebuild_fixture.py
+
+            - name: Run integration tests
+              env:
+                TEST_REPO_URL: ${{ secrets.TEST_REPO_URL }}
+              run: python3 tests/integration/test_mcp_tools.py
+
+            - name: Cleanup credentials
+              if: always()
+              run: rm -f ~/.git-credentials
+
     ci-success:
         name: CI Success
-        needs: [quick-checks, build]
+        needs: [quick-checks, build, integration]
         runs-on: ubuntu-latest
         timeout-minutes: 5
         if: ${{ !cancelled() }}
@@ -177,7 +240,11 @@ jobs:
             - name: Check if all jobs succeeded
               id: check-results
               run: |
-                if [[ "${{ needs.quick-checks.result }}" != "success" ]] || [[ "${{ needs.build.result }}" != "success" ]]; then
+                # Integration is optional (may fail in forks without secrets)
+                if [[ "${{ needs.quick-checks.result }}" != "success" ]] ||
+                   [[ "${{ needs.build.result }}" != "success" ]] ||
+                   [[ "${{ needs.integration.result }}" != "success" &&
+                      "${{ needs.integration.result }}" != "skipped" ]]; then
                     echo "One or more jobs failed"
                     exit 1
                 fi
