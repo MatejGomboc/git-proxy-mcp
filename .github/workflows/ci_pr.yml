@@ -5,7 +5,11 @@ permissions:
 
 on:
     pull_request:
-        branches: ["**"]
+        branches: [main]
+
+concurrency:
+    group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+    cancel-in-progress: true
 
 env:
     CARGO_TERM_COLOR: always
@@ -15,6 +19,7 @@ jobs:
     quick-checks:
         name: Quick Checks (fmt, docs, markdown)
         runs-on: ubuntu-latest
+        timeout-minutes: 10
 
         steps:
             - name: Checkout repository
@@ -130,7 +135,8 @@ jobs:
         name: CI Success
         needs: [quick-checks, build]
         runs-on: ubuntu-latest
-        if: always()
+        timeout-minutes: 5
+        if: ${{ !cancelled() }}
 
         steps:
             - name: Check if all jobs succeeded

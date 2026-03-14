@@ -19,6 +19,7 @@ jobs:
     validate:
         name: Validate Release
         runs-on: ubuntu-latest
+        timeout-minutes: 5
 
         outputs:
             version: ${{ steps.version.outputs.version }}
@@ -155,6 +156,7 @@ jobs:
         name: Create Release
         needs: [validate, build]
         runs-on: ubuntu-latest
+        timeout-minutes: 10
 
         steps:
             - name: Checkout repository
@@ -221,15 +223,17 @@ jobs:
 
                 # Determine if this is a prerelease
                 PRERELEASE_FLAG=""
+                LATEST_FLAG="--latest"
                 if [[ "$VERSION" == *-* ]]; then
                     PRERELEASE_FLAG="--prerelease"
+                    LATEST_FLAG="--latest=false"
                 fi
 
                 # Create the release with gh CLI (more reliable than third-party actions)
                 gh release create "$TAG" \
                     --title "$TAG" \
                     --notes-file release_notes.md \
-                    --latest \
+                    $LATEST_FLAG \
                     $PRERELEASE_FLAG \
                     artifacts/*.tar.gz \
                     artifacts/*.zip \
