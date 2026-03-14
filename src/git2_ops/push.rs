@@ -138,24 +138,28 @@ pub fn push_bundle(
 }
 
 /// Unbundle a git bundle file into a repository.
+///
+/// Uses the `git` CLI because libgit2 does not natively support
+/// fetching from bundle files (neither `file://` URLs nor raw paths
+/// work reliably across platforms and git/libgit2 versions).
 fn unbundle(repo: &Repository, bundle_path: &Path) -> Result<(), Git2Error> {
     debug!(path = %bundle_path.display(), "unbundling");
 
-    // Create a remote pointing to the bundle file.
-    // Use the filesystem path directly (not file:// URL) — libgit2
-    // recognises bundle files as fetchable remotes when given a path.
-    let bundle_str = bundle_path
-        .to_str()
-        .ok_or_else(|| Git2Error::BundleFailed("invalid bundle path".to_string()))?;
+    let repo_path = repo.path();
+    let output = std::process::Command::new("git")
+        .args(["fetch", "--no-tags"])
+        .arg(bundle_path)
+        .arg("refs/heads/*:refs/heads/*")
+        .env("GIT_DIR", repo_path)
+        .output()
+        .map_err(|e| Git2Error::BundleFailed(format!("failed to run git fetch: {e}")))?;
 
-    let mut remote = repo
-        .remote_anonymous(bundle_str)
-        .map_err(|e| Git2Error::BundleFailed(format!("failed to create bundle remote: {e}")))?;
-
-    // Fetch from bundle (no auth needed for local file)
-    remote
-        .fetch(&["refs/heads/*:refs/heads/*"], None, None)
-        .map_err(|e| Git2Error::BundleFailed(format!("failed to unbundle: {e}")))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(Git2Error::BundleFailed(format!(
+            "git fetch from bundle failed: {stderr}"
+        )));
+    }
 
     debug!("unbundle complete");
     Ok(())
