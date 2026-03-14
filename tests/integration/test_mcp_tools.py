@@ -19,6 +19,7 @@ import base64
 import json
 import os
 import select
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -403,7 +404,6 @@ def test_repo_push(client, runner, refs_content):
     # Create a local repo, fetch from remote, make a commit, create a bundle.
     work_dir = os.path.join(tempfile.gettempdir(), "mcp-test", "push-test")
     if os.path.exists(work_dir):
-        import shutil
         shutil.rmtree(work_dir)
     os.makedirs(work_dir)
 
@@ -435,9 +435,12 @@ def test_repo_push(client, runner, refs_content):
         )
 
         # Create a git bundle containing the new commit.
+        # Use main..HEAD so the bundle contains only the new commit
+        # with main as the prerequisite.
         bundle_path = os.path.join(work_dir, "push.bundle")
         subprocess.run(
-            ["git", "bundle", "create", bundle_path, f"{head_sha}..HEAD"],
+            ["git", "bundle", "create", bundle_path, "main..HEAD",
+             "--branches", "test/integration-push"],
             cwd=repo_dir, capture_output=True, text=True, check=True,
         )
 
@@ -507,7 +510,6 @@ def test_push_protected_branch(client, runner, refs_content):
     # Create a minimal bundle (same flow as test_repo_push).
     work_dir = os.path.join(tempfile.gettempdir(), "mcp-test", "push-protected")
     if os.path.exists(work_dir):
-        import shutil
         shutil.rmtree(work_dir)
     os.makedirs(work_dir)
 
