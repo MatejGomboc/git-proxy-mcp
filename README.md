@@ -131,13 +131,13 @@ Stream a repository to the AI's workspace (small-to-medium repos).
 
 ```json
 {
-  "name": "repo/clone",
-  "arguments": {
-    "url": "https://github.com/user/private-repo",
-    "branch": "main",
-    "depth": 1,
-    "sparse": ["src/", "Cargo.toml"]
-  }
+    "name": "repo/clone",
+    "arguments": {
+        "url": "https://github.com/user/private-repo",
+        "branch": "main",
+        "depth": 1,
+        "sparse": ["src/", "Cargo.toml"]
+    }
 }
 ```
 
@@ -149,13 +149,13 @@ Push a git bundle from AI's workspace to remote.
 
 ```json
 {
-  "name": "repo/push",
-  "arguments": {
-    "url": "https://github.com/user/private-repo",
-    "branch": "feature/fix-bug",
-    "bundle": "<base64-encoded git bundle>",
-    "force": false
-  }
+    "name": "repo/push",
+    "arguments": {
+        "url": "https://github.com/user/private-repo",
+        "branch": "feature/fix-bug",
+        "bundle": "<base64-encoded git bundle>",
+        "force": false
+    }
 }
 ```
 
@@ -171,13 +171,13 @@ Start a chunked clone session.
 
 ```json
 {
-  "name": "repo/clone_start",
-  "arguments": {
-    "url": "https://gitlab.com/org/large-repo",
-    "branch": "main",
-    "depth": 1,
-    "chunk_size": 1048576
-  }
+    "name": "repo/clone_start",
+    "arguments": {
+        "url": "https://gitlab.com/org/large-repo",
+        "branch": "main",
+        "depth": 1,
+        "chunk_size": 1048576
+    }
 }
 ```
 
@@ -189,26 +189,41 @@ Get a chunk from a streaming session.
 
 ```json
 {
-  "name": "repo/clone_chunk",
-  "arguments": {
-    "session_id": "stream_abc123",
-    "chunk_index": 0
-  }
+    "name": "repo/clone_chunk",
+    "arguments": {
+        "session_id": "stream_abc123",
+        "chunk_index": 0
+    }
 }
 ```
 
-**Response:** Base64-encoded chunk data, is_last flag.
+**Response:** Base64-encoded chunk data, is_last flag, next_missing_chunk (for resume).
 
-#### `repo/clone_cancel`
+#### `repo_clone_status`
 
-Cancel a streaming session (optional, auto-expires after 1 hour).
+Check progress and resume state of a chunked clone session.
 
 ```json
 {
-  "name": "repo/clone_cancel",
-  "arguments": {
-    "session_id": "stream_abc123"
-  }
+    "name": "repo_clone_status",
+    "arguments": {
+        "session_id": "stream_abc123"
+    }
+}
+```
+
+**Response:** Total/delivered chunks, next missing chunk, progress percentage, completion status.
+
+#### `repo/clone_cancel`
+
+Cancel a streaming session (optional, auto-expires after the configured timeout).
+
+```json
+{
+    "name": "repo/clone_cancel",
+    "arguments": {
+        "session_id": "stream_abc123"
+    }
 }
 ```
 
@@ -220,12 +235,12 @@ Sync new changes from remote to AI's workspace.
 
 ```json
 {
-  "name": "repo/pull",
-  "arguments": {
-    "url": "https://github.com/user/private-repo",
-    "branch": "main",
-    "since_commit": "abc123"
-  }
+    "name": "repo/pull",
+    "arguments": {
+        "url": "https://github.com/user/private-repo",
+        "branch": "main",
+        "since_commit": "abc123"
+    }
 }
 ```
 
@@ -237,12 +252,12 @@ Get diff between two commits.
 
 ```json
 {
-  "name": "repo/diff",
-  "arguments": {
-    "url": "https://github.com/user/private-repo",
-    "base_commit": "abc123",
-    "head_commit": "def456"
-  }
+    "name": "repo/diff",
+    "arguments": {
+        "url": "https://github.com/user/private-repo",
+        "base_commit": "abc123",
+        "head_commit": "def456"
+    }
 }
 ```
 
@@ -254,10 +269,10 @@ List remote branches and tags.
 
 ```json
 {
-  "name": "repo/refs",
-  "arguments": {
-    "url": "https://github.com/user/private-repo"
-  }
+    "name": "repo/refs",
+    "arguments": {
+        "url": "https://github.com/user/private-repo"
+    }
 }
 ```
 
@@ -271,8 +286,8 @@ Get a Python helper script for processing results (decoding base64, extracting t
 
 ```json
 {
-  "name": "helper_script",
-  "arguments": {}
+    "name": "helper_script",
+    "arguments": {}
 }
 ```
 
@@ -310,12 +325,12 @@ Add to your Claude Desktop MCP configuration:
 
 ```json
 {
-  "mcpServers": {
-    "git-proxy": {
-      "command": "git-proxy-mcp",
-      "args": []
+    "mcpServers": {
+        "git-proxy": {
+            "command": "git-proxy-mcp",
+            "args": []
+        }
     }
-  }
 }
 ```
 
@@ -345,6 +360,11 @@ Configuration file location:
   "proxy": {
     "url": "http://proxy.example.com:8080",
     "no_proxy": "*.internal.com,localhost"
+  },
+  "sessions": {
+    "timeout_secs": 3600,
+    "max_streaming_sessions": 10,
+    "max_repo_sessions": 100
   }
 }
 ```
@@ -366,6 +386,9 @@ Configuration file location:
 | `rate_limits` | `refill_rate_per_sec` | Sustained rate limit (default: 5.0) |
 | `proxy` | `url` | Proxy URL (HTTP, HTTPS, or SOCKS5) |
 | `proxy` | `no_proxy` | Comma-separated hosts to bypass proxy |
+| `sessions` | `timeout_secs` | Session inactivity timeout (default: 3600) |
+| `sessions` | `max_streaming_sessions` | Max Tier 2 streaming sessions (default: 10) |
+| `sessions` | `max_repo_sessions` | Max repo tracking sessions (default: 100) |
 
 ---
 

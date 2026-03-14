@@ -41,8 +41,9 @@ pub mod repo_refs;
 pub use helper_script::{handle_helper_script, HelperScriptResult};
 pub use repo_clone::{handle_repo_clone, RepoCloneArgs, RepoCloneResult};
 pub use repo_clone_chunk::{
-    handle_repo_clone_cancel, handle_repo_clone_chunk, RepoCloneCancelArgs, RepoCloneCancelResult,
-    RepoCloneChunkArgs, RepoCloneChunkResult,
+    handle_repo_clone_cancel, handle_repo_clone_chunk, handle_repo_clone_status,
+    RepoCloneCancelArgs, RepoCloneCancelResult, RepoCloneChunkArgs, RepoCloneChunkResult,
+    RepoCloneStatusArgs, RepoCloneStatusResult,
 };
 pub use repo_clone_start::{handle_repo_clone_start, RepoCloneStartArgs, RepoCloneStartResult};
 pub use repo_diff::{handle_repo_diff, RepoDiffArgs, RepoDiffResult};

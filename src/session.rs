@@ -17,12 +17,6 @@ use tracing::{debug, info};
 
 use crate::git2_ops::auth::sanitize_url_for_logging;
 
-/// Maximum session age before automatic cleanup (1 hour).
-const SESSION_MAX_AGE: Duration = Duration::from_secs(3600);
-
-/// Maximum number of sessions to prevent memory exhaustion.
-const MAX_SESSIONS: usize = 100;
-
 /// A session tracking a cloned repository.
 #[derive(Debug, Clone)]
 pub struct RepoSession {
@@ -68,10 +62,10 @@ impl RepoSession {
         sanitize_url_for_logging(&self.url)
     }
 
-    /// Check if this session has expired.
+    /// Check if this session has expired given the configured maximum age.
     #[must_use]
-    pub fn is_expired(&self) -> bool {
-        self.last_accessed.elapsed() > SESSION_MAX_AGE
+    pub fn is_expired(&self, max_age: Duration) -> bool {
+        self.last_accessed.elapsed() > max_age
     }
 
     /// Get the session age.
@@ -96,20 +90,26 @@ impl RepoSession {
 #[derive(Debug, Clone)]
 pub struct SessionManager {
     sessions: Arc<RwLock<HashMap<String, RepoSession>>>,
+    /// Maximum session age before automatic cleanup.
+    session_max_age: Duration,
+    /// Maximum number of sessions to prevent memory exhaustion.
+    max_sessions: usize,
 }
 
 impl Default for SessionManager {
     fn default() -> Self {
-        Self::new()
+        Self::new(Duration::from_secs(3600), 100)
     }
 }
 
 impl SessionManager {
-    /// Create a new session manager.
+    /// Create a new session manager with the given maximum age and session limit.
     #[must_use]
-    pub fn new() -> Self {
+    pub fn new(session_max_age: Duration, max_sessions: usize) -> Self {
         Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
+            session_max_age,
+            max_sessions,
         }
     }
 
@@ -141,12 +141,14 @@ impl SessionManager {
             .map_err(|_| SessionError::LockPoisoned)?;
 
         // Clean up expired sessions if we're at capacity
-        if sessions.len() >= MAX_SESSIONS {
+        if sessions.len() >= self.max_sessions {
             self.cleanup_expired_internal(&mut sessions);
 
             // Still at capacity after cleanup?
-            if sessions.len() >= MAX_SESSIONS {
-                return Err(SessionError::TooManySessions);
+            if sessions.len() >= self.max_sessions {
+                return Err(SessionError::TooManySessions {
+                    max: self.max_sessions,
+                });
             }
         }
 
@@ -178,7 +180,7 @@ impl SessionManager {
             .map_err(|_| SessionError::LockPoisoned)?;
 
         if let Some(session) = sessions.get_mut(session_id) {
-            if session.is_expired() {
+            if session.is_expired(self.session_max_age) {
                 debug!(session_id = %session_id, "session expired, removing");
                 sessions.remove(session_id);
                 return Ok(None);
@@ -265,11 +267,11 @@ impl SessionManager {
     }
 
     /// Internal cleanup helper (assumes lock is held).
-    #[allow(clippy::unused_self)] // Method for consistency, may use self in future
     fn cleanup_expired_internal(&self, sessions: &mut HashMap<String, RepoSession>) -> usize {
+        let max_age = self.session_max_age;
         let before = sessions.len();
         sessions.retain(|id, session| {
-            let keep = !session.is_expired();
+            let keep = !session.is_expired(max_age);
             if !keep {
                 debug!(session_id = %id, "cleaning up expired session");
             }
@@ -306,7 +308,7 @@ pub enum SessionError {
     NotFound(String),
 
     /// Too many sessions active.
-    TooManySessions,
+    TooManySessions { max: usize },
 }
 
 impl std::fmt::Display for SessionError {
@@ -314,10 +316,9 @@ impl std::fmt::Display for SessionError {
         match self {
             Self::LockPoisoned => write!(f, "session lock poisoned"),
             Self::NotFound(id) => write!(f, "session not found: {id}"),
-            Self::TooManySessions => write!(
-                f,
-                "too many active sessions (max {MAX_SESSIONS}), try again later"
-            ),
+            Self::TooManySessions { max } => {
+                write!(f, "too many active sessions (max {max}), try again later")
+            }
         }
     }
 }
@@ -330,7 +331,7 @@ mod tests {
 
     #[test]
     fn create_and_get_session() {
-        let manager = SessionManager::new();
+        let manager = SessionManager::new(Duration::from_secs(3600), 100);
 
         let session_id = manager
             .create_session("https://github.com/owner/repo.git", "main", "abc123")
@@ -356,7 +357,7 @@ mod tests {
 
     #[test]
     fn update_session_commit() {
-        let manager = SessionManager::new();
+        let manager = SessionManager::new(Duration::from_secs(3600), 100);
 
         let session_id = manager
             .create_session("https://github.com/owner/repo.git", "main", "abc123")
@@ -372,7 +373,7 @@ mod tests {
 
     #[test]
     fn remove_session() {
-        let manager = SessionManager::new();
+        let manager = SessionManager::new(Duration::from_secs(3600), 100);
 
         let session_id = manager
             .create_session("https://github.com/owner/repo.git", "main", "abc123")
@@ -384,7 +385,7 @@ mod tests {
 
     #[test]
     fn session_count() {
-        let manager = SessionManager::new();
+        let manager = SessionManager::new(Duration::from_secs(3600), 100);
 
         assert_eq!(manager.session_count().unwrap(), 0);
 
@@ -400,7 +401,7 @@ mod tests {
 
     #[test]
     fn list_sessions() {
-        let manager = SessionManager::new();
+        let manager = SessionManager::new(Duration::from_secs(3600), 100);
 
         manager
             .create_session("https://github.com/owner/repo.git", "main", "abc123")
@@ -415,7 +416,7 @@ mod tests {
 
     #[test]
     fn update_nonexistent_session_fails() {
-        let manager = SessionManager::new();
+        let manager = SessionManager::new(Duration::from_secs(3600), 100);
 
         let result = manager.update_session_commit("nonexistent", "abc123");
         assert!(result.is_err());

@@ -88,7 +88,7 @@ fn perf_base64_encode_10mb() {
 
 #[test]
 fn perf_session_create() {
-    let manager = StreamingSessionManager::new();
+    let manager = StreamingSessionManager::default();
     let data = vec![0u8; 1024 * 100]; // 100KB
 
     let avg = measure_avg(100, || {
@@ -114,7 +114,7 @@ fn perf_session_create() {
 
 #[test]
 fn perf_session_chunk_retrieval() {
-    let manager = StreamingSessionManager::new();
+    let manager = StreamingSessionManager::default();
     // Create a session with 10MB of data, 1MB chunks = 10 chunks
     let data = vec![0u8; 10 * 1024 * 1024];
     let info = manager

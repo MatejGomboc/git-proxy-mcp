@@ -29,5 +29,10 @@
     "proxy": {
         "url": null,
         "no_proxy": null
+    },
+    "sessions": {
+        "timeout_secs": 3600,
+        "max_streaming_sessions": 10,
+        "max_repo_sessions": 100
     }
 }

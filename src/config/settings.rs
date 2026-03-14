@@ -59,6 +59,10 @@ pub struct Config {
     /// Proxy settings for network connections.
     #[serde(default)]
     pub proxy: ProxyConfig,
+
+    /// Session management settings.
+    #[serde(default)]
+    pub sessions: SessionConfig,
 }
 
 impl Config {
@@ -257,6 +261,71 @@ impl Default for RateLimitConfig {
             max_burst: default_rate_limit_max_burst(),
             refill_rate_per_sec: default_rate_limit_refill_rate(),
         }
+    }
+}
+
+/// Default session timeout in seconds (1 hour).
+const fn default_session_timeout_secs() -> u64 {
+    3600
+}
+
+/// Default maximum concurrent Tier 2 streaming sessions.
+const fn default_max_streaming_sessions() -> usize {
+    10
+}
+
+/// Default maximum concurrent repo tracking sessions.
+const fn default_max_repo_sessions() -> usize {
+    100
+}
+
+/// Session management configuration.
+///
+/// Controls timeouts and concurrency limits for both Tier 2 streaming
+/// sessions (chunked clone) and repo tracking sessions.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionConfig {
+    /// Timeout for inactive sessions in seconds.
+    ///
+    /// Sessions that have not been accessed within this period are
+    /// automatically cleaned up.
+    ///
+    /// Default: 3600 (1 hour).
+    #[serde(default = "default_session_timeout_secs")]
+    pub timeout_secs: u64,
+
+    /// Maximum number of concurrent Tier 2 streaming sessions.
+    ///
+    /// Limits how many chunked clone operations can be in progress
+    /// simultaneously.
+    ///
+    /// Default: 10.
+    #[serde(default = "default_max_streaming_sessions")]
+    pub max_streaming_sessions: usize,
+
+    /// Maximum number of concurrent repo tracking sessions.
+    ///
+    /// Default: 100.
+    #[serde(default = "default_max_repo_sessions")]
+    pub max_repo_sessions: usize,
+}
+
+impl Default for SessionConfig {
+    fn default() -> Self {
+        Self {
+            timeout_secs: default_session_timeout_secs(),
+            max_streaming_sessions: default_max_streaming_sessions(),
+            max_repo_sessions: default_max_repo_sessions(),
+        }
+    }
+}
+
+impl SessionConfig {
+    /// Returns the session timeout as a `Duration`.
+    #[must_use]
+    pub const fn timeout(&self) -> Duration {
+        Duration::from_secs(self.timeout_secs)
     }
 }
 

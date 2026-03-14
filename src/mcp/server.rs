@@ -38,16 +38,16 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::config::ProxyConfig;
+use crate::config::{ProxyConfig, SessionConfig};
 use crate::mcp::protocol::{
     ErrorCode, IncomingMessage, JsonRpcError, JsonRpcErrorData, JsonRpcNotification,
     JsonRpcRequest, JsonRpcResponse, RequestId, MCP_PROTOCOL_VERSION, SERVER_NAME,
 };
 use crate::mcp::tools::{
     handle_repo_clone, handle_repo_clone_cancel, handle_repo_clone_chunk, handle_repo_clone_start,
-    handle_repo_diff, handle_repo_pull, handle_repo_push, handle_repo_refs, RepoCloneArgs,
-    RepoCloneCancelArgs, RepoCloneChunkArgs, RepoCloneStartArgs, RepoDiffArgs, RepoPullArgs,
-    RepoPushArgs, RepoRefsArgs,
+    handle_repo_clone_status, handle_repo_diff, handle_repo_pull, handle_repo_push,
+    handle_repo_refs, RepoCloneArgs, RepoCloneCancelArgs, RepoCloneChunkArgs, RepoCloneStartArgs,
+    RepoCloneStatusArgs, RepoDiffArgs, RepoPullArgs, RepoPushArgs, RepoRefsArgs,
 };
 use crate::mcp::transport::StdioTransport;
 use crate::security::{
@@ -287,12 +287,14 @@ impl McpServer {
     /// * `git_identity` — Git identity for AI-assisted commits
     /// * `audit_logger` — Audit logger for recording operations
     /// * `proxy_config` — Proxy configuration for network connections
+    /// * `session_config` — Session management settings
     #[must_use]
     pub fn new(
         security_config: SecurityConfig,
         git_identity: GitIdentity,
         audit_logger: AuditLogger,
         proxy_config: ProxyConfig,
+        session_config: &SessionConfig,
     ) -> Self {
         // Build branch guard from protected branches
         let branch_guard = if security_config.protected_branches.is_empty() {
@@ -342,7 +344,10 @@ impl McpServer {
             repo_filter,
             rate_limiter,
             audit_logger: Arc::new(audit_logger),
-            streaming_sessions: StreamingSessionManager::new(),
+            streaming_sessions: StreamingSessionManager::new(
+                session_config.timeout(),
+                session_config.max_streaming_sessions,
+            ),
             git_identity,
             proxy_config,
         }
@@ -596,6 +601,7 @@ impl McpServer {
             "repo_clone_start" => self.call_repo_clone_start_tool(&params.arguments),
             "repo_clone_chunk" => self.call_repo_clone_chunk_tool(&params.arguments),
             "repo_clone_cancel" => self.call_repo_clone_cancel_tool(&params.arguments),
+            "repo_clone_status" => self.call_repo_clone_status_tool(&params.arguments),
             // Utility tools
             "helper_script" => Self::call_helper_script_tool(),
             _ => ToolCallResult::error(format!("Unknown tool: {}", params.name)),
@@ -806,7 +812,7 @@ impl McpServer {
                 description: Some(
                     "Cancel a streaming clone session and free resources. Call this if \
                      you no longer need the remaining chunks. Sessions also auto-expire \
-                     after 1 hour of inactivity."
+                     after a configured period of inactivity."
                         .to_string(),
                 ),
                 input_schema: json!({
@@ -815,6 +821,25 @@ impl McpServer {
                         "session_id": {
                             "type": "string",
                             "description": "Session ID to cancel"
+                        }
+                    },
+                    "required": ["session_id"]
+                }),
+            },
+            // Tier 2: Check status of a streaming session (resume support)
+            ToolDefinition {
+                name: "repo_clone_status".to_string(),
+                description: Some(
+                    "Check the status of a chunked clone session. Returns progress and which \
+                     chunks have been delivered, enabling resume after interruption."
+                        .to_string(),
+                ),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "session_id": {
+                            "type": "string",
+                            "description": "Session ID from repo_clone_start"
                         }
                     },
                     "required": ["session_id"]
@@ -1192,6 +1217,31 @@ impl McpServer {
         }
     }
 
+    /// Calls the `repo/clone_status` tool (Tier 2).
+    ///
+    /// Returns resume information for a streaming session.
+    fn call_repo_clone_status_tool(&self, arguments: &Value) -> ToolCallResult {
+        // Parse arguments
+        let args: RepoCloneStatusArgs = match serde_json::from_value(arguments.clone()) {
+            Ok(a) => a,
+            Err(e) => {
+                return ToolCallResult::error(format!("Invalid arguments: {e}"));
+            }
+        };
+
+        // Execute the status check
+        match handle_repo_clone_status(args, &self.streaming_sessions) {
+            Ok(result) => {
+                // Return the result as JSON text
+                match serde_json::to_string_pretty(&result) {
+                    Ok(json) => ToolCallResult::text(json),
+                    Err(e) => ToolCallResult::error(format!("Failed to serialize result: {e}")),
+                }
+            }
+            Err(e) => ToolCallResult::error(e.to_string()),
+        }
+    }
+
     /// Calls the `repo/refs` tool.
     ///
     /// Lists branches and tags from a remote repository without cloning.
@@ -1445,6 +1495,7 @@ mod tests {
             git_identity,
             audit_logger,
             ProxyConfig::default(),
+            &SessionConfig::default(),
         )
     }
 
