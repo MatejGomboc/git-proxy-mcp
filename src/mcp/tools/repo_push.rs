@@ -118,6 +118,11 @@ pub fn handle_repo_push(
     args: RepoPushArgs,
     proxy_config: &ProxyConfig,
 ) -> Result<RepoPushResult, RepoPushError> {
+    // Maximum bundle size: 1 GiB decoded.
+    // Base64 expands data by ~33%, so the encoded limit is ~1.37 GiB.
+    const MAX_BUNDLE_SIZE: usize = 1024 * 1024 * 1024;
+    const MAX_ENCODED_SIZE: usize = MAX_BUNDLE_SIZE * 4 / 3 + 4;
+
     info!(
         url = %sanitize_url_for_logging(&args.url),
         branch = %args.branch,
@@ -125,6 +130,17 @@ pub fn handle_repo_push(
         bundle_len = args.bundle.len(),
         "repo_push tool called"
     );
+
+    // Reject oversized bundles before decoding.
+    if args.bundle.len() > MAX_ENCODED_SIZE {
+        return Err(RepoPushError {
+            message: format!(
+                "bundle too large: {} bytes encoded (max {} bytes)",
+                args.bundle.len(),
+                MAX_ENCODED_SIZE,
+            ),
+        });
+    }
 
     // Decode the bundle
     let bundle_data = decode_bundle(&args.bundle)?;
