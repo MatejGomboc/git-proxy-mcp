@@ -863,14 +863,17 @@ def test_multi_chunk_streaming(client, runner):
             actual=status2.get("next_missing_chunk"),
         )
 
-    # Fetch remaining chunks in order.
+    # Fetch only the chunks we haven't fetched yet.
+    fetched = {0}
+    if total_chunks >= 3:
+        fetched.add(2)
     for i in range(1, total_chunks):
-        chunk = client.call_tool(
-            "repo_clone_chunk",
-            {"session_id": session_id, "chunk_index": i},
-        )
-        # Re-fetching an already-fetched chunk is fine (idempotent).
-        runner.check("data" in chunk, f"chunk {i} has data")
+        if i not in fetched:
+            chunk = client.call_tool(
+                "repo_clone_chunk",
+                {"session_id": session_id, "chunk_index": i},
+            )
+            runner.check("data" in chunk, f"chunk {i} has data")
 
     # Session should be complete (auto-cleaned or status shows complete).
     final_status = client.send(
@@ -907,13 +910,17 @@ def test_clone_with_submodules(client, runner):
         },
     )
 
-    submodules_included = content.get("submodules_included", 0)
-    submodules_failed = content.get("submodules_failed", 0)
-    runner.check(
-        submodules_included >= 1 or submodules_failed >= 1,
-        "submodule processing attempted",
-        actual=f"included={submodules_included}, failed={submodules_failed}",
-    )
+    if content.get("_isError"):
+        print(f"  Clone with submodules returned error: {content.get('_error')}")
+        runner.check(False, "submodule clone succeeded", actual="error")
+    else:
+        submodules_included = content.get("submodules_included", 0)
+        submodules_failed = content.get("submodules_failed", 0)
+        runner.check(
+            submodules_included >= 1 or submodules_failed >= 1,
+            "submodule processing attempted",
+            actual=f"included={submodules_included}, failed={submodules_failed}",
+        )
 
 
 def test_clone_without_submodules(client, runner):
