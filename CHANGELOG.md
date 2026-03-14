@@ -34,9 +34,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   chunks it already has.
 - **Integration tests** — Python-based end-to-end tests (`tests/integration/`) that
   rebuild a private test fixture repo from scratch and exercise all 10 MCP tools
-  (initialise, refs, clone, diff, pull, Tier 2 streaming lifecycle, helper script)
-  against a real GitHub remote. Runs as part of `ci_main.yml` on every push to main,
-  plus nightly and on manual dispatch via `ci_integration.yml`.
+  (initialise, refs, clone, diff, pull, push, Tier 2 streaming lifecycle, helper
+  script) against a real GitHub remote, including error handling, edge cases,
+  credential leak checks, protected branch enforcement, and sparse clone
+  verification. Runs as part of `ci_main.yml` on every push to main, plus nightly
+  and on manual dispatch via `ci_integration.yml`.
 
 ### Changed
 

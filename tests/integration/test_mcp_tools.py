@@ -105,19 +105,36 @@ class McpTestClient:
         self.process.stdin.write(request_str + "\n")
         self.process.stdin.flush()
 
-        # Read one line of response with timeout.
-        ready, _, _ = select.select([self.process.stdout], [], [], REQUEST_TIMEOUT_SECS)
-        if not ready:
-            raise RuntimeError(
-                f"Timeout waiting for response after {REQUEST_TIMEOUT_SECS}s "
-                f"(method: {method})"
+        # Read lines until we get a response (skip notifications).
+        deadline = time.monotonic() + REQUEST_TIMEOUT_SECS
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise RuntimeError(
+                    f"Timeout waiting for response after {REQUEST_TIMEOUT_SECS}s "
+                    f"(method: {method})"
+                )
+
+            ready, _, _ = select.select(
+                [self.process.stdout], [], [], remaining,
             )
+            if not ready:
+                raise RuntimeError(
+                    f"Timeout waiting for response after {REQUEST_TIMEOUT_SECS}s "
+                    f"(method: {method})"
+                )
 
-        line = self.process.stdout.readline()
-        if not line:
-            raise RuntimeError("No response from server (EOF)")
+            line = self.process.stdout.readline()
+            if not line:
+                raise RuntimeError("No response from server (EOF)")
 
-        return json.loads(line)
+            msg = json.loads(line)
+
+            # Skip JSON-RPC notifications (no "id" field).
+            if "id" not in msg:
+                continue
+
+            return msg
 
     def notify(self, method, params=None):
         """Send a JSON-RPC notification (no response expected)."""

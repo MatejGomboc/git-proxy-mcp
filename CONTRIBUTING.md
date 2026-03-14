@@ -257,7 +257,8 @@ cargo test module_name::
 
 - Write unit tests for new functionality
 - Place unit tests in the same file as the code, in a `#[cfg(test)]` module
-- Place integration tests in the `tests/` directory
+- Place Rust integration tests in the `tests/` directory
+- End-to-end MCP server tests are in `tests/integration/` (Python, stdlib only)
 - Use descriptive test names that explain what's being tested
 - Test both success and failure cases
 - **Never use real credentials in tests** — use mock values or test fixtures

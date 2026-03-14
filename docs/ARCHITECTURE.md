@@ -276,6 +276,14 @@ src/
     ├── audit.rs                 # Operation audit logging
     ├── guards.rs                # Branch + push guards + repo filter
     └── rate_limit.rs            # Token bucket rate limiting
+
+tests/
+├── mcp_integration.rs           # Rust MCP protocol tests
+├── perf_tests.rs                # Performance benchmarks
+├── streaming_tests.rs           # Streaming/chunked tests
+└── integration/                 # End-to-end Python tests (stdlib only)
+    ├── test_mcp_tools.py        # Spawn server, exercise all 10 tools
+    └── rebuild_fixture.py       # Rebuild private test fixture repo
 ```
 
 ## Supported Git Providers
