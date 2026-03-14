@@ -374,6 +374,8 @@ pub fn fetch_submodule(
 /// Fetch all submodules for a repository.
 ///
 /// Delegates to the internal recursive fetcher with the provided configuration.
+/// Submodules at each depth level are fetched in parallel, up to
+/// `max_concurrent` threads.
 ///
 /// # Arguments
 ///
@@ -382,6 +384,7 @@ pub fn fetch_submodule(
 /// * `proxy_url` - Optional proxy URL for network operations
 /// * `max_depth` - Maximum recursion depth (1 = top-level only)
 /// * `max_failures` - Maximum number of failures before stopping
+/// * `max_concurrent` - Maximum number of submodules fetched in parallel
 /// * `filter` - Filter for include/exclude patterns
 ///
 /// # Returns
@@ -397,6 +400,7 @@ pub fn fetch_all_submodules(
     proxy_url: Option<&str>,
     max_depth: u32,
     max_failures: usize,
+    max_concurrent: usize,
     filter: &SubmoduleFilter,
 ) -> Result<Vec<FetchedSubmodule>, Git2Error> {
     let mut visited_urls: HashSet<String> = HashSet::new();
@@ -409,6 +413,7 @@ pub fn fetch_all_submodules(
         1, // current depth starts at 1
         max_depth,
         max_failures,
+        max_concurrent,
         filter,
         &mut visited_urls,
         &mut failure_count,
@@ -437,16 +442,17 @@ fn normalise_url_for_cycle_detection(url: &str) -> String {
 ///
 /// This function:
 /// 1. Reads `.gitmodules` from the given commit's tree
-/// 2. Filters entries through the `SubmoduleFilter`
-/// 3. Tracks failure count and stops early when `max_failures` is reached
-/// 4. Uses a `HashSet` of normalised URLs to prevent cycles
+/// 2. Filters entries through the `SubmoduleFilter` and checks for cycles
+/// 3. Fetches eligible entries in parallel batches of `max_concurrent`
+/// 4. Tracks failure count and stops early when `max_failures` is reached
 /// 5. For each successful fetch, recursively fetches child submodules
-///    if `current_depth < max_depth`
+///    sequentially (children need mutable `visited_urls` and `failure_count`)
 ///
 /// # Errors
 ///
 /// Returns `Git2Error` if reading the tree fails.
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_lines)] // Parallel batch logic + recursion is naturally verbose
 fn fetch_submodules_recursive(
     repo: &Repository,
     commit_id: Oid,
@@ -454,6 +460,7 @@ fn fetch_submodules_recursive(
     current_depth: u32,
     max_depth: u32,
     max_failures: usize,
+    max_concurrent: usize,
     filter: &SubmoduleFilter,
     visited_urls: &mut HashSet<String>,
     failure_count: &mut usize,
@@ -481,10 +488,9 @@ fn fetch_submodules_recursive(
     let entries = find_submodule_entries(repo, commit_id, &gitmodules)?;
     let total_entries = entries.len();
 
-    // Fetch each submodule
-    let mut fetched = Vec::new();
+    // Phase 1: Filter entries and check cycles (sequential — needs mutable visited_urls)
+    let mut eligible_entries = Vec::new();
     for entry in entries {
-        // Check max_failures early termination
         if *failure_count >= max_failures {
             warn!(
                 failure_count = *failure_count,
@@ -494,15 +500,13 @@ fn fetch_submodules_recursive(
             break;
         }
 
-        // Check filter
         if !filter.matches(&entry.path) {
             debug!(path = %entry.path, "submodule excluded by filter");
             continue;
         }
 
-        // Check for URL cycles
         let normalised = normalise_url_for_cycle_detection(&entry.url);
-        if !visited_urls.insert(normalised.clone()) {
+        if !visited_urls.insert(normalised) {
             warn!(
                 path = %entry.path,
                 url = %sanitize_url_for_logging(&entry.url),
@@ -511,47 +515,83 @@ fn fetch_submodules_recursive(
             continue;
         }
 
-        match fetch_submodule(&entry, proxy_url) {
-            Ok(mut submodule) => {
-                // Recursively fetch child submodules if depth allows
-                if current_depth < max_depth {
-                    match fetch_submodules_recursive(
-                        &submodule.fetch_result.repo,
-                        submodule.entry.commit,
-                        proxy_url,
-                        current_depth + 1,
-                        max_depth,
-                        max_failures,
-                        filter,
-                        visited_urls,
-                        failure_count,
-                    ) {
-                        Ok(children) => {
-                            submodule.children = children;
-                        }
-                        Err(e) => {
-                            warn!(
-                                path = %entry.path,
-                                error = %e,
-                                "failed to fetch child submodules"
-                            );
-                            // Child submodule tree failure does not count as
-                            // a failure of this submodule itself.
+        eligible_entries.push(entry);
+    }
+
+    // Phase 2: Fetch in parallel batches
+    let mut fetched = Vec::new();
+    let batch_size = max_concurrent.max(1);
+
+    for batch in eligible_entries.chunks(batch_size) {
+        if *failure_count >= max_failures {
+            warn!(
+                failure_count = *failure_count,
+                max_failures = max_failures,
+                "max submodule failures reached, skipping remaining batches"
+            );
+            break;
+        }
+
+        let results: Vec<Result<FetchedSubmodule, Git2Error>> = std::thread::scope(|s| {
+            // Collect handles first so all threads run concurrently.
+            // Without the intermediate Vec, spawn-then-join would be
+            // evaluated lazily per element, making fetches sequential.
+            #[allow(clippy::needless_collect)]
+            let handles: Vec<_> = batch
+                .iter()
+                .map(|entry| s.spawn(move || fetch_submodule(entry, proxy_url)))
+                .collect();
+
+            handles
+                .into_iter()
+                .map(|h| h.join().expect("submodule fetch thread panicked"))
+                .collect()
+        });
+
+        // Phase 3: Process results and recurse into children (sequential)
+        for (entry, result) in batch.iter().zip(results) {
+            match result {
+                Ok(mut submodule) => {
+                    if current_depth < max_depth {
+                        match fetch_submodules_recursive(
+                            &submodule.fetch_result.repo,
+                            submodule.entry.commit,
+                            proxy_url,
+                            current_depth + 1,
+                            max_depth,
+                            max_failures,
+                            max_concurrent,
+                            filter,
+                            visited_urls,
+                            failure_count,
+                        ) {
+                            Ok(children) => {
+                                submodule.children = children;
+                            }
+                            Err(e) => {
+                                warn!(
+                                    path = %entry.path,
+                                    error = %e,
+                                    "failed to fetch child submodules"
+                                );
+                                // Child submodule tree failure does not count as
+                                // a failure of this submodule itself.
+                            }
                         }
                     }
-                }
 
-                fetched.push(submodule);
-            }
-            Err(e) => {
-                *failure_count += 1;
-                warn!(
-                    path = %entry.path,
-                    url = %sanitize_url_for_logging(&entry.url),
-                    error = %e,
-                    failure_count = *failure_count,
-                    "failed to fetch submodule, skipping"
-                );
+                    fetched.push(submodule);
+                }
+                Err(e) => {
+                    *failure_count += 1;
+                    warn!(
+                        path = %entry.path,
+                        url = %sanitize_url_for_logging(&entry.url),
+                        error = %e,
+                        failure_count = *failure_count,
+                        "failed to fetch submodule, skipping"
+                    );
+                }
             }
         }
     }

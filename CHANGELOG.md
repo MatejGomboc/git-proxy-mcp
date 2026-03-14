@@ -24,6 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   early termination after configurable failure count. New `submodule_depth`,
   `submodule_include`, and `submodule_exclude` tool arguments for `repo/clone`
   and `repo/clone_start`.
+- **Parallel submodule fetching** — submodules at each depth level are now
+  fetched in parallel using `std::thread::scope`, controlled by the existing
+  `max_concurrent` setting (default 4). When `max_concurrent` is 1, behaviour
+  degrades gracefully to sequential fetching.
 - **Chunk-level resume** — new `repo_clone_status` tool to check progress and identify
   missing chunks in a Tier 2 streaming session. `repo/clone_chunk` responses now include
   `next_missing_chunk` so the AI can resume interrupted transfers without re-downloading
