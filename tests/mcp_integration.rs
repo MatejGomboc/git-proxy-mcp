@@ -3,7 +3,7 @@
 //! These tests verify the MCP server's JSON-RPC 2.0 protocol implementation,
 //! including request/response handling, error responses, and lifecycle management.
 
-use git_proxy_mcp::config::{LfsConfig, ProxyConfig, SessionConfig};
+use git_proxy_mcp::config::{LfsConfig, ProxyConfig, SessionConfig, SubmoduleConfig};
 use git_proxy_mcp::mcp::protocol::{
     parse_message, IncomingMessage, JsonRpcError, JsonRpcResponse, RequestId,
 };
@@ -23,6 +23,7 @@ fn create_test_server() -> McpServer {
         ProxyConfig::default(),
         &SessionConfig::default(),
         LfsConfig::default(),
+        SubmoduleConfig::default(),
     )
 }
 

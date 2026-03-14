@@ -34,7 +34,7 @@
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 
-use crate::config::{LfsConfig, ProxyConfig};
+use crate::config::{LfsConfig, ProxyConfig, SubmoduleConfig};
 use crate::git2_ops::auth::{get_credentials_for_url, sanitize_url_for_logging};
 use crate::git2_ops::clone::{fetch_bare, FetchOptions2};
 use crate::git2_ops::error::Git2Error;
@@ -85,6 +85,22 @@ pub struct RepoCloneStartArgs {
     /// at their respective paths.
     #[serde(default)]
     pub include_submodules: Option<bool>,
+
+    /// Maximum submodule recursion depth (1 = top-level only).
+    /// Overrides the server default from submodule config.
+    #[serde(default)]
+    pub submodule_depth: Option<u32>,
+
+    /// Glob patterns for submodule paths to include.
+    /// Only submodules matching at least one pattern are fetched.
+    #[serde(default)]
+    pub submodule_include: Option<Vec<String>>,
+
+    /// Glob patterns for submodule paths to exclude.
+    /// Submodules matching any pattern are skipped. Exclusions take
+    /// precedence over inclusions.
+    #[serde(default)]
+    pub submodule_exclude: Option<Vec<String>>,
 }
 
 /// Result of a successful `repo_clone_start` operation.
@@ -209,6 +225,7 @@ pub fn handle_repo_clone_start(
     args: RepoCloneStartArgs,
     proxy_config: &ProxyConfig,
     lfs_config: &LfsConfig,
+    submodule_config: &SubmoduleConfig,
     session_manager: &StreamingSessionManager,
 ) -> Result<RepoCloneStartResult, RepoCloneStartError> {
     let sanitized_url = sanitize_url_for_logging(&args.url);
@@ -271,6 +288,19 @@ pub fn handle_repo_clone_start(
         None
     };
 
+    // Build effective submodule config: merge per-request overrides with server defaults
+    let effective_sub_config = SubmoduleConfig {
+        max_depth: args.submodule_depth.unwrap_or(submodule_config.max_depth),
+        max_concurrent: submodule_config.max_concurrent,
+        max_failures: submodule_config.max_failures,
+        include_patterns: args
+            .submodule_include
+            .or_else(|| submodule_config.include_patterns.clone()),
+        exclude_patterns: args
+            .submodule_exclude
+            .or_else(|| submodule_config.exclude_patterns.clone()),
+    };
+
     // Create tar.gz from tree (in memory), with optional filtering
     let tar_opts = TarOptions {
         sparse_patterns: args.sparse,
@@ -288,6 +318,7 @@ pub fn handle_repo_clone_start(
         no_proxy: proxy_config.no_proxy.clone(),
         progress: None,
         lfs_config: Some(lfs_config.clone()),
+        submodule_config: Some(effective_sub_config),
     };
 
     let tar_result = create_tar_from_tree_with_options(

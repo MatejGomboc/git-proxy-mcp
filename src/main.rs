@@ -160,6 +160,7 @@ fn main() -> ExitCode {
         cfg.proxy,
         &cfg.sessions,
         cfg.lfs,
+        cfg.submodules,
     );
 
     info!("MCP server ready, waiting for client connection...");
