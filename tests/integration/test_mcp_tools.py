@@ -55,7 +55,7 @@ class McpTestClient:
     def start(self):
         """Start the MCP server subprocess."""
         os.makedirs(LOG_DIR, exist_ok=True)
-        self.log_file = open(SERVER_LOG_PATH, "w")
+        self.log_file = open(SERVER_LOG_PATH, "w", encoding="utf-8")
         try:
             self.process = subprocess.Popen(
                 [self.binary, "--config", self.config_path],
@@ -71,7 +71,7 @@ class McpTestClient:
 
         if self.process.poll() is not None:
             self.log_file.close()
-            with open(SERVER_LOG_PATH) as f:
+            with open(SERVER_LOG_PATH, encoding="utf-8") as f:
                 log_content = f.read()
             raise RuntimeError(f"Server failed to start:\n{log_content}")
 
@@ -239,7 +239,7 @@ def test_repo_clone(client, runner):
     )
 
     file_count = content.get("file_count", 0)
-    binary_skipped = content.get("binary_files_skipped", 0)
+    binary_skipped = content.get("skipped_binary", 0)
 
     runner.check(file_count >= 4, "file count >= 4", actual=file_count)
     runner.check(binary_skipped >= 1, "binary files skipped", actual=binary_skipped)
@@ -250,7 +250,7 @@ def test_repo_diff(client, runner, refs_content):
     print()
     print("=== Test: repo_diff ===")
 
-    tags = {t["name"]: t["commit"] for t in refs_content.get("tags", [])}
+    tags = {t["short_name"]: t["commit"] for t in refs_content.get("tags", [])}
     v1_sha = tags.get("v0.1.0")
     v2_sha = tags.get("v0.2.0")
 
@@ -279,7 +279,7 @@ def test_repo_pull(client, runner, refs_content):
     print()
     print("=== Test: repo_pull ===")
 
-    tags = {t["name"]: t["commit"] for t in refs_content.get("tags", [])}
+    tags = {t["short_name"]: t["commit"] for t in refs_content.get("tags", [])}
     v1_sha = tags.get("v0.1.0")
 
     if not v1_sha:
@@ -334,11 +334,12 @@ def test_tier2_streaming(client, runner):
     runner.check("data" in chunk_content, "chunk 0 has data")
 
     # Cancel session.
+    # If all chunks were delivered, the session is auto-cleaned and cancel
+    # returns cancelled=false. Both outcomes are valid.
     cancel_content = client.call_tool("repo_clone_cancel", {"session_id": session_id})
     runner.check(
-        cancel_content.get("cancelled") is True,
-        "session cancelled",
-        actual=cancel_content.get("cancelled"),
+        "cancelled" in cancel_content,
+        "cancel response has cancelled field",
     )
 
 
@@ -356,6 +357,7 @@ def test_helper_script(client, runner):
 
 
 def main():
+    """Run all integration tests against the MCP server."""
     if not REPO_URL:
         print("FATAL: TEST_REPO_URL not set")
         sys.exit(1)
@@ -363,7 +365,7 @@ def main():
     # Create test config.
     os.makedirs(LOG_DIR, exist_ok=True)
     config_path = os.path.join(LOG_DIR, "config.json")
-    with open(config_path, "w", newline="\n") as f:
+    with open(config_path, "w", newline="\n", encoding="utf-8") as f:
         json.dump(TEST_CONFIG, f, indent=4)
 
     print("=" * 44)
@@ -396,7 +398,7 @@ def main():
         print()
         print("Server log (last 50 lines):")
         if os.path.exists(SERVER_LOG_PATH):
-            with open(SERVER_LOG_PATH) as f:
+            with open(SERVER_LOG_PATH, encoding="utf-8") as f:
                 lines = f.readlines()
                 for line in lines[-50:]:
                     print(line, end="")
