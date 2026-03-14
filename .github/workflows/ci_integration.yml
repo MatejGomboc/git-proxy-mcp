@@ -1,0 +1,104 @@
+name: CI - Integration Tests
+
+permissions:
+    contents: read
+
+on:
+    schedule:
+        # Run nightly at 03:00 UTC
+        - cron: "0 3 * * *"
+
+    workflow_dispatch:
+
+concurrency:
+    group: ${{ github.workflow }}-${{ github.ref }}
+    cancel-in-progress: true
+
+env:
+    CARGO_TERM_COLOR: always
+    RUSTFLAGS: "-Dwarnings"
+    CARGO_HOME: /home/runner/.cargo
+    CARGO_INCREMENTAL: 0
+
+jobs:
+    integration:
+        name: Integration Tests (private repo)
+        runs-on: ubuntu-latest
+        timeout-minutes: 20
+
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+            - name: Install Rust toolchain
+              uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+              with:
+                toolchain: stable
+
+            - name: Restore Rust cache
+              uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
+              with:
+                path: |
+                    ~/.cargo/bin/
+                    ~/.cargo/registry/index/
+                    ~/.cargo/registry/cache/
+                    ~/.cargo/git/db/
+                    target/.rustc_info.json
+                    target/.cargo-lock
+                    target/release/deps/
+                    target/release/build/
+                    target/release/.fingerprint/
+                    target/release/incremental/
+                key: rust-${{ runner.os }}-integration-${{ hashFiles('**/Cargo.lock') }}
+                restore-keys: |
+                    rust-${{ runner.os }}-integration-
+
+            - name: Build (release)
+              run: cargo build --release
+
+            - name: Configure git credentials
+              run: |
+                git config --global credential.helper store
+                echo "https://x-access-token:${{ secrets.TEST_REPO_PAT }}@github.com" \
+                    >> ~/.git-credentials
+                git config --global user.name "integration-test"
+                git config --global user.email "integration-test@ci.local"
+
+            - name: Rebuild test fixture repo
+              env:
+                TEST_REPO_URL: ${{ secrets.TEST_REPO_URL }}
+              run: bash .github/scripts/rebuild-test-fixture.sh
+
+            - name: Create test config
+              run: |
+                mkdir -p /tmp/mcp-test
+                cat > /tmp/mcp-test/config.json << 'CFGEOF'
+                {
+                    "security": {
+                        "allow_force_push": true,
+                        "protected_branches": [],
+                        "repo_allowlist": null,
+                        "repo_blocklist": null
+                    },
+                    "logging": {
+                        "level": "debug",
+                        "audit_log_path": null
+                    },
+                    "timeouts": {
+                        "request_timeout_secs": 120
+                    },
+                    "rate_limits": {
+                        "max_burst": 100,
+                        "refill_rate_per_sec": 50.0
+                    }
+                }
+                CFGEOF
+
+            - name: Run integration tests
+              env:
+                TEST_REPO_URL: ${{ secrets.TEST_REPO_URL }}
+              run: bash .github/scripts/integration-tests.sh
+
+            - name: Cleanup credentials
+              if: always()
+              run: rm -f ~/.git-credentials
