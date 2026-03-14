@@ -38,7 +38,7 @@ This document explains how an AI assistant uses git-proxy-mcp to work with priva
 
 ## Configuring Git Identity
 
-When the MCP server initializes, it may provide a `gitIdentity` in the response.
+When the MCP server initialises, it may provide a `gitIdentity` in the response.
 This identity should be used for all commits to clearly distinguish AI-assisted
 commits from human commits.
 
@@ -59,7 +59,7 @@ commits from human commits.
 **AI configures Git before making commits:**
 
 ```bash
-# Configure git identity from MCP initialize response
+# Configure git identity from MCP initialise response
 git config user.name "Claude AI"
 git config user.email "ai-assistant@example.com"
 ```

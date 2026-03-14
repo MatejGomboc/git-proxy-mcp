@@ -10,10 +10,10 @@ Requires:
     - git credentials configured (PAT with write access)
 
 Creates:
-    - 2 commits on main
+    - 3 commits on main
     - 2 tags (v0.1.0, v0.2.0)
-    - 5 files: README.md, src/main.rs, src/lib.rs, docs/DESIGN.md, docs/pixel.png
-    - Exports V1_SHA and V2_SHA to /tmp/mcp-test/fixture-shas.env
+    - 5 source files + 20 generated data files + 1 submodule
+    - Exports V1_SHA, V2_SHA, V3_SHA to /tmp/mcp-test/fixture-shas.env
 """
 
 import os
@@ -162,7 +162,7 @@ def main():
     v1_sha = get_sha(repo_dir)
     print(f"Commit 1 (v0.1.0): {v1_sha}")
 
-    # --- Commit 2: add subtract function ---
+    # --- Commit 2: add subtract function + generated data files ---
     lib_path = os.path.join(repo_dir, "src", "lib.rs")
     with open(lib_path, "a", newline="\n") as f:
         f.write(LIB_RS_ADDITION)
@@ -171,11 +171,30 @@ def main():
     with open(design_path, "a", newline="\n") as f:
         f.write("Second commit for diff testing.\n")
 
+    # Generate data files to make the archive large enough for
+    # multi-chunk streaming tests (each ~200 bytes, 20 files).
+    data_dir = os.path.join(repo_dir, "data")
+    os.makedirs(data_dir, exist_ok=True)
+    for i in range(20):
+        content = f"# Data file {i:03d}\n" + f"Generated content for multi-chunk testing.\n" * 4
+        write_file(os.path.join(data_dir, f"file_{i:03d}.txt"), content)
+
     run(["git", "add", "-A"], cwd=repo_dir)
-    run(["git", "commit", "-m", "Add subtract function and update docs"], cwd=repo_dir)
+    run(["git", "commit", "-m", "Add subtract function, update docs, and add data files"], cwd=repo_dir)
 
     v2_sha = get_sha(repo_dir)
     print(f"Commit 2 (v0.2.0): {v2_sha}")
+
+    # --- Commit 3: add a submodule ---
+    # Use a small, stable public repo as a submodule.
+    run(
+        ["git", "submodule", "add", "https://github.com/nickel-org/rust-mustache.git", "vendor/mustache"],
+        cwd=repo_dir,
+    )
+    run(["git", "commit", "-m", "Add submodule for integration testing"], cwd=repo_dir)
+
+    v3_sha = get_sha(repo_dir)
+    print(f"Commit 3 (HEAD): {v3_sha}")
 
     # --- Tags ---
     run(["git", "tag", "v0.1.0", v1_sha], cwd=repo_dir)
@@ -190,6 +209,7 @@ def main():
     print("Fixture rebuilt successfully:")
     print(f"  v0.1.0 = {v1_sha}")
     print(f"  v0.2.0 = {v2_sha}")
+    print(f"  HEAD   = {v3_sha}")
 
     # Export SHAs for the test script.
     env_dir = os.path.join(tempfile.gettempdir(), "mcp-test")
@@ -198,6 +218,7 @@ def main():
     with open(env_path, "w", newline="\n") as f:
         f.write(f"V1_SHA={v1_sha}\n")
         f.write(f"V2_SHA={v2_sha}\n")
+        f.write(f"V3_SHA={v3_sha}\n")
 
 
 if __name__ == "__main__":

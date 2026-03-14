@@ -125,7 +125,7 @@ These errors occur during the MCP handshake.
 | Already initialised | `Server already initialised` | `initialize` called more than once |
 | Not initialised | `Server not initialised` | `tools/call` before completing handshake |
 | Missing params | `Missing initialize params` | `initialize` request has no params |
-| Invalid params | `Invalid initialize params: {error}` | Malformed initialization parameters |
+| Invalid params | `Invalid initialize params: {error}` | Malformed initialisation parameters |
 
 ---
 
