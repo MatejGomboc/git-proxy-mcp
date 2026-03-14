@@ -146,7 +146,12 @@ class McpTestClient:
         self.process.stdin.flush()
 
     def call_tool(self, name, arguments=None):
-        """Call an MCP tool and return the parsed content."""
+        """Call an MCP tool and return the parsed content.
+
+        For successful responses the text is JSON-parsed. For error
+        responses (isError=true) the text is returned as a plain string
+        inside {"_error": text, "_isError": True} so callers can inspect it.
+        """
         if arguments is None:
             arguments = {}
 
@@ -157,7 +162,13 @@ class McpTestClient:
                 f"Tool {name} returned error: {response['error'].get('message', response['error'])}"
             )
 
-        text = response["result"]["content"][0]["text"]
+        result = response["result"]
+        text = result["content"][0]["text"]
+        is_error = result.get("isError", False)
+
+        if is_error:
+            return {"_error": text, "_isError": True}
+
         return json.loads(text)
 
 
@@ -451,22 +462,26 @@ def test_repo_push(client, runner, refs_content):
         },
     )
 
-    runner.check(
-        content.get("branch") == "test/integration-push",
-        "pushed to correct branch",
-        actual=content.get("branch"),
-        expected="test/integration-push",
-    )
-    runner.check(
-        len(content.get("commit", "")) == 40,
-        "got valid commit SHA",
-        actual=len(content.get("commit", "")),
-    )
-    runner.check(
-        content.get("force") is False,
-        "force=false",
-        actual=content.get("force"),
-    )
+    if content.get("_isError"):
+        print(f"  Push returned error: {content.get('_error', 'unknown')}")
+        runner.check(False, "push succeeded", actual="error")
+    else:
+        runner.check(
+            content.get("branch") == "test/integration-push",
+            "pushed to correct branch",
+            actual=content.get("branch"),
+            expected="test/integration-push",
+        )
+        runner.check(
+            len(content.get("commit", "")) == 40,
+            "got valid commit SHA",
+            actual=len(content.get("commit", "")),
+        )
+        runner.check(
+            content.get("force") is False,
+            "force=false",
+            actual=content.get("force"),
+        )
 
     # Clean up: delete the test branch from remote.
     subprocess.run(
