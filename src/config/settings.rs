@@ -55,6 +55,10 @@ pub struct Config {
     /// Git identity settings for AI-assisted commits.
     #[serde(default)]
     pub git_identity: GitIdentityConfig,
+
+    /// Proxy settings for network connections.
+    #[serde(default)]
+    pub proxy: ProxyConfig,
 }
 
 impl Config {
@@ -254,6 +258,29 @@ impl Default for RateLimitConfig {
             refill_rate_per_sec: default_rate_limit_refill_rate(),
         }
     }
+}
+
+/// Proxy configuration for network connections.
+///
+/// When configured, all git fetch/push/connect operations and LFS HTTP
+/// requests will be routed through the specified proxy server.
+/// If no proxy is configured, git2 falls back to auto-detection from
+/// the user's git config (`http.proxy`).
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct ProxyConfig {
+    /// Proxy URL (e.g., `"http://proxy.example.com:8080"`,
+    /// `"socks5://proxy.example.com:1080"`).
+    ///
+    /// Supports HTTP, HTTPS, and SOCKS5 proxy protocols.
+    #[serde(default)]
+    pub url: Option<String>,
+
+    /// Comma-separated list of hosts that should bypass the proxy.
+    ///
+    /// Supports wildcards (e.g., `"*.internal.com,localhost,127.0.0.1"`).
+    #[serde(default)]
+    pub no_proxy: Option<String>,
 }
 
 #[cfg(test)]
@@ -531,6 +558,49 @@ mod tests {
         let config: Config = serde_json::from_str(json).unwrap();
         assert_eq!(config.git_identity.name, Some("AI Bot".to_string()));
         assert!(config.git_identity.email.is_none());
+    }
+
+    #[test]
+    fn proxy_config_defaults() {
+        let config = ProxyConfig::default();
+        assert!(config.url.is_none());
+        assert!(config.no_proxy.is_none());
+    }
+
+    #[test]
+    fn parse_proxy_config() {
+        let json = r#"{
+            "proxy": {
+                "url": "http://proxy.example.com:8080",
+                "no_proxy": "*.internal.com,localhost"
+            }
+        }"#;
+
+        let config: Config = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            config.proxy.url,
+            Some("http://proxy.example.com:8080".to_string())
+        );
+        assert_eq!(
+            config.proxy.no_proxy,
+            Some("*.internal.com,localhost".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_proxy_url_only() {
+        let json = r#"{
+            "proxy": {
+                "url": "socks5://proxy.example.com:1080"
+            }
+        }"#;
+
+        let config: Config = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            config.proxy.url,
+            Some("socks5://proxy.example.com:1080".to_string())
+        );
+        assert!(config.proxy.no_proxy.is_none());
     }
 
     #[test]

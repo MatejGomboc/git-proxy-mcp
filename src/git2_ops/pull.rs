@@ -128,7 +128,12 @@ pub struct PullResult {
 /// Credentials are handled via git2 callbacks and never stored or logged.
 /// The temporary bare repository is cleaned up after the operation.
 #[allow(clippy::too_many_lines)] // Complex operation with many steps
-pub fn pull_changes(url: &str, branch: &str, since_commit: &str) -> Result<PullResult, Git2Error> {
+pub fn pull_changes(
+    url: &str,
+    branch: &str,
+    since_commit: &str,
+    proxy_url: Option<&str>,
+) -> Result<PullResult, Git2Error> {
     info!(
         url = %sanitize_url_for_logging(url),
         branch = %branch,
@@ -158,6 +163,14 @@ pub fn pull_changes(url: &str, branch: &str, since_commit: &str) -> Result<PullR
         let callbacks = create_callbacks();
         let mut fetch_opts = FetchOptions::new();
         fetch_opts.remote_callbacks(callbacks);
+
+        let mut proxy_opts = git2::ProxyOptions::new();
+        if let Some(url) = proxy_url {
+            proxy_opts.url(url);
+        } else {
+            proxy_opts.auto();
+        }
+        fetch_opts.proxy_options(proxy_opts);
 
         debug!(refspec = %refspec, "fetching branch");
 
@@ -502,13 +515,13 @@ mod tests {
 
     #[test]
     fn pull_changes_rejects_invalid_url() {
-        let result = pull_changes("/invalid/path", "main", "abc123");
+        let result = pull_changes("/invalid/path", "main", "abc123", None);
         assert!(result.is_err());
     }
 
     #[test]
     fn pull_changes_rejects_file_url() {
-        let result = pull_changes("file:///etc/passwd", "main", "abc123");
+        let result = pull_changes("file:///etc/passwd", "main", "abc123", None);
         assert!(result.is_err());
     }
 }

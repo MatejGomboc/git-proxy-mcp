@@ -21,6 +21,7 @@
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
+use crate::config::ProxyConfig;
 use crate::git2_ops::auth::sanitize_url_for_logging;
 use crate::git2_ops::error::Git2Error;
 use crate::git2_ops::refs::{list_remote_refs, RefInfo};
@@ -97,13 +98,16 @@ impl From<Git2Error> for RepoRefsError {
 /// - No repository data is downloaded
 /// - Only ref names and commit SHAs are returned
 #[allow(clippy::needless_pass_by_value)] // Consistent with other handlers
-pub fn handle_repo_refs(args: RepoRefsArgs) -> Result<RepoRefsResult, RepoRefsError> {
+pub fn handle_repo_refs(
+    args: RepoRefsArgs,
+    proxy_config: &ProxyConfig,
+) -> Result<RepoRefsResult, RepoRefsError> {
     info!(
         url = %sanitize_url_for_logging(&args.url),
         "repo_refs tool called"
     );
 
-    let refs_result = list_remote_refs(&args.url)?;
+    let refs_result = list_remote_refs(&args.url, proxy_config.url.as_deref())?;
 
     info!(
         branches = refs_result.branches.len(),

@@ -263,7 +263,10 @@ pub fn get_gitmodules_content(repo: &Repository, commit_id: Oid) -> Option<Vec<u
 /// # Errors
 ///
 /// Returns `Git2Error` if URL validation or fetch fails.
-pub fn fetch_submodule(entry: &SubmoduleEntry) -> Result<FetchedSubmodule, Git2Error> {
+pub fn fetch_submodule(
+    entry: &SubmoduleEntry,
+    proxy_url: Option<&str>,
+) -> Result<FetchedSubmodule, Git2Error> {
     debug!(
         url = %sanitize_url_for_logging(&entry.url),
         path = %entry.path,
@@ -280,6 +283,7 @@ pub fn fetch_submodule(entry: &SubmoduleEntry) -> Result<FetchedSubmodule, Git2E
         branch: None,
         depth: None,
         progress: None, // Submodule fetch progress is reported at higher level
+        proxy_url: proxy_url.map(String::from),
     };
 
     let fetch_result = fetch_bare(&entry.url, Some(fetch_opts))?;
@@ -315,6 +319,7 @@ pub fn fetch_submodule(entry: &SubmoduleEntry) -> Result<FetchedSubmodule, Git2E
 pub fn fetch_all_submodules(
     repo: &Repository,
     commit_id: Oid,
+    proxy_url: Option<&str>,
 ) -> Result<Vec<FetchedSubmodule>, Git2Error> {
     // Get .gitmodules content
     let Some(gitmodules_content) = get_gitmodules_content(repo, commit_id) else {
@@ -338,7 +343,7 @@ pub fn fetch_all_submodules(
     // Fetch each submodule
     let mut fetched = Vec::new();
     for entry in entries {
-        match fetch_submodule(&entry) {
+        match fetch_submodule(&entry, proxy_url) {
             Ok(submodule) => {
                 fetched.push(submodule);
             }

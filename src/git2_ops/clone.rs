@@ -49,6 +49,8 @@ pub struct FetchOptions2 {
     pub depth: Option<u32>,
     /// Optional progress sender for real-time updates
     pub progress: Option<ProgressSender>,
+    /// Optional proxy URL (None = auto-detect from environment)
+    pub proxy_url: Option<String>,
 }
 
 /// Fetch a repository without creating a working tree.
@@ -126,6 +128,14 @@ pub fn fetch_bare(url: &str, options: Option<FetchOptions2>) -> Result<FetchResu
         let mut fetch_opts = FetchOptions::new();
         fetch_opts.remote_callbacks(callbacks);
 
+        let mut proxy_opts = git2::ProxyOptions::new();
+        if let Some(ref proxy_url) = options.proxy_url {
+            proxy_opts.url(proxy_url);
+        } else {
+            proxy_opts.auto();
+        }
+        fetch_opts.proxy_options(proxy_opts);
+
         // Configure shallow clone if depth is specified
         if let Some(depth) = options.depth {
             // git2 depth() takes i32, 0 means full clone
@@ -178,6 +188,7 @@ mod tests {
         let opts = FetchOptions2::default();
         assert!(opts.branch.is_none());
         assert!(opts.depth.is_none());
+        assert!(opts.proxy_url.is_none());
     }
 
     // Integration tests would go here but require network access

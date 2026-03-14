@@ -22,6 +22,7 @@
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 
+use crate::config::ProxyConfig;
 use crate::git2_ops::auth::sanitize_url_for_logging;
 use crate::git2_ops::error::Git2Error;
 use crate::git2_ops::push::{push_bundle, PushOptions2};
@@ -113,7 +114,10 @@ impl From<Git2Error> for RepoPushError {
 /// - Only the bundle file touches disk
 /// - Protected branch guards should be checked by caller
 #[allow(clippy::needless_pass_by_value)] // Consistent with other handlers
-pub fn handle_repo_push(args: RepoPushArgs) -> Result<RepoPushResult, RepoPushError> {
+pub fn handle_repo_push(
+    args: RepoPushArgs,
+    proxy_config: &ProxyConfig,
+) -> Result<RepoPushResult, RepoPushError> {
     info!(
         url = %sanitize_url_for_logging(&args.url),
         branch = %args.branch,
@@ -136,7 +140,12 @@ pub fn handle_repo_push(args: RepoPushArgs) -> Result<RepoPushResult, RepoPushEr
         force: args.force,
     };
 
-    let result = push_bundle(&bundle_data, &args.url, push_opts)?;
+    let result = push_bundle(
+        &bundle_data,
+        &args.url,
+        push_opts,
+        proxy_config.url.as_deref(),
+    )?;
 
     info!(
         commit = %result.commit,

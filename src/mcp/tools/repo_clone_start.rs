@@ -34,6 +34,7 @@
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 
+use crate::config::ProxyConfig;
 use crate::git2_ops::auth::{get_credentials_for_url, sanitize_url_for_logging};
 use crate::git2_ops::clone::{fetch_bare, FetchOptions2};
 use crate::git2_ops::error::Git2Error;
@@ -206,6 +207,7 @@ impl From<StreamingError> for RepoCloneStartError {
 #[allow(clippy::too_many_lines)] // Complex setup with many optional features
 pub fn handle_repo_clone_start(
     args: RepoCloneStartArgs,
+    proxy_config: &ProxyConfig,
     session_manager: &StreamingSessionManager,
 ) -> Result<RepoCloneStartResult, RepoCloneStartError> {
     let sanitized_url = sanitize_url_for_logging(&args.url);
@@ -247,6 +249,7 @@ pub fn handle_repo_clone_start(
         branch: args.branch.clone(),
         depth: args.depth,
         progress: None,
+        proxy_url: proxy_config.url.clone(),
     };
 
     let fetch_result = fetch_bare(&args.url, Some(fetch_opts))?;
@@ -280,6 +283,8 @@ pub fn handle_repo_clone_start(
         },
         lfs_credentials, // From OS credential store, NEVER sent to AI
         include_submodules: args.include_submodules,
+        proxy_url: proxy_config.url.clone(),
+        no_proxy: proxy_config.no_proxy.clone(),
         progress: None,
     };
 
