@@ -208,6 +208,34 @@ Use [Even Better TOML](https://marketplace.visualstudio.com/items?itemName=tamas
 
 ---
 
+## Python
+
+### Scope
+
+Python is used for integration test scripts only (`tests/integration/`).
+
+### Formatting
+
+**4 spaces** indentation. Max line length **170 characters** (project-wide convention).
+
+### Conventions
+
+| Rule | Setting |
+|------|--------|
+| File encoding | UTF-8 (explicit `encoding="utf-8"` on all `open()` calls) |
+| String quotes | Double quotes |
+| Imports | Standard library only (no pip dependencies) |
+| Docstrings | Required for all functions |
+| Spelling | British English in comments and strings |
+
+### Validation
+
+```bash
+python3 -m py_compile tests/integration/test_mcp_tools.py  # Syntax check
+```
+
+---
+
 ## Markdown
 
 ### Headings
@@ -256,4 +284,4 @@ See `CONTRIBUTING.md` § British Spelling for the full reference table.
 
 ---
 
-*Last updated: 2026-01-11*
+*Last updated: 2026-03-14*
