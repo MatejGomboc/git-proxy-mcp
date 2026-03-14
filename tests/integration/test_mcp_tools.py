@@ -356,6 +356,231 @@ def test_helper_script(client, runner):
     runner.check("extract" in text, "helper script contains 'extract'")
 
 
+# --- Error handling and edge case tests ---
+
+
+def test_unknown_tool(client, runner):
+    """Test that calling an unknown tool returns an error."""
+    print()
+    print("=== Test: unknown tool ===")
+
+    response = client.send(
+        "tools/call",
+        {"name": "nonexistent_tool", "arguments": {}},
+    )
+
+    # Unknown tools return a successful JSON-RPC response with isError=true
+    # in the result, not a protocol-level error.
+    runner.check("error" not in response, "no protocol error")
+
+    content = response["result"]["content"][0]["text"]
+    is_error = response["result"].get("isError", False)
+    runner.check(is_error is True, "isError is true", actual=is_error)
+    runner.check(
+        "Unknown tool" in content or "unknown" in content.lower(),
+        "error mentions unknown tool",
+    )
+
+
+def test_unknown_method(client, runner):
+    """Test that calling an unknown JSON-RPC method returns method_not_found."""
+    print()
+    print("=== Test: unknown method ===")
+
+    response = client.send("nonexistent/method")
+
+    runner.check("error" in response, "has error field")
+
+    error_code = response.get("error", {}).get("code", 0)
+    runner.check(
+        error_code == -32601,
+        "method not found error code",
+        actual=error_code,
+        expected=-32601,
+    )
+
+
+def test_invalid_params(client, runner):
+    """Test that missing required params returns invalid_params."""
+    print()
+    print("=== Test: invalid params (missing URL) ===")
+
+    # repo_refs requires a URL — omit it.
+    response = client.send(
+        "tools/call",
+        {"name": "repo_refs", "arguments": {}},
+    )
+
+    # Missing required field should return a tool error or protocol error.
+    has_error = "error" in response
+    has_tool_error = (
+        not has_error
+        and response.get("result", {}).get("isError", False)
+    )
+    runner.check(
+        has_error or has_tool_error,
+        "error returned for missing URL",
+    )
+
+
+def test_invalid_url(client, runner):
+    """Test that an invalid URL returns a tool error, not a credential leak."""
+    print()
+    print("=== Test: invalid URL ===")
+
+    response = client.send(
+        "tools/call",
+        {"name": "repo_refs", "arguments": {"url": "not-a-valid-url"}},
+    )
+
+    # Should get a tool error (isError=true), not a protocol error.
+    runner.check("error" not in response, "no protocol error for invalid URL")
+
+    is_error = response.get("result", {}).get("isError", False)
+    runner.check(is_error is True, "isError is true", actual=is_error)
+
+    # Error message should not contain any credentials.
+    content = response["result"]["content"][0]["text"]
+    runner.check("ghp_" not in content, "no GitHub PAT in error")
+    runner.check("password" not in content.lower(), "no password in error")
+    runner.check("token" not in content.lower(), "no token in error")
+
+
+def test_nonexistent_branch(client, runner):
+    """Test that cloning a non-existent branch returns a tool error."""
+    print()
+    print("=== Test: non-existent branch ===")
+
+    response = client.send(
+        "tools/call",
+        {
+            "name": "repo_clone",
+            "arguments": {"url": REPO_URL, "branch": "this-branch-does-not-exist"},
+        },
+    )
+
+    runner.check("error" not in response, "no protocol error")
+
+    is_error = response.get("result", {}).get("isError", False)
+    runner.check(is_error is True, "isError is true for bad branch", actual=is_error)
+
+
+def test_invalid_commit_sha(client, runner):
+    """Test that diffing with an invalid commit SHA returns a tool error."""
+    print()
+    print("=== Test: invalid commit SHA ===")
+
+    response = client.send(
+        "tools/call",
+        {
+            "name": "repo_diff",
+            "arguments": {
+                "url": REPO_URL,
+                "base_commit": "0000000000000000000000000000000000000000",
+                "head_commit": "1111111111111111111111111111111111111111",
+            },
+        },
+    )
+
+    runner.check("error" not in response, "no protocol error")
+
+    is_error = response.get("result", {}).get("isError", False)
+    runner.check(is_error is True, "isError for invalid SHA", actual=is_error)
+
+
+def test_invalid_session_id(client, runner):
+    """Test that using a bogus session ID returns a tool error."""
+    print()
+    print("=== Test: invalid session ID ===")
+
+    response = client.send(
+        "tools/call",
+        {
+            "name": "repo_clone_chunk",
+            "arguments": {"session_id": "nonexistent_session", "chunk_index": 0},
+        },
+    )
+
+    runner.check("error" not in response, "no protocol error")
+
+    is_error = response.get("result", {}).get("isError", False)
+    runner.check(is_error is True, "isError for bogus session", actual=is_error)
+
+
+def test_clone_sparse_patterns(client, runner):
+    """Test clone with sparse patterns returns only matching files."""
+    print()
+    print("=== Test: clone with sparse patterns ===")
+
+    content = client.call_tool(
+        "repo_clone",
+        {"url": REPO_URL, "branch": "main", "depth": 1, "sparse": ["src/**"]},
+    )
+
+    file_count = content.get("file_count", 0)
+    skipped = content.get("skipped_by_filter", 0)
+
+    # Only src/main.rs and src/lib.rs should be included.
+    runner.check(file_count == 2, "sparse: 2 src files", actual=file_count, expected=2)
+    runner.check(skipped >= 2, "sparse: skipped non-src files", actual=skipped)
+
+
+def test_clone_all_chunks(client, runner):
+    """Test fetching all chunks sequentially produces a valid archive."""
+    print()
+    print("=== Test: fetch all chunks (Tier 2 full retrieval) ===")
+
+    start_content = client.call_tool(
+        "repo_clone_start",
+        {"url": REPO_URL, "branch": "main", "chunk_size": 256},
+    )
+
+    session_id = start_content.get("session_id")
+    total_chunks = start_content.get("total_chunks", 0)
+    total_size = start_content.get("total_size", 0)
+
+    runner.check(total_chunks >= 1, "has chunks", actual=total_chunks)
+
+    if not session_id:
+        return
+
+    # Fetch all chunks and accumulate data size.
+    fetched_size = 0
+    for i in range(total_chunks):
+        chunk = client.call_tool(
+            "repo_clone_chunk",
+            {"session_id": session_id, "chunk_index": i},
+        )
+        chunk_data = chunk.get("data", "")
+        fetched_size += len(chunk_data)
+
+        is_last = chunk.get("is_last", False)
+        if i == total_chunks - 1:
+            runner.check(is_last is True, f"chunk {i} is_last=true")
+        else:
+            runner.check(is_last is False, f"chunk {i} is_last=false")
+
+    runner.check(fetched_size > 0, "fetched data is non-empty", actual=fetched_size)
+
+    # Verify session status shows complete.
+    status = client.call_tool("repo_clone_status", {"session_id": session_id})
+    runner.check(
+        status.get("is_complete", False) is True,
+        "session is complete after all chunks",
+    )
+
+
+def test_ping(client, runner):
+    """Test the ping method."""
+    print()
+    print("=== Test: ping ===")
+
+    response = client.send("ping")
+
+    runner.check("error" not in response, "ping — no error")
+    runner.check("result" in response, "ping has result")
+
+
 def main():
     """Run all integration tests against the MCP server."""
     if not REPO_URL:
@@ -382,6 +607,8 @@ def main():
 
     try:
         client.start()
+
+        # Happy path tests.
         test_initialise(client, runner)
         refs_content = test_repo_refs(client, runner)
         test_repo_clone(client, runner)
@@ -389,6 +616,18 @@ def main():
         test_repo_pull(client, runner, refs_content)
         test_tier2_streaming(client, runner)
         test_helper_script(client, runner)
+
+        # Edge case and error handling tests.
+        test_unknown_tool(client, runner)
+        test_unknown_method(client, runner)
+        test_invalid_params(client, runner)
+        test_invalid_url(client, runner)
+        test_nonexistent_branch(client, runner)
+        test_invalid_commit_sha(client, runner)
+        test_invalid_session_id(client, runner)
+        test_clone_sparse_patterns(client, runner)
+        test_clone_all_chunks(client, runner)
+        test_ping(client, runner)
     finally:
         client.stop()
 
