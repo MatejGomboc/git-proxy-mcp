@@ -141,16 +141,15 @@ pub fn push_bundle(
 fn unbundle(repo: &Repository, bundle_path: &Path) -> Result<(), Git2Error> {
     debug!(path = %bundle_path.display(), "unbundling");
 
-    // Create a remote pointing to the bundle file
-    let bundle_url = format!(
-        "file://{}",
-        bundle_path
-            .to_str()
-            .ok_or_else(|| Git2Error::BundleFailed("invalid bundle path".to_string()))?
-    );
+    // Create a remote pointing to the bundle file.
+    // Use the filesystem path directly (not file:// URL) — libgit2
+    // recognises bundle files as fetchable remotes when given a path.
+    let bundle_str = bundle_path
+        .to_str()
+        .ok_or_else(|| Git2Error::BundleFailed("invalid bundle path".to_string()))?;
 
     let mut remote = repo
-        .remote_anonymous(&bundle_url)
+        .remote_anonymous(bundle_str)
         .map_err(|e| Git2Error::BundleFailed(format!("failed to create bundle remote: {e}")))?;
 
     // Fetch from bundle (no auth needed for local file)
