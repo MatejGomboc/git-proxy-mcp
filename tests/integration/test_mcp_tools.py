@@ -293,7 +293,7 @@ def test_repo_pull(client, runner, refs_content):
         {"url": REPO_URL, "branch": "main", "since_commit": v1_sha},
     )
 
-    commit_count = len(content.get("commits", []))
+    commit_count = content.get("stats", {}).get("commits", 0)
     runner.check(commit_count >= 1, "got commits", actual=commit_count)
 
 
