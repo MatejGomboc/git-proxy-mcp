@@ -32,6 +32,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   missing chunks in a Tier 2 streaming session. `repo/clone_chunk` responses now include
   `next_missing_chunk` so the AI can resume interrupted transfers without re-downloading
   chunks it already has.
+- **Integration tests** — new `ci_integration.yml` workflow that rebuilds a private
+  test fixture repo from scratch and exercises all 9 MCP tools (initialise, refs, clone,
+  diff, pull, Tier 2 streaming lifecycle, helper script) against a real GitHub remote.
+  Runs nightly and on manual dispatch.
 
 ### Changed
 
