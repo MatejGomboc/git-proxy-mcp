@@ -62,7 +62,7 @@ Examples:
     # Show info about a result without extracting
     python git_proxy_helper.py info clone_result.json
 
-Version: 1.0.0
+Version: 1.1.0
 """
 
 import json
@@ -329,7 +329,7 @@ pub fn handle_helper_script() -> HelperScriptResult {
             python git_proxy_helper.py bundle <repo_dir> <since_commit>    # Create push bundle\n  \
             python git_proxy_helper.py info <result.json>                  # Show result info"
             .to_string(),
-        version: "1.0.0".to_string(),
+        version: "1.1.0".to_string(),
     }
 }
 
@@ -343,7 +343,7 @@ mod tests {
         let json = serde_json::to_string(&result).unwrap();
         assert!(json.contains("\"script\":"));
         assert!(json.contains("\"filename\":\"git_proxy_helper.py\""));
-        assert!(json.contains("\"version\":\"1.0.0\""));
+        assert!(json.contains("\"version\":\"1.1.0\""));
     }
 
     #[test]

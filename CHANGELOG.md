@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.1.0] - 2026-03-14
 
 ### Added
 
@@ -58,6 +58,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pinned all GitHub Actions to full-length commit SHAs, as required by the repository's
   action permissions settings.
 - Pinned `dtolnay/rust-toolchain` to commit SHA with explicit `toolchain: stable` input.
+- Accept git >= 2.53 bundle header format (`# v2 git bundle` / `# v3 git bundle`).
+- Use `git` CLI for bundle unbundling instead of libgit2 (which does not support
+  fetching from bundle files reliably across platforms).
+- Added bundle size limit (1 GiB) to prevent memory exhaustion via oversized bundles.
 
 ### Security
 
