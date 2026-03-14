@@ -434,13 +434,12 @@ def test_repo_push(client, runner, refs_content):
             cwd=repo_dir, capture_output=True, text=True, check=True,
         )
 
-        # Create a git bundle containing the new commit.
-        # Use main..HEAD so the bundle contains only the new commit
-        # with main as the prerequisite.
+        # Create a self-contained git bundle (no prerequisites).
+        # The server unbundles into an empty temp repo, so the bundle
+        # must include the full history for the branch.
         bundle_path = os.path.join(work_dir, "push.bundle")
         subprocess.run(
-            ["git", "bundle", "create", bundle_path, "main..HEAD",
-             "--branches", "test/integration-push"],
+            ["git", "bundle", "create", bundle_path, "test/integration-push"],
             cwd=repo_dir, capture_output=True, text=True, check=True,
         )
 
