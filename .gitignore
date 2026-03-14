@@ -3,3 +3,4 @@ Cargo.lock
 /.claude/settings.local.json
 nul
 __pycache__/
+.env.local

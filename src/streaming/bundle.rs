@@ -41,16 +41,23 @@ pub fn decode_bundle(encoded: &str) -> Result<Vec<u8>, Git2Error> {
 
 /// Validate that data looks like a git bundle.
 ///
-/// Git bundles start with "# v2 bundle" or "# v3 bundle".
+/// Git bundles start with `# v2 bundle` / `# v3 bundle` (git < 2.53)
+/// or `# v2 git bundle` / `# v3 git bundle` (git >= 2.53).
 ///
 /// # Errors
 ///
 /// Returns `BundleFailed` if the data doesn't have a valid bundle header.
 pub fn validate_bundle(data: &[u8]) -> Result<(), Git2Error> {
     const V2_HEADER: &[u8] = b"# v2 bundle";
+    const V2_GIT_HEADER: &[u8] = b"# v2 git bundle";
     const V3_HEADER: &[u8] = b"# v3 bundle";
+    const V3_GIT_HEADER: &[u8] = b"# v3 git bundle";
 
-    if data.starts_with(V2_HEADER) || data.starts_with(V3_HEADER) {
+    if data.starts_with(V2_HEADER)
+        || data.starts_with(V2_GIT_HEADER)
+        || data.starts_with(V3_HEADER)
+        || data.starts_with(V3_GIT_HEADER)
+    {
         debug!("valid git bundle detected");
         Ok(())
     } else {
@@ -90,10 +97,10 @@ pub fn parse_bundle_info(data: &[u8]) -> Result<BundleInfo, Git2Error> {
     let header = std::str::from_utf8(data.get(..512).unwrap_or(data))
         .map_err(|_| Git2Error::BundleFailed("invalid bundle header encoding".to_string()))?;
 
-    // Determine version
-    let version = if header.starts_with("# v3 bundle") {
+    // Determine version (git >= 2.53 uses "# vN git bundle")
+    let version = if header.starts_with("# v3 bundle") || header.starts_with("# v3 git bundle") {
         3
-    } else if header.starts_with("# v2 bundle") {
+    } else if header.starts_with("# v2 bundle") || header.starts_with("# v2 git bundle") {
         2
     } else {
         return Err(Git2Error::BundleFailed(
@@ -167,6 +174,18 @@ mod tests {
     }
 
     #[test]
+    fn validate_bundle_v2_git() {
+        let data = b"# v2 git bundle\nsome content";
+        assert!(validate_bundle(data).is_ok());
+    }
+
+    #[test]
+    fn validate_bundle_v3_git() {
+        let data = b"# v3 git bundle\nsome content";
+        assert!(validate_bundle(data).is_ok());
+    }
+
+    #[test]
     fn validate_bundle_invalid() {
         let data = b"not a bundle";
         assert!(validate_bundle(data).is_err());
@@ -175,6 +194,15 @@ mod tests {
     #[test]
     fn parse_bundle_info_v2() {
         let data = b"# v2 bundle\nabcd1234abcd1234abcd1234abcd1234abcd1234 refs/heads/main\n\n";
+        let info = parse_bundle_info(data).unwrap();
+        assert_eq!(info.version, 2);
+        assert_eq!(info.refs.len(), 1);
+        assert_eq!(info.refs[0].name, "refs/heads/main");
+    }
+
+    #[test]
+    fn parse_bundle_info_v2_git() {
+        let data = b"# v2 git bundle\nabcd1234abcd1234abcd1234abcd1234abcd1234 refs/heads/main\n\n";
         let info = parse_bundle_info(data).unwrap();
         assert_eq!(info.version, 2);
         assert_eq!(info.refs.len(), 1);
