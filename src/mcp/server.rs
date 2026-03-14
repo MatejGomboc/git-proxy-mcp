@@ -38,7 +38,7 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::config::{LfsConfig, ProxyConfig, SessionConfig};
+use crate::config::{LfsConfig, ProxyConfig, SessionConfig, SubmoduleConfig};
 use crate::mcp::protocol::{
     ErrorCode, IncomingMessage, JsonRpcError, JsonRpcErrorData, JsonRpcNotification,
     JsonRpcRequest, JsonRpcResponse, RequestId, MCP_PROTOCOL_VERSION, SERVER_NAME,
@@ -278,6 +278,8 @@ pub struct McpServer {
     proxy_config: ProxyConfig,
     /// Git LFS configuration (retry behaviour, size limits).
     lfs_config: LfsConfig,
+    /// Submodule configuration (depth, filtering, failure limits).
+    submodule_config: SubmoduleConfig,
 }
 
 impl McpServer {
@@ -291,6 +293,7 @@ impl McpServer {
     /// * `proxy_config` — Proxy configuration for network connections
     /// * `session_config` — Session management settings
     /// * `lfs_config` — Git LFS configuration (retry behaviour, size limits)
+    /// * `submodule_config` — Submodule configuration (depth, filtering, failure limits)
     #[must_use]
     pub fn new(
         security_config: SecurityConfig,
@@ -299,6 +302,7 @@ impl McpServer {
         proxy_config: ProxyConfig,
         session_config: &SessionConfig,
         lfs_config: LfsConfig,
+        submodule_config: SubmoduleConfig,
     ) -> Self {
         // Build branch guard from protected branches
         let branch_guard = if security_config.protected_branches.is_empty() {
@@ -355,6 +359,7 @@ impl McpServer {
             git_identity,
             proxy_config,
             lfs_config,
+            submodule_config,
         }
     }
 
@@ -712,6 +717,20 @@ impl McpServer {
                         "include_submodules": {
                             "type": "boolean",
                             "description": "Include submodule contents in the archive. When enabled, submodules are fetched and their files are included at their respective paths."
+                        },
+                        "submodule_depth": {
+                            "type": "integer",
+                            "description": "Maximum submodule recursion depth (1 = top-level only, default from server config)."
+                        },
+                        "submodule_include": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Glob patterns for submodule paths to include. Only submodules matching at least one pattern are fetched."
+                        },
+                        "submodule_exclude": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Glob patterns for submodule paths to exclude. Exclusions take precedence over inclusions."
                         }
                     },
                     "required": ["url"]
@@ -782,6 +801,36 @@ impl McpServer {
                         "chunk_size": {
                             "type": "integer",
                             "description": "Chunk size in bytes (default: 1MB, max: 4MB)"
+                        },
+                        "exclude_binary": {
+                            "type": "boolean",
+                            "description": "Exclude binary files (files with null bytes or mostly non-printable chars)."
+                        },
+                        "max_file_size": {
+                            "type": "integer",
+                            "description": "Maximum file size in bytes. Files larger than this are skipped."
+                        },
+                        "resolve_lfs": {
+                            "type": "boolean",
+                            "description": "Resolve Git LFS pointers to actual content."
+                        },
+                        "include_submodules": {
+                            "type": "boolean",
+                            "description": "Include submodule contents in the archive."
+                        },
+                        "submodule_depth": {
+                            "type": "integer",
+                            "description": "Maximum submodule recursion depth (1 = top-level only, default from server config)."
+                        },
+                        "submodule_include": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Glob patterns for submodule paths to include."
+                        },
+                        "submodule_exclude": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Glob patterns for submodule paths to exclude. Exclusions take precedence over inclusions."
                         }
                     },
                     "required": ["url"]
@@ -974,7 +1023,12 @@ impl McpServer {
 
         // Execute the clone with timing
         let start = Instant::now();
-        match handle_repo_clone(args, &self.proxy_config, &self.lfs_config) {
+        match handle_repo_clone(
+            args,
+            &self.proxy_config,
+            &self.lfs_config,
+            &self.submodule_config,
+        ) {
             Ok(result) => {
                 let duration = start.elapsed();
                 self.audit_logger
@@ -1147,6 +1201,7 @@ impl McpServer {
             args,
             &self.proxy_config,
             &self.lfs_config,
+            &self.submodule_config,
             &self.streaming_sessions,
         ) {
             Ok(result) => {
@@ -1507,6 +1562,7 @@ mod tests {
             ProxyConfig::default(),
             &SessionConfig::default(),
             LfsConfig::default(),
+            SubmoduleConfig::default(),
         )
     }
 

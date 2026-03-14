@@ -28,10 +28,10 @@ use git2::{ObjectType, Oid, Repository, TreeWalkMode, TreeWalkResult};
 use glob::{MatchOptions, Pattern};
 use tracing::{debug, trace, warn};
 
-use crate::config::LfsConfig;
+use crate::config::{LfsConfig, SubmoduleConfig};
 use crate::git2_ops::error::Git2Error;
 use crate::git2_ops::lfs::{is_lfs_pointer, parse_lfs_pointer, LfsClient};
-use crate::git2_ops::submodule::fetch_all_submodules;
+use crate::git2_ops::submodule::{fetch_all_submodules, FetchedSubmodule, SubmoduleFilter};
 use crate::mcp::ProgressSender;
 
 /// Options for tar creation.
@@ -78,6 +78,10 @@ pub struct TarOptions {
     /// Optional LFS configuration (retry behaviour, size limits).
     /// When `None`, defaults are used.
     pub lfs_config: Option<LfsConfig>,
+
+    /// Optional submodule configuration (depth, filtering, failure limits).
+    /// When `None`, defaults are used.
+    pub submodule_config: Option<SubmoduleConfig>,
 }
 
 /// Compiled sparse patterns for efficient matching.
@@ -457,153 +461,50 @@ pub fn create_tar_from_tree_with_options(
         })
         .map_err(|e| Git2Error::Git2(format!("tree walk failed: {e}")))?;
 
-        // Process submodules if enabled
+        // Process submodules if enabled (max_depth=0 means skip submodules)
         if include_submodules {
-            debug!("fetching submodules");
-            match fetch_all_submodules(repo, commit_id, proxy_url.as_deref()) {
-                Ok(submodules) => {
-                    let total_submodules = submodules.len();
-                    let mut processed_submodules = 0usize;
-                    for submodule in submodules {
-                        // Report submodule fetch progress
-                        if let Some(ref sender) = progress {
-                            sender.send_submodule_progress(
-                                processed_submodules,
-                                total_submodules,
-                                Some(&submodule.entry.path),
-                            );
-                        }
-                        let submodule_path = &submodule.entry.path;
-                        let submodule_commit = submodule.entry.commit;
-                        let submodule_repo = &submodule.fetch_result.repo;
+            let sub_cfg = options.submodule_config.unwrap_or_default();
 
-                        debug!(
-                            path = %submodule_path,
-                            commit = %submodule_commit,
-                            "adding submodule contents to tar"
+            if sub_cfg.max_depth == 0 {
+                debug!("submodule_depth=0, skipping submodule fetching");
+            } else {
+                debug!("fetching submodules");
+                let sub_filter = SubmoduleFilter::new(
+                    sub_cfg.include_patterns.as_deref(),
+                    sub_cfg.exclude_patterns.as_deref(),
+                );
+
+                match fetch_all_submodules(
+                    repo,
+                    commit_id,
+                    proxy_url.as_deref(),
+                    sub_cfg.max_depth,
+                    sub_cfg.max_failures,
+                    &sub_filter,
+                ) {
+                    Ok(submodules) => {
+                        // Flatten and write all submodules (including children) to tar
+                        write_submodules_to_tar(
+                            &submodules,
+                            "",
+                            filter.as_ref(),
+                            exclude_binary,
+                            max_file_size,
+                            &mut tar_builder,
+                            &mut file_count,
+                            &mut uncompressed_size,
+                            &mut skipped_by_filter,
+                            &mut skipped_binary,
+                            &mut skipped_too_large,
+                            &mut skipped_path_too_long,
+                            &mut submodules_included,
+                            &mut submodules_failed,
+                            progress.as_ref(),
                         );
-
-                        // Get the submodule's tree
-                        let submodule_tree = match submodule_repo.find_commit(submodule_commit) {
-                            Ok(commit) => match commit.tree() {
-                                Ok(tree) => tree,
-                                Err(e) => {
-                                    warn!(path = %submodule_path, error = %e, "failed to get submodule tree");
-                                    submodules_failed += 1;
-                                    continue;
-                                }
-                            },
-                            Err(e) => {
-                                warn!(path = %submodule_path, error = %e, "failed to find submodule commit");
-                                submodules_failed += 1;
-                                continue;
-                            }
-                        };
-
-                        // Walk the submodule tree and add files
-                        let submodule_prefix = format!("{submodule_path}/");
-                        let mut submodule_files = 0usize;
-
-                        let walk_result = submodule_tree.walk(TreeWalkMode::PreOrder, |dir, entry| {
-                            let Some(name) = entry.name() else {
-                                return TreeWalkResult::Skip;
-                            };
-
-                            // Build the full path with submodule prefix
-                            let relative_path = if dir.is_empty() {
-                                name.to_string()
-                            } else {
-                                format!("{dir}{name}")
-                            };
-                            let full_path = format!("{submodule_prefix}{relative_path}");
-
-                            // Only process blobs (files)
-                            if entry.kind() == Some(ObjectType::Blob) {
-                                // Check sparse filter
-                                if let Some(ref f) = filter {
-                                    if !f.matches(&full_path) {
-                                        trace!(path = %full_path, "submodule file skipped by sparse filter");
-                                        skipped_by_filter += 1;
-                                        return TreeWalkResult::Ok;
-                                    }
-                                }
-
-                                match submodule_repo.find_blob(entry.id()) {
-                                    Ok(blob) => {
-                                        let content = blob.content();
-
-                                        // Check file size limit
-                                        if let Some(max_size) = max_file_size {
-                                            if content.len() > max_size {
-                                                trace!(path = %full_path, size = content.len(), "submodule file too large");
-                                                skipped_too_large += 1;
-                                                return TreeWalkResult::Ok;
-                                            }
-                                        }
-
-                                        // Check if binary
-                                        if exclude_binary && is_binary(content) {
-                                            trace!(path = %full_path, "submodule binary file skipped");
-                                            skipped_binary += 1;
-                                            return TreeWalkResult::Ok;
-                                        }
-
-                                        trace!(path = %full_path, size = content.len(), "adding submodule file to tar");
-
-                                        // Create tar header
-                                        let mut header = tar::Header::new_gnu();
-                                        if header.set_path(&full_path).is_err() {
-                                            debug!(path = %full_path, "submodule path too long for tar");
-                                            skipped_path_too_long += 1;
-                                            return TreeWalkResult::Ok;
-                                        }
-                                        header.set_size(content.len() as u64);
-                                        #[allow(clippy::cast_sign_loss)]
-                                        header.set_mode(entry.filemode() as u32);
-                                        header.set_cksum();
-
-                                        if tar_builder.append(&header, content).is_err() {
-                                            debug!(path = %full_path, "failed to append submodule file");
-                                            return TreeWalkResult::Ok;
-                                        }
-
-                                        submodule_files += 1;
-                                        file_count += 1;
-                                        uncompressed_size += content.len() as u64;
-                                    }
-                                    Err(e) => {
-                                        debug!(path = %full_path, error = %e, "failed to read submodule blob");
-                                    }
-                                }
-                            }
-
-                            TreeWalkResult::Ok
-                        });
-
-                        if walk_result.is_ok() && submodule_files > 0 {
-                            debug!(
-                                path = %submodule_path,
-                                files = submodule_files,
-                                "submodule added to tar"
-                            );
-                            submodules_included += 1;
-                            processed_submodules += 1;
-                        } else if walk_result.is_err() {
-                            warn!(path = %submodule_path, "failed to walk submodule tree");
-                            submodules_failed += 1;
-                            processed_submodules += 1;
-                        }
                     }
-
-                    debug!(
-                        total = total_submodules,
-                        included = submodules_included,
-                        failed = submodules_failed,
-                        "submodule processing complete"
-                    );
-                }
-                Err(e) => {
-                    warn!(error = %e, "failed to fetch submodules");
+                    Err(e) => {
+                        warn!(error = %e, "failed to fetch submodules");
+                    }
                 }
             }
         }
@@ -642,6 +543,190 @@ pub fn create_tar_from_tree_with_options(
         submodules_included,
         submodules_failed,
     })
+}
+
+/// Write fetched submodules (and their recursive children) into a tar builder.
+///
+/// This function walks each submodule's tree, applies filtering, and appends
+/// blobs to the tar archive. It then recurses into each submodule's children.
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_lines)] // Submodule tree walk + tar creation is naturally verbose
+fn write_submodules_to_tar<W: std::io::Write>(
+    submodules: &[FetchedSubmodule],
+    parent_prefix: &str,
+    filter: Option<&SparseFilter>,
+    exclude_binary: bool,
+    max_file_size: Option<usize>,
+    tar_builder: &mut tar::Builder<W>,
+    file_count: &mut usize,
+    uncompressed_size: &mut u64,
+    skipped_by_filter: &mut usize,
+    skipped_binary: &mut usize,
+    skipped_too_large: &mut usize,
+    skipped_path_too_long: &mut usize,
+    submodules_included: &mut usize,
+    submodules_failed: &mut usize,
+    progress: Option<&ProgressSender>,
+) {
+    let total_submodules = submodules.len();
+    let mut processed_submodules = 0usize;
+
+    for submodule in submodules {
+        // Report submodule fetch progress
+        if let Some(sender) = progress {
+            sender.send_submodule_progress(
+                processed_submodules,
+                total_submodules,
+                Some(&submodule.entry.path),
+            );
+        }
+
+        let submodule_path = if parent_prefix.is_empty() {
+            submodule.entry.path.clone()
+        } else {
+            format!("{parent_prefix}{}", submodule.entry.path)
+        };
+        let submodule_commit = submodule.entry.commit;
+        let submodule_repo = &submodule.fetch_result.repo;
+
+        debug!(
+            path = %submodule_path,
+            commit = %submodule_commit,
+            "adding submodule contents to tar"
+        );
+
+        // Get the submodule's tree
+        let submodule_tree = match submodule_repo.find_commit(submodule_commit) {
+            Ok(commit) => match commit.tree() {
+                Ok(tree) => tree,
+                Err(e) => {
+                    warn!(path = %submodule_path, error = %e, "failed to get submodule tree");
+                    *submodules_failed += 1;
+                    continue;
+                }
+            },
+            Err(e) => {
+                warn!(path = %submodule_path, error = %e, "failed to find submodule commit");
+                *submodules_failed += 1;
+                continue;
+            }
+        };
+
+        // Walk the submodule tree and add files
+        let submodule_prefix = format!("{submodule_path}/");
+        let mut submodule_files = 0usize;
+
+        let walk_result = submodule_tree.walk(TreeWalkMode::PreOrder, |dir, entry| {
+            let Some(name) = entry.name() else {
+                return TreeWalkResult::Skip;
+            };
+
+            // Build the full path with submodule prefix
+            let relative_path = if dir.is_empty() {
+                name.to_string()
+            } else {
+                format!("{dir}{name}")
+            };
+            let full_path = format!("{submodule_prefix}{relative_path}");
+
+            // Only process blobs (files)
+            if entry.kind() == Some(ObjectType::Blob) {
+                // Check sparse filter
+                if let Some(f) = filter {
+                    if !f.matches(&full_path) {
+                        trace!(path = %full_path, "submodule file skipped by sparse filter");
+                        *skipped_by_filter += 1;
+                        return TreeWalkResult::Ok;
+                    }
+                }
+
+                match submodule_repo.find_blob(entry.id()) {
+                    Ok(blob) => {
+                        let content = blob.content();
+
+                        // Check file size limit
+                        if let Some(max_size) = max_file_size {
+                            if content.len() > max_size {
+                                trace!(path = %full_path, size = content.len(), "submodule file too large");
+                                *skipped_too_large += 1;
+                                return TreeWalkResult::Ok;
+                            }
+                        }
+
+                        // Check if binary
+                        if exclude_binary && is_binary(content) {
+                            trace!(path = %full_path, "submodule binary file skipped");
+                            *skipped_binary += 1;
+                            return TreeWalkResult::Ok;
+                        }
+
+                        trace!(path = %full_path, size = content.len(), "adding submodule file to tar");
+
+                        // Create tar header
+                        let mut header = tar::Header::new_gnu();
+                        if header.set_path(&full_path).is_err() {
+                            debug!(path = %full_path, "submodule path too long for tar");
+                            *skipped_path_too_long += 1;
+                            return TreeWalkResult::Ok;
+                        }
+                        header.set_size(content.len() as u64);
+                        #[allow(clippy::cast_sign_loss)]
+                        header.set_mode(entry.filemode() as u32);
+                        header.set_cksum();
+
+                        if tar_builder.append(&header, content).is_err() {
+                            debug!(path = %full_path, "failed to append submodule file");
+                            return TreeWalkResult::Ok;
+                        }
+
+                        submodule_files += 1;
+                        *file_count += 1;
+                        *uncompressed_size += content.len() as u64;
+                    }
+                    Err(e) => {
+                        debug!(path = %full_path, error = %e, "failed to read submodule blob");
+                    }
+                }
+            }
+
+            TreeWalkResult::Ok
+        });
+
+        if walk_result.is_ok() && submodule_files > 0 {
+            debug!(
+                path = %submodule_path,
+                files = submodule_files,
+                "submodule added to tar"
+            );
+            *submodules_included += 1;
+            processed_submodules += 1;
+        } else if walk_result.is_err() {
+            warn!(path = %submodule_path, "failed to walk submodule tree");
+            *submodules_failed += 1;
+            processed_submodules += 1;
+        }
+
+        // Recursively write child submodules
+        if !submodule.children.is_empty() {
+            write_submodules_to_tar(
+                &submodule.children,
+                &submodule_prefix,
+                filter,
+                exclude_binary,
+                max_file_size,
+                tar_builder,
+                file_count,
+                uncompressed_size,
+                skipped_by_filter,
+                skipped_binary,
+                skipped_too_large,
+                skipped_path_too_long,
+                submodules_included,
+                submodules_failed,
+                progress,
+            );
+        }
+    }
 }
 
 /// Encode tar data as base64 for MCP response.
