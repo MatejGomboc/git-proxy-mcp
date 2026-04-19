@@ -17,6 +17,7 @@ Creates:
 """
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -107,13 +108,30 @@ def write_file(path, content, binary=False):
         f.write(content)
 
 
+def validate_repo_url(value):
+    """Validate TEST_REPO_URL against expected git URL formats."""
+    pattern = re.compile(
+        r"^(?:https://[A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]+|"
+        r"git@[A-Za-z0-9.-]+:[A-Za-z0-9._/-]+(?:\.git)?)$"
+    )
+    if not value or not pattern.fullmatch(value):
+        raise ValueError("Invalid TEST_REPO_URL format")
+    return value
+
+
 def main():
     """Rebuild the test fixture repository from scratch."""
     if not REPO_URL:
         print("FATAL: TEST_REPO_URL not set")
         sys.exit(1)
 
-    print(f"Rebuilding test fixture: {REPO_URL}")
+    try:
+        repo_url = validate_repo_url(REPO_URL)
+    except ValueError as exc:
+        print(f"FATAL: {exc}")
+        sys.exit(1)
+
+    print(f"Rebuilding test fixture: {repo_url}")
 
     work_dir = os.path.join(tempfile.gettempdir(), "mcp-test", "fixture")
     shutil.rmtree(work_dir, ignore_errors=True)
@@ -123,7 +141,7 @@ def main():
 
     # Clone existing repo or init fresh.
     clone_result = subprocess.run(
-        ["git", "clone", REPO_URL, "repo"],
+        ["git", "clone", repo_url, "repo"],
         cwd=work_dir,
         capture_output=True,
         text=True,
@@ -145,7 +163,7 @@ def main():
         # Repo is empty — init fresh.
         os.makedirs(repo_dir)
         run(["git", "init"], cwd=repo_dir)
-        run(["git", "remote", "add", "origin", REPO_URL], cwd=repo_dir)
+        run(["git", "remote", "add", "origin", repo_url], cwd=repo_dir)
         run(["git", "checkout", "-b", "fresh"], cwd=repo_dir)
 
     # --- Commit 1: initial structure ---
