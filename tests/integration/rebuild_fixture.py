@@ -17,12 +17,44 @@ Creates:
 """
 
 import os
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
+from urllib.parse import urlsplit, urlunsplit
 
-REPO_URL = os.environ.get("TEST_REPO_URL", "")
+_HOST_RE = re.compile(r"\A[A-Za-z0-9.\-]+\Z")
+_PATH_RE = re.compile(r"\A/[A-Za-z0-9._\-/]+\.git\Z")
+
+
+def _sanitise_repo_url(raw: str) -> str:
+    """Validate and reconstruct the repo URL from its parts.
+
+    Parsing with `urlsplit` and rebuilding via `urlunsplit` produces a
+    new string that CodeQL recognises as sanitised, closing the
+    `py/command-line-injection` alert on the `subprocess.run` calls
+    that use the result.
+
+    Only plain `https://host/path.git` URLs are accepted; anything
+    else (including SSH URLs, query strings, userinfo, or unusual
+    characters) is rejected.
+    """
+    parts = urlsplit(raw)
+    if parts.scheme != "https":
+        raise ValueError(f"TEST_REPO_URL must use https (got {parts.scheme!r})")
+    if parts.username or parts.password or parts.port:
+        raise ValueError("TEST_REPO_URL must not contain userinfo or port")
+    if parts.query or parts.fragment:
+        raise ValueError("TEST_REPO_URL must not contain query or fragment")
+    if not _HOST_RE.fullmatch(parts.hostname or ""):
+        raise ValueError(f"TEST_REPO_URL has invalid host: {parts.hostname!r}")
+    if not _PATH_RE.fullmatch(parts.path):
+        raise ValueError(f"TEST_REPO_URL has invalid path: {parts.path!r}")
+    return urlunsplit(("https", parts.hostname, parts.path, "", ""))
+
+
+REPO_URL = _sanitise_repo_url(os.environ["TEST_REPO_URL"]) if os.environ.get("TEST_REPO_URL") else ""
 
 # File contents for the fixture repository.
 README_CONTENT = """\
