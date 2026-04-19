@@ -18,6 +18,7 @@ Test fixture repo (git-proxy-mcp-test-dummy) has:
 import base64
 import json
 import os
+import re
 import select
 import shutil
 import subprocess
@@ -25,8 +26,22 @@ import sys
 import tempfile
 import time
 
+
+def _validate_repo_url(raw: str) -> str:
+    """Validate that the URL matches a safe HTTPS git remote pattern.
+
+    Rejects anything that is not a plain `https://host/path.git` URL to
+    prevent command-line injection via crafted environment values.
+    """
+    if not re.fullmatch(r"https://[A-Za-z0-9.\-]+/[A-Za-z0-9._\-/]+\.git", raw):
+        raise ValueError(
+            f"TEST_REPO_URL is not a safe HTTPS .git URL: {raw!r}",
+        )
+    return raw
+
+
 BINARY = "./target/release/git-proxy-mcp"
-REPO_URL = os.environ.get("TEST_REPO_URL", "")
+REPO_URL = _validate_repo_url(os.environ["TEST_REPO_URL"]) if os.environ.get("TEST_REPO_URL") else ""
 REQUEST_TIMEOUT_SECS = 60
 LOG_DIR = os.path.join(tempfile.gettempdir(), "mcp-test")
 SERVER_LOG_PATH = os.path.join(LOG_DIR, "server.log")

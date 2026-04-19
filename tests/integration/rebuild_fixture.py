@@ -17,12 +17,27 @@ Creates:
 """
 
 import os
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
 
-REPO_URL = os.environ.get("TEST_REPO_URL", "")
+
+def _validate_repo_url(raw: str) -> str:
+    """Validate that the URL matches a safe HTTPS git remote pattern.
+
+    Rejects anything that is not a plain `https://host/path.git` URL to
+    prevent command-line injection via crafted environment values.
+    """
+    if not re.fullmatch(r"https://[A-Za-z0-9.\-]+/[A-Za-z0-9._\-/]+\.git", raw):
+        raise ValueError(
+            f"TEST_REPO_URL is not a safe HTTPS .git URL: {raw!r}",
+        )
+    return raw
+
+
+REPO_URL = _validate_repo_url(os.environ["TEST_REPO_URL"]) if os.environ.get("TEST_REPO_URL") else ""
 
 # File contents for the fixture repository.
 README_CONTENT = """\
