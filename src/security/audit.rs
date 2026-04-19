@@ -524,6 +524,7 @@ pub enum AuditLoggerError {
 }
 
 #[cfg(test)]
+#[allow(unknown_lints, clippy::duration_suboptimal_units)] // lint added in Rust 1.95; tests use non-round ms values
 mod tests {
     use super::*;
     use std::io::Read;
@@ -672,7 +673,7 @@ mod tests {
             "abc123def",
             100,
             50000,
-            Duration::from_millis(2000),
+            Duration::from_secs(2),
         );
 
         assert_eq!(event.event_type, AuditEventType::RepoClone);
