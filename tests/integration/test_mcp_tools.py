@@ -1181,7 +1181,10 @@ def test_ping(client, runner):
 
 
 def test_pull_up_to_date(client, runner, refs_content):
-    """Test that pulling from current HEAD returns up_to_date=true."""
+    """Test that pulling from current HEAD returns up_to_date=true.
+
+    Depends on `test_repo_refs()` having run first to populate refs_content.
+    """
     print()
     print("=== Test: pull when already up to date ===")
 
@@ -1212,7 +1215,10 @@ def test_pull_up_to_date(client, runner, refs_content):
 
 
 def test_diff_same_commit(client, runner, refs_content):
-    """Test that diff between identical commits is empty."""
+    """Test that diff between identical commits is empty.
+
+    Depends on `test_repo_refs()` having run first to populate refs_content.
+    """
     print()
     print("=== Test: diff between identical commits ===")
 
@@ -1243,7 +1249,11 @@ def test_diff_same_commit(client, runner, refs_content):
 
 
 def test_initialize_already_initialised(client, runner):
-    """Test that calling initialize twice returns an error."""
+    """Test that calling initialize twice returns an InvalidRequest error.
+
+    Depends on `test_initialise()` having run first to put the server
+    into Running state.
+    """
     print()
     print("=== Test: initialize already initialised ===")
 
@@ -1268,25 +1278,6 @@ def test_initialize_already_initialised(client, runner):
             "error code is InvalidRequest (-32600)",
             actual=code,
         )
-
-
-def test_initialize_missing_params(client, runner):
-    """Test that initialize without params returns an error.
-
-    Server is already initialised so this also exercises the
-    AwaitingInit guard, but the missing-params path is tested by
-    handle_initialize itself returning InvalidParams before
-    state-checking.
-    """
-    print()
-    print("=== Test: initialize missing params ===")
-
-    response = client.send("initialize", None)
-
-    runner.check(
-        "error" in response,
-        "initialize without params returns error",
-    )
 
 
 def test_clone_with_explicit_branch(client, runner):
@@ -1347,12 +1338,30 @@ def test_cancel_unknown_session(client, runner):
     )
 
     runner.check("error" not in response, "no protocol error")
-    # Response can either be an error result or {cancelled: false} — both acceptable.
-    # The key contract is: server doesn't crash on unknown session ID.
-    runner.check(
-        "result" in response,
-        "got a response (no crash) for unknown session",
-    )
+    # Two valid response shapes for unknown session:
+    #   - isError=true with an error message in content[0].text, OR
+    #   - normal result with {cancelled: false}
+    # Inspect the actual content to verify which contract the server honours.
+    result = response.get("result", {})
+    is_error = result.get("isError", False)
+
+    if is_error:
+        runner.check(
+            True,
+            "server returned isError for unknown session (acceptable)",
+        )
+    else:
+        # Parse the JSON in content[0].text and check `cancelled` field.
+        try:
+            text = result["content"][0]["text"]
+            payload = json.loads(text)
+            runner.check(
+                payload.get("cancelled") is False,
+                "cancelled is false for unknown session",
+                actual=payload.get("cancelled"),
+            )
+        except (KeyError, IndexError, json.JSONDecodeError) as exc:
+            runner.check(False, f"unexpected response shape: {exc}")
 
 
 def test_helper_script_content(client, runner):
@@ -1431,7 +1440,10 @@ def test_clone_start_then_status_zero_progress(client, runner):
 
 
 def test_diff_with_invalid_base_commit(client, runner, refs_content):
-    """Test that diff with an invalid base commit returns isError."""
+    """Test that diff with an invalid base commit returns isError.
+
+    Depends on `test_repo_refs()` having run first to populate refs_content.
+    """
     print()
     print("=== Test: diff with invalid base commit ===")
 
@@ -1444,13 +1456,18 @@ def test_diff_with_invalid_base_commit(client, runner, refs_content):
         runner.failed += 1
         return
 
+    # Use a 40-char hex string that cannot be a real Git OID (all-f).
+    # SHA-1 has 2^160 possible values; collision with a real commit is
+    # cryptographically impossible.
+    bogus_oid = "f" * 40
+
     response = client.send(
         "tools/call",
         {
             "name": "repo_diff",
             "arguments": {
                 "url": REPO_URL,
-                "base_commit": "0000000000000000000000000000000000000099",
+                "base_commit": bogus_oid,
                 "head_commit": v2_sha,
             },
         },
@@ -1518,8 +1535,13 @@ def test_clone_start_with_zero_chunk_size_uses_default(client, runner):
         client.call_tool("repo_clone_cancel", {"session_id": sid})
 
 
-def test_refs_lists_all_branches_and_tags(client, runner, refs_content):
-    """Detailed check: refs response correctly classifies branches vs tags."""
+def test_refs_lists_all_branches_and_tags(_client, runner, refs_content):
+    """Detailed check: refs response correctly classifies branches vs tags.
+
+    Uses pre-fetched refs_content from `test_repo_refs()` rather than making
+    a fresh call, hence the underscore-prefixed unused client parameter.
+    Depends on `test_repo_refs()` having run first to populate refs_content.
+    """
     print()
     print("=== Test: refs classification ===")
 
@@ -1652,8 +1674,12 @@ def main():
         test_diff_with_invalid_base_commit(client, runner, refs_content)
         test_pull_with_invalid_since_commit(client, runner)
         test_refs_lists_all_branches_and_tags(client, runner, refs_content)
+        # test_initialize_already_initialised exercises the only initialize
+        # error path reachable after init: state guard. The missing-params
+        # path can only fire before initialise, so it is covered by the
+        # unit test handle_initialize_missing_params_returns_error in
+        # src/mcp/server.rs (unit tests can construct an AwaitingInit server).
         test_initialize_already_initialised(client, runner)
-        test_initialize_missing_params(client, runner)
     finally:
         client.stop()
 
