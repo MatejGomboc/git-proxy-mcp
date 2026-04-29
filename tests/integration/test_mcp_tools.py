@@ -1650,13 +1650,17 @@ def test_diff_detects_rename(client, runner):
     )
 
 
-def test_pull_with_rename(client, runner):
+def test_pull_captures_file_move(client, runner):
     """Test that pull from before-rename to after-rename captures the change.
 
-    Tests the changed_files / deleted_files tracking when a file is renamed.
+    The current pull implementation does not enable git's similarity-based
+    rename detection, so this surfaces as a delete (`docs/DESIGN.md`) plus
+    an add (`docs/ARCHITECTURE.md`) rather than a single renamed entry.
+    Either shape is acceptable; this test verifies the file-move path is
+    represented in the result, not the specific representation.
     """
     print()
-    print("=== Test: pull captures rename ===")
+    print("=== Test: pull captures file move (rename as delete+add) ===")
 
     env_path = os.path.join(tempfile.gettempdir(), "mcp-test", "fixture-shas.env")
     if not os.path.exists(env_path):
@@ -1848,7 +1852,7 @@ def main():
         # Fixture-dependent tests (require commits 4 and 5 from the
         # rebuild_fixture.py extended fixture).
         test_diff_detects_rename(client, runner)
-        test_pull_with_rename(client, runner)
+        test_pull_captures_file_move(client, runner)
         test_clone_resolves_lfs_pointer(client, runner)
         test_clone_without_lfs_keeps_pointer(client, runner)
     finally:

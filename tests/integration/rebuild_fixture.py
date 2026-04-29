@@ -241,12 +241,15 @@ def main():
     print(f"Commit 3: {v3_sha}")
 
     # --- Commit 4: rename docs/DESIGN.md -> docs/ARCHITECTURE.md ---
-    # Exercises rename-detection in repo_diff and repo_pull.
-    old_path = os.path.join(repo_dir, "docs", "DESIGN.md")
-    new_path = os.path.join(repo_dir, "docs", "ARCHITECTURE.md")
+    # Exercises rename-detection in repo_diff and repo_pull. Note: the
+    # current diff/pull implementations do NOT enable git's similarity
+    # detector, so this rename surfaces as a delete+add pair rather than a
+    # single rename entry. We still test it because the integration tests
+    # should catch any future change that breaks the file-move path.
     run(["git", "mv", "DESIGN.md", "ARCHITECTURE.md"], cwd=os.path.join(repo_dir, "docs"))
-    # Append a small change so the rename is detected with similarity rather
-    # than treated as add+delete.
+    # Append a small change so the moved file is non-trivially different
+    # from the original.
+    new_path = os.path.join(repo_dir, "docs", "ARCHITECTURE.md")
     with open(new_path, "a", newline="\n", encoding="utf-8") as f:
         f.write("Renamed for clarity.\n")
     run(["git", "add", "-A"], cwd=repo_dir)
@@ -254,8 +257,6 @@ def main():
         ["git", "commit", "-m", "Rename DESIGN.md to ARCHITECTURE.md"],
         cwd=repo_dir,
     )
-    # Suppress unused-variable lint: old_path documents intent.
-    del old_path
 
     v4_sha = get_sha(repo_dir)
     print(f"Commit 4: {v4_sha}")
@@ -273,9 +274,9 @@ def main():
     with open(lfs_path, "wb") as f:
         f.write(lfs_payload)
 
-    # `git lfs track` reads .gitattributes; ensure LFS knows about the file.
-    # Some git-lfs versions require `git lfs install --local` before adding.
-    run(["git", "lfs", "install", "--local"], cwd=repo_dir, check=False)
+    # The CI workflow runs `git lfs install` globally before this script
+    # runs, so the smudge/clean filters are already configured for the
+    # runner user — no per-repo install needed here.
     run(["git", "add", "-A"], cwd=repo_dir)
     run(
         ["git", "commit", "-m", "Add LFS-tracked binary file"],
