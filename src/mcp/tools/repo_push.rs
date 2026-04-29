@@ -221,5 +221,84 @@ mod tests {
         assert!(json.contains("\"force\":false"));
     }
 
-    // Integration tests that require network access are in tests/
+    #[test]
+    fn repo_push_args_rejects_missing_bundle() {
+        let json = r#"{"url": "https://x.com/r.git", "branch": "main"}"#;
+        let result: Result<RepoPushArgs, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn repo_push_args_rejects_missing_url() {
+        let json = r#"{"bundle": "SGVsbG8=", "branch": "main"}"#;
+        let result: Result<RepoPushArgs, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn repo_push_error_displays() {
+        let err = RepoPushError {
+            message: "test error".to_string(),
+        };
+        assert_eq!(format!("{err}"), "test error");
+    }
+
+    #[test]
+    fn repo_push_error_from_git2_error() {
+        let git2_err = Git2Error::InvalidUrl;
+        let err: RepoPushError = git2_err.into();
+        assert!(err.message.contains("invalid"));
+    }
+
+    #[test]
+    fn handle_repo_push_with_invalid_url() {
+        let args = RepoPushArgs {
+            bundle: "SGVsbG8=".to_string(),
+            url: "not-a-url".to_string(),
+            branch: "main".to_string(),
+            force: false,
+        };
+        let proxy = ProxyConfig::default();
+        assert!(handle_repo_push(args, &proxy).is_err());
+    }
+
+    #[test]
+    fn handle_repo_push_with_oversized_bundle() {
+        // Bundle exceeding 1.37 GiB encoded limit
+        let oversized = "A".repeat(2 * 1024 * 1024 * 1024);
+        let args = RepoPushArgs {
+            bundle: oversized,
+            url: "https://github.com/owner/repo.git".to_string(),
+            branch: "main".to_string(),
+            force: false,
+        };
+        let proxy = ProxyConfig::default();
+        let err = handle_repo_push(args, &proxy).unwrap_err();
+        assert!(err.message.contains("too large"));
+    }
+
+    #[test]
+    fn handle_repo_push_with_invalid_base64() {
+        let args = RepoPushArgs {
+            bundle: "not_valid_base64!@#$%".to_string(),
+            url: "https://github.com/owner/repo.git".to_string(),
+            branch: "feature".to_string(),
+            force: false,
+        };
+        let proxy = ProxyConfig::default();
+        assert!(handle_repo_push(args, &proxy).is_err());
+    }
+
+    #[test]
+    fn handle_repo_push_with_malformed_bundle() {
+        // Valid base64 but not a git bundle
+        let args = RepoPushArgs {
+            bundle: "SGVsbG8gV29ybGQ=".to_string(), // "Hello World"
+            url: "https://github.com/owner/repo.git".to_string(),
+            branch: "feature".to_string(),
+            force: false,
+        };
+        let proxy = ProxyConfig::default();
+        assert!(handle_repo_push(args, &proxy).is_err());
+    }
 }

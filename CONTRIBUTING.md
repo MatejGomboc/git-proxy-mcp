@@ -263,6 +263,32 @@ cargo test module_name::
 - Test both success and failure cases
 - **Never use real credentials in tests** — use mock values or test fixtures
 
+### Code Coverage
+
+The project uses [`cargo-llvm-cov`](https://github.com/taiki-e/cargo-llvm-cov) for coverage
+measurement and [Codecov](https://codecov.io/gh/MatejGomboc/git-proxy-mcp) for reporting.
+Coverage runs automatically on every PR and push to main.
+
+```bash
+# Install cargo-llvm-cov locally (one-time)
+cargo install cargo-llvm-cov --locked
+
+# Run coverage with a summary report
+cargo llvm-cov --all-features --workspace --summary-only
+
+# Generate an HTML report (opens in browser)
+cargo llvm-cov --all-features --workspace --html
+open target/llvm-cov/html/index.html
+
+# Generate lcov for CI (matches what CI uploads to Codecov)
+cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info
+```
+
+**Coverage targets** (configured in `codecov.yml`):
+
+- Patch coverage: ≥ 80% on changed lines (per-PR)
+- Project coverage: must not drop more than 1% on main
+
 ### Security Testing
 
 When adding or modifying code that handles credentials:

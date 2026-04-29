@@ -1620,4 +1620,493 @@ mod tests {
         assert_eq!(info.name, SERVER_NAME);
         assert!(!info.version.is_empty());
     }
+
+    fn make_request(id: i64, method: &str, params: Option<Value>) -> JsonRpcRequest {
+        JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: RequestId::Number(id),
+            method: method.to_string(),
+            params,
+        }
+    }
+
+    fn initialise_server(server: &mut McpServer) {
+        let init_req = make_request(
+            1,
+            "initialize",
+            Some(json!({
+                "protocolVersion": MCP_PROTOCOL_VERSION,
+                "capabilities": {},
+                "clientInfo": {"name": "test-client", "version": "1.0"},
+            })),
+        );
+        let _ = server.handle_initialize(&init_req).unwrap();
+        // Send initialized notification to move to Running state
+        let notif = JsonRpcNotification {
+            jsonrpc: "2.0".to_string(),
+            method: "notifications/initialized".to_string(),
+            params: None,
+        };
+        server.handle_notification(&notif);
+    }
+
+    #[test]
+    fn handle_initialize_with_valid_params_transitions_state() {
+        let mut server = create_test_server();
+        let req = make_request(
+            1,
+            "initialize",
+            Some(json!({
+                "protocolVersion": MCP_PROTOCOL_VERSION,
+                "capabilities": {},
+                "clientInfo": {"name": "test-client", "version": "1.0"},
+            })),
+        );
+        let resp = server.handle_initialize(&req).unwrap();
+        assert_eq!(server.state(), ServerState::Initialising);
+        let result = &resp.result;
+        assert_eq!(result["protocolVersion"], MCP_PROTOCOL_VERSION);
+        assert!(result["capabilities"].is_object());
+        assert!(result["serverInfo"].is_object());
+    }
+
+    #[test]
+    fn handle_initialize_twice_returns_error() {
+        let mut server = create_test_server();
+        let req = make_request(
+            1,
+            "initialize",
+            Some(json!({
+                "protocolVersion": MCP_PROTOCOL_VERSION,
+                "capabilities": {},
+                "clientInfo": {"name": "test-client", "version": "1.0"},
+            })),
+        );
+        let _ = server.handle_initialize(&req).unwrap();
+        let err = server.handle_initialize(&req).unwrap_err();
+        assert_eq!(err.error.code, ErrorCode::InvalidRequest.code());
+        assert!(err.error.message.contains("already"));
+    }
+
+    #[test]
+    fn handle_initialize_missing_params_returns_error() {
+        let mut server = create_test_server();
+        let req = make_request(1, "initialize", None);
+        let err = server.handle_initialize(&req).unwrap_err();
+        assert_eq!(err.error.code, ErrorCode::InvalidParams.code());
+    }
+
+    #[test]
+    fn handle_initialize_malformed_params_returns_error() {
+        let mut server = create_test_server();
+        let req = make_request(1, "initialize", Some(json!("not an object")));
+        let err = server.handle_initialize(&req).unwrap_err();
+        assert_eq!(err.error.code, ErrorCode::InvalidParams.code());
+    }
+
+    #[test]
+    fn handle_initialize_includes_git_identity_when_set() {
+        let security_config = SecurityConfig::default();
+        let git_identity = GitIdentity {
+            name: Some("AI Assistant".to_string()),
+            email: Some("ai@example.com".to_string()),
+        };
+        let audit_logger = AuditLogger::disabled();
+        let mut server = McpServer::new(
+            security_config,
+            git_identity,
+            audit_logger,
+            ProxyConfig::default(),
+            &SessionConfig::default(),
+            LfsConfig::default(),
+            SubmoduleConfig::default(),
+        );
+        let req = make_request(
+            1,
+            "initialize",
+            Some(json!({
+                "protocolVersion": MCP_PROTOCOL_VERSION,
+                "capabilities": {},
+                "clientInfo": {"name": "c", "version": "1"},
+            })),
+        );
+        let resp = server.handle_initialize(&req).unwrap();
+        assert!(resp.result.get("gitIdentity").is_some());
+    }
+
+    #[test]
+    fn handle_tools_list_before_init_returns_error() {
+        let server = create_test_server();
+        let req = make_request(1, "tools/list", None);
+        let err = server.handle_tools_list(&req).unwrap_err();
+        assert_eq!(err.error.code, ErrorCode::InvalidRequest.code());
+    }
+
+    #[test]
+    fn handle_tools_list_after_init_returns_all_tools() {
+        let mut server = create_test_server();
+        initialise_server(&mut server);
+        let req = make_request(1, "tools/list", None);
+        let resp = server.handle_tools_list(&req).unwrap();
+        let tools = resp.result.get("tools").unwrap().as_array().unwrap();
+        // 10 tools total: helper_script + 5 tier1 + 4 tier2
+        assert!(tools.len() >= 10);
+        let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
+        assert!(names.contains(&"helper_script"));
+        assert!(names.contains(&"repo_clone"));
+        assert!(names.contains(&"repo_push"));
+        assert!(names.contains(&"repo_pull"));
+        assert!(names.contains(&"repo_diff"));
+        assert!(names.contains(&"repo_refs"));
+        assert!(names.contains(&"repo_clone_start"));
+        assert!(names.contains(&"repo_clone_chunk"));
+        assert!(names.contains(&"repo_clone_cancel"));
+        assert!(names.contains(&"repo_clone_status"));
+    }
+
+    #[test]
+    fn handle_tools_call_before_init_returns_error() {
+        let server = create_test_server();
+        let req = make_request(
+            1,
+            "tools/call",
+            Some(json!({"name": "helper_script", "arguments": {}})),
+        );
+        let err = server.handle_tools_call(&req).unwrap_err();
+        assert_eq!(err.error.code, ErrorCode::InvalidRequest.code());
+    }
+
+    #[test]
+    fn handle_tools_call_with_missing_params_returns_error() {
+        let mut server = create_test_server();
+        initialise_server(&mut server);
+        let req = make_request(1, "tools/call", None);
+        let err = server.handle_tools_call(&req).unwrap_err();
+        assert_eq!(err.error.code, ErrorCode::InvalidParams.code());
+    }
+
+    #[test]
+    fn handle_tools_call_with_malformed_params_returns_error() {
+        let mut server = create_test_server();
+        initialise_server(&mut server);
+        let req = make_request(1, "tools/call", Some(json!("not an object")));
+        let err = server.handle_tools_call(&req).unwrap_err();
+        assert_eq!(err.error.code, ErrorCode::InvalidParams.code());
+    }
+
+    #[test]
+    fn handle_tools_call_helper_script_returns_python_script() {
+        let mut server = create_test_server();
+        initialise_server(&mut server);
+        let req = make_request(
+            1,
+            "tools/call",
+            Some(json!({"name": "helper_script", "arguments": {}})),
+        );
+        let resp = server.handle_tools_call(&req).unwrap();
+        let result = &resp.result;
+        // isError is skipped when false (serde skip_serializing_if)
+        assert!(result.get("isError").is_none() || result["isError"] == false);
+        let text = result["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("script"));
+    }
+
+    #[test]
+    fn handle_tools_call_unknown_tool_returns_error_result() {
+        let mut server = create_test_server();
+        initialise_server(&mut server);
+        let req = make_request(
+            1,
+            "tools/call",
+            Some(json!({"name": "nonexistent_tool", "arguments": {}})),
+        );
+        // Returns Ok with isError=true (not a JSON-RPC error)
+        let resp = server.handle_tools_call(&req).unwrap();
+        assert_eq!(resp.result["isError"], true);
+        let text = resp.result["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("Unknown tool"));
+    }
+
+    #[test]
+    fn handle_ping_returns_empty_object() {
+        let req = make_request(42, "ping", None);
+        let resp = McpServer::handle_ping(&req);
+        assert_eq!(resp.id, RequestId::Number(42));
+        assert!(resp.result.is_object());
+    }
+
+    #[test]
+    fn handle_ping_works_in_any_state() {
+        // Ping should work even before initialize
+        let server = create_test_server();
+        assert_eq!(server.state(), ServerState::AwaitingInit);
+        let req = make_request(1, "ping", None);
+        let resp = McpServer::handle_ping(&req);
+        assert!(resp.result.is_object());
+    }
+
+    #[test]
+    fn handle_notification_initialized_transitions_to_running() {
+        let mut server = create_test_server();
+        // Move to Initialising first
+        let init_req = make_request(
+            1,
+            "initialize",
+            Some(json!({
+                "protocolVersion": MCP_PROTOCOL_VERSION,
+                "capabilities": {},
+                "clientInfo": {"name": "c", "version": "1"},
+            })),
+        );
+        server.handle_initialize(&init_req).unwrap();
+        assert_eq!(server.state(), ServerState::Initialising);
+
+        let notif = JsonRpcNotification {
+            jsonrpc: "2.0".to_string(),
+            method: "notifications/initialized".to_string(),
+            params: None,
+        };
+        server.handle_notification(&notif);
+        assert_eq!(server.state(), ServerState::Running);
+    }
+
+    #[test]
+    fn handle_notification_initialized_ignored_in_wrong_state() {
+        let mut server = create_test_server();
+        // Server is in AwaitingInit
+        let notif = JsonRpcNotification {
+            jsonrpc: "2.0".to_string(),
+            method: "notifications/initialized".to_string(),
+            params: None,
+        };
+        server.handle_notification(&notif);
+        // State unchanged
+        assert_eq!(server.state(), ServerState::AwaitingInit);
+    }
+
+    #[test]
+    fn handle_notification_unknown_method_ignored() {
+        let mut server = create_test_server();
+        initialise_server(&mut server);
+        let notif = JsonRpcNotification {
+            jsonrpc: "2.0".to_string(),
+            method: "unknown/method".to_string(),
+            params: None,
+        };
+        server.handle_notification(&notif);
+        // State unchanged
+        assert_eq!(server.state(), ServerState::Running);
+    }
+
+    #[test]
+    fn require_running_in_running_state_succeeds() {
+        let mut server = create_test_server();
+        initialise_server(&mut server);
+        assert!(server.require_running(&RequestId::Number(1)).is_ok());
+    }
+
+    #[test]
+    fn require_running_in_awaiting_init_fails() {
+        let server = create_test_server();
+        let err = server.require_running(&RequestId::Number(1)).unwrap_err();
+        assert_eq!(err.error.code, ErrorCode::InvalidRequest.code());
+    }
+
+    #[test]
+    fn require_running_in_initialising_fails() {
+        let mut server = create_test_server();
+        let init_req = make_request(
+            1,
+            "initialize",
+            Some(json!({
+                "protocolVersion": MCP_PROTOCOL_VERSION,
+                "capabilities": {},
+                "clientInfo": {"name": "c", "version": "1"},
+            })),
+        );
+        server.handle_initialize(&init_req).unwrap();
+        // Now in Initialising (haven't sent notifications/initialized)
+        let err = server.require_running(&RequestId::Number(1)).unwrap_err();
+        assert_eq!(err.error.code, ErrorCode::InvalidRequest.code());
+    }
+
+    #[test]
+    fn call_repo_clone_tool_with_invalid_args_returns_error() {
+        let mut server = create_test_server();
+        initialise_server(&mut server);
+        // Missing required url field
+        let result = server.call_repo_clone_tool(&json!({}));
+        assert!(result.is_error);
+    }
+
+    #[test]
+    fn call_repo_push_tool_with_invalid_args_returns_error() {
+        let mut server = create_test_server();
+        initialise_server(&mut server);
+        let result = server.call_repo_push_tool(&json!({}));
+        assert!(result.is_error);
+    }
+
+    #[test]
+    fn call_repo_refs_tool_with_invalid_args_returns_error() {
+        let mut server = create_test_server();
+        initialise_server(&mut server);
+        let result = server.call_repo_refs_tool(&json!({}));
+        assert!(result.is_error);
+    }
+
+    #[test]
+    fn call_repo_diff_tool_with_invalid_args_returns_error() {
+        let mut server = create_test_server();
+        initialise_server(&mut server);
+        let result = server.call_repo_diff_tool(&json!({}));
+        assert!(result.is_error);
+    }
+
+    #[test]
+    fn call_repo_pull_tool_with_invalid_args_returns_error() {
+        let mut server = create_test_server();
+        initialise_server(&mut server);
+        let result = server.call_repo_pull_tool(&json!({}));
+        assert!(result.is_error);
+    }
+
+    #[test]
+    fn call_repo_clone_chunk_tool_with_invalid_args_returns_error() {
+        let mut server = create_test_server();
+        initialise_server(&mut server);
+        let result = server.call_repo_clone_chunk_tool(&json!({}));
+        assert!(result.is_error);
+    }
+
+    #[test]
+    fn call_repo_clone_cancel_tool_with_invalid_args_returns_error() {
+        let mut server = create_test_server();
+        initialise_server(&mut server);
+        let result = server.call_repo_clone_cancel_tool(&json!({}));
+        assert!(result.is_error);
+    }
+
+    #[test]
+    fn call_repo_clone_status_tool_with_invalid_args_returns_error() {
+        let mut server = create_test_server();
+        initialise_server(&mut server);
+        let result = server.call_repo_clone_status_tool(&json!({}));
+        assert!(result.is_error);
+    }
+
+    #[test]
+    fn call_repo_clone_status_tool_with_unknown_session() {
+        let mut server = create_test_server();
+        initialise_server(&mut server);
+        let result = server.call_repo_clone_status_tool(&json!({
+            "session_id": "nonexistent_session"
+        }));
+        assert!(result.is_error);
+    }
+
+    #[test]
+    fn call_helper_script_tool_returns_text_content() {
+        let result = McpServer::call_helper_script_tool();
+        assert!(!result.is_error);
+        assert_eq!(result.content.len(), 1);
+    }
+
+    #[test]
+    fn call_repo_refs_tool_with_blocked_url_returns_error() {
+        let security_config = SecurityConfig {
+            repo_blocklist: Some(vec!["github.com/blocked/*".to_string()]),
+            ..Default::default()
+        };
+        let git_identity = GitIdentity::default();
+        let audit_logger = AuditLogger::disabled();
+        let mut server = McpServer::new(
+            security_config,
+            git_identity,
+            audit_logger,
+            ProxyConfig::default(),
+            &SessionConfig::default(),
+            LfsConfig::default(),
+            SubmoduleConfig::default(),
+        );
+        initialise_server(&mut server);
+        let result = server.call_repo_refs_tool(&json!({
+            "url": "https://github.com/blocked/repo.git"
+        }));
+        assert!(result.is_error);
+    }
+
+    #[test]
+    fn tool_call_result_text_creation() {
+        let result = ToolCallResult::text("hello");
+        assert!(!result.is_error);
+        match &result.content[0] {
+            ToolContent::Text { text } => assert_eq!(text, "hello"),
+        }
+    }
+
+    #[test]
+    fn tool_call_result_serialises_with_fields() {
+        let result = ToolCallResult::text("ok");
+        let json = serde_json::to_value(&result).unwrap();
+        // is_error is skipped when false
+        assert!(json.get("isError").is_none());
+        assert!(json["content"].is_array());
+    }
+
+    #[test]
+    fn tool_call_result_error_serialises_correctly() {
+        let result = ToolCallResult::error("boom");
+        let json = serde_json::to_value(&result).unwrap();
+        assert_eq!(json["isError"], true);
+    }
+
+    #[test]
+    fn server_capabilities_default_has_tools() {
+        let caps = ServerCapabilities::default();
+        let json = serde_json::to_value(&caps).unwrap();
+        assert!(json["tools"].is_object());
+    }
+
+    #[test]
+    fn server_info_has_correct_name_and_version() {
+        let info = ServerInfo::default();
+        assert_eq!(info.name, "git-proxy-mcp");
+        // Version should match Cargo.toml package version
+        assert!(!info.version.is_empty());
+        assert!(info.version.chars().any(|c| c.is_ascii_digit()));
+    }
+
+    #[test]
+    fn git_identity_is_partial_when_name_set() {
+        let id = GitIdentity {
+            name: Some("foo".into()),
+            email: None,
+        };
+        assert!(id.is_partial());
+    }
+
+    #[test]
+    fn git_identity_is_partial_when_email_set() {
+        let id = GitIdentity {
+            name: None,
+            email: Some("e@x".into()),
+        };
+        assert!(id.is_partial());
+    }
+
+    #[test]
+    fn git_identity_is_not_partial_when_empty() {
+        let id = GitIdentity::default();
+        assert!(!id.is_partial());
+    }
+
+    #[test]
+    fn git_identity_is_partial_when_both_set() {
+        let id = GitIdentity {
+            name: Some("foo".into()),
+            email: Some("e@x".into()),
+        };
+        assert!(id.is_partial());
+    }
 }

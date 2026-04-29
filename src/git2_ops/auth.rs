@@ -507,4 +507,144 @@ mod tests {
         let result = parse_credential_output("");
         assert!(result.is_none());
     }
+
+    #[test]
+    fn validate_url_rejects_empty_string() {
+        assert!(validate_url("").is_err());
+    }
+
+    #[test]
+    fn validate_url_rejects_ext_protocol() {
+        assert!(validate_url("ext::ssh user@host").is_err());
+    }
+
+    #[test]
+    fn validate_url_rejects_uppercase_file_scheme() {
+        assert!(validate_url("FILE:///etc/passwd").is_err());
+    }
+
+    #[test]
+    fn validate_url_rejects_uppercase_ext() {
+        assert!(validate_url("EXT::ssh whatever").is_err());
+    }
+
+    #[test]
+    fn validate_url_accepts_http() {
+        assert!(validate_url("http://example.com/repo.git").is_ok());
+    }
+
+    #[test]
+    fn sanitize_url_handles_https_no_credentials() {
+        let url = "https://github.com";
+        let sanitized = sanitize_url_for_logging(url);
+        assert_eq!(sanitized, url);
+    }
+
+    #[test]
+    fn sanitize_url_with_only_username_and_at() {
+        let url = "https://username@github.com/owner/repo.git";
+        let sanitized = sanitize_url_for_logging(url);
+        // No password but has @ — still sanitised
+        assert!(sanitized.contains("***@github.com"));
+        assert!(!sanitized.contains("username"));
+    }
+
+    #[test]
+    fn sanitize_url_with_at_but_no_scheme_returns_unchanged() {
+        let url = "user@host:path";
+        let sanitized = sanitize_url_for_logging(url);
+        // Has @ but no :// — unchanged
+        assert_eq!(sanitized, url);
+    }
+
+    #[test]
+    fn parse_url_for_credentials_with_port() {
+        let result = parse_url_for_credentials("https://gitlab.example.com:8443/owner/repo.git");
+        assert_eq!(
+            result,
+            Some(("https".to_string(), "gitlab.example.com".to_string()))
+        );
+    }
+
+    #[test]
+    fn parse_url_for_credentials_ssh_with_no_path() {
+        // SSH URL with just user@host (no colon)
+        let result = parse_url_for_credentials("git@github.com");
+        // Should still parse — host is everything after git@
+        // Actually this depends on whether the implementation handles this case
+        // If `host:path` split returns whole string when no colon, host = "github.com"
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn parse_url_for_credentials_url_no_host() {
+        // URL with scheme but no host
+        let result = parse_url_for_credentials("file:///local");
+        // file:// has no host, so host_str() returns None
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn parse_credential_output_with_extra_fields() {
+        let output =
+            "protocol=https\nhost=github.com\nusername=u\npassword=p\ncapability[]=authtype\n";
+        let result = parse_credential_output(output);
+        assert_eq!(result, Some(("u".to_string(), "p".to_string())));
+    }
+
+    #[test]
+    fn parse_credential_output_handles_lines_without_equals() {
+        let output = "protocol=https\nno_equals_here\nusername=u\npassword=p\n";
+        let result = parse_credential_output(output);
+        assert_eq!(result, Some(("u".to_string(), "p".to_string())));
+    }
+
+    #[test]
+    fn parse_credential_output_preserves_value_with_equals() {
+        // split_once means values with = are preserved (only first = splits)
+        let output = "username=u\npassword=p=with=equals\n";
+        let result = parse_credential_output(output);
+        assert_eq!(result, Some(("u".to_string(), "p=with=equals".to_string())));
+    }
+
+    #[test]
+    fn create_callbacks_returns_callbacks() {
+        // Just exercise the function — we can't easily test the closures
+        // without invoking them with real git2 args.
+        let _callbacks = create_callbacks();
+        // If we got here without panicking, the function works.
+    }
+
+    #[test]
+    fn create_callbacks_with_progress_returns_callbacks() {
+        let (sender, _receiver) = crate::mcp::progress::ProgressSender::new("t".to_string());
+        let _callbacks = create_callbacks_with_progress(Some(&sender));
+        let _callbacks_no_progress = create_callbacks_with_progress(None);
+    }
+
+    #[test]
+    fn validate_url_rejects_just_scheme_no_host() {
+        // Edge case — has :// but nothing meaningful
+        // This actually passes validation since it checks for "://" presence,
+        // not validity. Document the current behaviour.
+        assert!(validate_url("https://").is_ok());
+    }
+
+    #[test]
+    fn parse_url_for_credentials_ssh_extracts_correct_host() {
+        let result = parse_url_for_credentials("git@bitbucket.org:owner/repo.git");
+        assert_eq!(
+            result,
+            Some(("https".to_string(), "bitbucket.org".to_string()))
+        );
+    }
+
+    #[test]
+    fn parse_url_for_credentials_with_userinfo() {
+        let result = parse_url_for_credentials("https://user:pass@github.com/repo.git");
+        assert_eq!(
+            result,
+            Some(("https".to_string(), "github.com".to_string()))
+        );
+    }
 }

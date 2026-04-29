@@ -1,5 +1,8 @@
 # git-proxy-mcp
 
+[![CI](https://github.com/MatejGomboc/git-proxy-mcp/actions/workflows/ci_main.yml/badge.svg)](https://github.com/MatejGomboc/git-proxy-mcp/actions/workflows/ci_main.yml)
+[![codecov](https://codecov.io/gh/MatejGomboc/git-proxy-mcp/branch/main/graph/badge.svg)](https://codecov.io/gh/MatejGomboc/git-proxy-mcp)
+
 **Your Git credentials stay on your machine. Your repo lives in the AI's workspace.**
 
 A secure MCP server that lets cloud-based AI assistants (Claude.ai, ChatGPT, Gemini, etc.)

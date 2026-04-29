@@ -186,5 +186,54 @@ mod tests {
         assert_eq!(format!("{err}"), "test error");
     }
 
-    // Integration tests that require network access are in tests/
+    #[test]
+    fn repo_diff_args_rejects_missing_url() {
+        let json = r#"{"base_commit": "a", "head_commit": "b"}"#;
+        let result: Result<RepoDiffArgs, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn repo_diff_args_rejects_missing_base() {
+        let json = r#"{"url": "https://x.com/r.git", "head_commit": "b"}"#;
+        let result: Result<RepoDiffArgs, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn repo_diff_args_rejects_missing_head() {
+        let json = r#"{"url": "https://x.com/r.git", "base_commit": "a"}"#;
+        let result: Result<RepoDiffArgs, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn repo_diff_error_from_git2_error() {
+        let git2_err = Git2Error::InvalidUrl;
+        let diff_err: RepoDiffError = git2_err.into();
+        assert!(diff_err.message.contains("invalid"));
+    }
+
+    #[test]
+    fn handle_repo_diff_with_invalid_url() {
+        let args = RepoDiffArgs {
+            url: "not-a-url".to_string(),
+            base_commit: "a".to_string(),
+            head_commit: "b".to_string(),
+        };
+        let proxy = ProxyConfig::default();
+        let result = handle_repo_diff(args, &proxy);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn handle_repo_diff_rejects_file_url() {
+        let args = RepoDiffArgs {
+            url: "file:///etc/passwd".to_string(),
+            base_commit: "a".to_string(),
+            head_commit: "b".to_string(),
+        };
+        let proxy = ProxyConfig::default();
+        assert!(handle_repo_diff(args, &proxy).is_err());
+    }
 }

@@ -31,7 +31,7 @@ Avoid duplicating information across files. Each piece of information should hav
 | Build commands | `CONTRIBUTING.md` § Development Setup |
 | Coding standards | `CONTRIBUTING.md` § Coding Standards |
 | Commit conventions | `CONTRIBUTING.md` § Commit Messages |
-| British spelling | `CONTRIBUTING.md` § British Spelling |
+| British spelling 🇬🇧 | `CONTRIBUTING.md` § British Spelling |
 | PR requirements | `CONTRIBUTING.md` § Pull Requests |
 | Security policy | `SECURITY.md` |
 | Formatting rules | `.editorconfig` |
@@ -226,7 +226,7 @@ Python is used for integration test scripts only (`tests/integration/`).
 | String quotes | Double quotes |
 | Imports | Standard library only (no pip dependencies) |
 | Docstrings | Required for all functions |
-| Spelling | British English in comments and strings |
+| Spelling 🇬🇧 | British English in comments and strings |
 
 ### Validation
 
