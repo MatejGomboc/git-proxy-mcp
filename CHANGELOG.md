@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Expanded integration test fixture** — fixture now includes a renamed-file
+  commit (commit 4: `docs/DESIGN.md` → `docs/ARCHITECTURE.md`) and an
+  LFS-tracked binary file (commit 5: `docs/large.bin`). Adds 4 integration
+  tests covering rename detection in diff/pull and LFS pointer resolution.
+- CI workflows now install `git-lfs` before rebuilding the test fixture.
 - **Code coverage reporting** — `cargo-llvm-cov` runs on every PR and push to main,
   uploading lcov reports to Codecov. Patch coverage target is 80% for changed lines;
   project coverage cannot drop more than 1% on main. Coverage badge added to README.

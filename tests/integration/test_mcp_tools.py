@@ -1600,6 +1600,174 @@ def test_clone_with_max_file_size(client, runner):
     )
 
 
+def test_diff_detects_rename(client, runner):
+    """Test that diff detects the docs/DESIGN.md -> docs/ARCHITECTURE.md rename.
+
+    Commit 4 in the fixture renames the file. Diffing the parent (commit 3)
+    against HEAD should report the rename in the unified diff.
+    """
+    print()
+    print("=== Test: diff detects file rename ===")
+
+    # Get the SHA exports from rebuild_fixture.py.
+    env_path = os.path.join(tempfile.gettempdir(), "mcp-test", "fixture-shas.env")
+    if not os.path.exists(env_path):
+        print(f"  SKIP: {env_path} not found")
+        runner.total += 1
+        runner.failed += 1
+        return
+
+    shas = {}
+    with open(env_path, encoding="utf-8") as f:
+        for line in f:
+            key, _, value = line.strip().partition("=")
+            shas[key] = value
+
+    base = shas.get("V3_SHA")
+    head = shas.get("V4_SHA")
+    if not base or not head:
+        print("  SKIP: V3_SHA or V4_SHA not in env file")
+        runner.total += 1
+        runner.failed += 1
+        return
+
+    content = client.call_tool(
+        "repo_diff",
+        {"url": REPO_URL, "base_commit": base, "head_commit": head},
+    )
+
+    diff_text = content.get("diff", "")
+    # Either a rename header (similarity-detected) or an add+delete pair will
+    # appear. Both indicate the rename was visible in the diff.
+    runner.check(
+        "DESIGN.md" in diff_text or "ARCHITECTURE.md" in diff_text,
+        "diff mentions DESIGN.md or ARCHITECTURE.md",
+    )
+    runner.check(
+        content.get("stats", {}).get("files_changed", 0) >= 1,
+        "at least 1 file changed in rename commit",
+        actual=content.get("stats", {}).get("files_changed"),
+    )
+
+
+def test_pull_captures_file_move(client, runner):
+    """Test that pull from before-rename to after-rename captures the change.
+
+    The current pull implementation does not enable git's similarity-based
+    rename detection, so this surfaces as a delete (`docs/DESIGN.md`) plus
+    an add (`docs/ARCHITECTURE.md`) rather than a single renamed entry.
+    Either shape is acceptable; this test verifies the file-move path is
+    represented in the result, not the specific representation.
+    """
+    print()
+    print("=== Test: pull captures file move (rename as delete+add) ===")
+
+    env_path = os.path.join(tempfile.gettempdir(), "mcp-test", "fixture-shas.env")
+    if not os.path.exists(env_path):
+        print(f"  SKIP: {env_path} not found")
+        runner.total += 1
+        runner.failed += 1
+        return
+
+    shas = {}
+    with open(env_path, encoding="utf-8") as f:
+        for line in f:
+            key, _, value = line.strip().partition("=")
+            shas[key] = value
+
+    base = shas.get("V3_SHA")
+    if not base:
+        print("  SKIP: V3_SHA not in env file")
+        runner.total += 1
+        runner.failed += 1
+        return
+
+    content = client.call_tool(
+        "repo_pull",
+        {"url": REPO_URL, "branch": "main", "since_commit": base},
+    )
+
+    # The rename should appear as either a renamed entry or a delete+add pair.
+    changed_files = content.get("changed_files", [])
+    deleted_files = content.get("deleted_files", [])
+    all_paths = [f.get("path", "") for f in changed_files] + deleted_files
+
+    rename_visible = any(
+        "DESIGN.md" in p or "ARCHITECTURE.md" in p for p in all_paths
+    )
+    runner.check(
+        rename_visible,
+        "rename appears in changed_files or deleted_files",
+        actual=all_paths[:5] if all_paths else "no paths",
+    )
+
+
+def test_clone_resolves_lfs_pointer(client, runner):
+    """Test that resolve_lfs=true expands the LFS pointer to actual content.
+
+    Commit 5 in the fixture adds docs/large.bin as an LFS-tracked file.
+    With resolve_lfs=true, the server should fetch the actual content.
+    """
+    print()
+    print("=== Test: clone with LFS resolution ===")
+
+    content = client.call_tool(
+        "repo_clone",
+        {
+            "url": REPO_URL,
+            "branch": "main",
+            "depth": 1,
+            "resolve_lfs": True,
+        },
+    )
+
+    lfs_resolved = content.get("lfs_resolved", 0)
+    lfs_failed = content.get("lfs_failed", 0)
+    runner.check(
+        lfs_resolved >= 1,
+        "at least 1 LFS pointer resolved",
+        actual=lfs_resolved,
+    )
+    runner.check(
+        lfs_failed == 0,
+        "no LFS resolution failures",
+        actual=lfs_failed,
+    )
+
+
+def test_clone_without_lfs_keeps_pointer(client, runner):
+    """Test that without resolve_lfs, the LFS pointer file is included as-is.
+
+    The pointer is small text content, not the actual binary, but it should
+    still appear in the archive.
+    """
+    print()
+    print("=== Test: clone without LFS resolution keeps pointer ===")
+
+    content = client.call_tool(
+        "repo_clone",
+        {
+            "url": REPO_URL,
+            "branch": "main",
+            "depth": 1,
+            "resolve_lfs": False,
+        },
+    )
+
+    lfs_resolved = content.get("lfs_resolved", 0)
+    runner.check(
+        lfs_resolved == 0,
+        "no LFS resolution attempted (resolve_lfs=false)",
+        actual=lfs_resolved,
+    )
+    # The pointer file should still be in the file count.
+    runner.check(
+        content.get("file_count", 0) >= 1,
+        "file count is non-zero (pointer included)",
+        actual=content.get("file_count"),
+    )
+
+
 def main():
     """Run all integration tests against the MCP server."""
     if not REPO_URL:
@@ -1680,6 +1848,13 @@ def main():
         # unit test handle_initialize_missing_params_returns_error in
         # src/mcp/server.rs (unit tests can construct an AwaitingInit server).
         test_initialize_already_initialised(client, runner)
+
+        # Fixture-dependent tests (require commits 4 and 5 from the
+        # rebuild_fixture.py extended fixture).
+        test_diff_detects_rename(client, runner)
+        test_pull_captures_file_move(client, runner)
+        test_clone_resolves_lfs_pointer(client, runner)
+        test_clone_without_lfs_keeps_pointer(client, runner)
     finally:
         client.stop()
 

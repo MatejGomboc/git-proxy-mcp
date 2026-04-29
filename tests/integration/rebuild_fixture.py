@@ -8,12 +8,16 @@ to ensure a clean, known state.
 Requires:
     - TEST_REPO_URL environment variable
     - git credentials configured (PAT with write access)
+    - git-lfs installed and initialised (`git lfs install`)
 
 Creates:
-    - 3 commits on main
+    - 5 commits on main
     - 2 tags (v0.1.0, v0.2.0)
-    - 5 source files + 20 generated data files + 1 submodule
-    - Exports V1_SHA, V2_SHA, V3_SHA to /tmp/mcp-test/fixture-shas.env
+    - 5 source files + 40 generated data files + 1 submodule
+    - 1 renamed file (docs/DESIGN.md -> docs/ARCHITECTURE.md in commit 4)
+    - 1 LFS-tracked file (docs/large.bin in commit 5)
+    - Exports V1_SHA, V2_SHA, V3_SHA, V4_SHA, V5_SHA to
+      /tmp/mcp-test/fixture-shas.env
 """
 
 import os
@@ -234,13 +238,61 @@ def main():
     run(["git", "commit", "-m", "Add submodule for integration testing"], cwd=repo_dir)
 
     v3_sha = get_sha(repo_dir)
-    print(f"Commit 3 (HEAD): {v3_sha}")
+    print(f"Commit 3: {v3_sha}")
+
+    # --- Commit 4: rename docs/DESIGN.md -> docs/ARCHITECTURE.md ---
+    # Exercises rename-detection in repo_diff and repo_pull. Note: the
+    # current diff/pull implementations do NOT enable git's similarity
+    # detector, so this rename surfaces as a delete+add pair rather than a
+    # single rename entry. We still test it because the integration tests
+    # should catch any future change that breaks the file-move path.
+    run(["git", "mv", "DESIGN.md", "ARCHITECTURE.md"], cwd=os.path.join(repo_dir, "docs"))
+    # Append a small change so the moved file is non-trivially different
+    # from the original.
+    new_path = os.path.join(repo_dir, "docs", "ARCHITECTURE.md")
+    with open(new_path, "a", newline="\n", encoding="utf-8") as f:
+        f.write("Renamed for clarity.\n")
+    run(["git", "add", "-A"], cwd=repo_dir)
+    run(
+        ["git", "commit", "-m", "Rename DESIGN.md to ARCHITECTURE.md"],
+        cwd=repo_dir,
+    )
+
+    v4_sha = get_sha(repo_dir)
+    print(f"Commit 4: {v4_sha}")
+
+    # --- Commit 5: add LFS-tracked file ---
+    # Requires git-lfs installed; the test workflow installs it explicitly.
+    # We track *.bin files via .gitattributes and add a small (1 KiB) blob.
+    gitattributes = os.path.join(repo_dir, ".gitattributes")
+    with open(gitattributes, "w", newline="\n", encoding="utf-8") as f:
+        f.write("*.bin filter=lfs diff=lfs merge=lfs -text\n")
+
+    # Create a deterministic "binary" file that LFS will replace with a pointer.
+    lfs_payload = b"git-proxy-mcp test fixture LFS payload\n" * 26  # ~1 KiB
+    lfs_path = os.path.join(repo_dir, "docs", "large.bin")
+    with open(lfs_path, "wb") as f:
+        f.write(lfs_payload)
+
+    # The CI workflow runs `git lfs install` globally before this script
+    # runs, so the smudge/clean filters are already configured for the
+    # runner user — no per-repo install needed here.
+    run(["git", "add", "-A"], cwd=repo_dir)
+    run(
+        ["git", "commit", "-m", "Add LFS-tracked binary file"],
+        cwd=repo_dir,
+    )
+
+    v5_sha = get_sha(repo_dir)
+    print(f"Commit 5 (HEAD): {v5_sha}")
 
     # --- Tags ---
     run(["git", "tag", "v0.1.0", v1_sha], cwd=repo_dir)
     run(["git", "tag", "v0.2.0", v2_sha], cwd=repo_dir)
 
     # --- Push (force to overwrite any existing content) ---
+    # LFS objects are pushed automatically as part of the regular push when
+    # git-lfs is installed.
     run(["git", "branch", "-M", "main"], cwd=repo_dir)
     run(["git", "push", "--force", "origin", "main"], cwd=repo_dir)
     run(["git", "push", "--force", "--tags", "origin"], cwd=repo_dir)
@@ -249,7 +301,9 @@ def main():
     print("Fixture rebuilt successfully:")
     print(f"  v0.1.0 = {v1_sha}")
     print(f"  v0.2.0 = {v2_sha}")
-    print(f"  HEAD   = {v3_sha}")
+    print(f"  C3     = {v3_sha}")
+    print(f"  C4     = {v4_sha}")
+    print(f"  HEAD   = {v5_sha}")
 
     # Export SHAs for the test script.
     env_dir = os.path.join(tempfile.gettempdir(), "mcp-test")
@@ -259,6 +313,8 @@ def main():
         f.write(f"V1_SHA={v1_sha}\n")
         f.write(f"V2_SHA={v2_sha}\n")
         f.write(f"V3_SHA={v3_sha}\n")
+        f.write(f"V4_SHA={v4_sha}\n")
+        f.write(f"V5_SHA={v5_sha}\n")
 
 
 if __name__ == "__main__":
