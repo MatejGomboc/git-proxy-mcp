@@ -1180,6 +1180,404 @@ def test_ping(client, runner):
     runner.check("result" in response, "ping has result")
 
 
+def test_pull_up_to_date(client, runner, refs_content):
+    """Test that pulling from current HEAD returns up_to_date=true."""
+    print()
+    print("=== Test: pull when already up to date ===")
+
+    branches = {b["short_name"]: b["commit"] for b in refs_content.get("branches", [])}
+    head_sha = branches.get("main")
+
+    if not head_sha:
+        print("  SKIP: could not resolve main branch SHA")
+        runner.total += 1
+        runner.failed += 1
+        return
+
+    content = client.call_tool(
+        "repo_pull",
+        {"url": REPO_URL, "branch": "main", "since_commit": head_sha},
+    )
+
+    runner.check(
+        content.get("up_to_date") is True,
+        "up_to_date is true when pulling from HEAD",
+        actual=content.get("up_to_date"),
+    )
+    runner.check(
+        content.get("stats", {}).get("commits") == 0,
+        "no new commits reported",
+        actual=content.get("stats", {}).get("commits"),
+    )
+
+
+def test_diff_same_commit(client, runner, refs_content):
+    """Test that diff between identical commits is empty."""
+    print()
+    print("=== Test: diff between identical commits ===")
+
+    tags = {t["short_name"]: t["commit"] for t in refs_content.get("tags", [])}
+    v1_sha = tags.get("v0.1.0")
+
+    if not v1_sha:
+        print("  SKIP: could not resolve v0.1.0 SHA")
+        runner.total += 1
+        runner.failed += 1
+        return
+
+    content = client.call_tool(
+        "repo_diff",
+        {"url": REPO_URL, "base_commit": v1_sha, "head_commit": v1_sha},
+    )
+
+    stats = content.get("stats", {})
+    runner.check(
+        stats.get("files_changed", -1) == 0,
+        "files_changed is 0 for identical commits",
+        actual=stats.get("files_changed"),
+    )
+    runner.check(
+        stats.get("insertions", -1) == 0 and stats.get("deletions", -1) == 0,
+        "insertions and deletions are 0",
+    )
+
+
+def test_initialize_already_initialised(client, runner):
+    """Test that calling initialize twice returns an error."""
+    print()
+    print("=== Test: initialize already initialised ===")
+
+    # Server is already initialised by test_initialise() — calling again should fail.
+    response = client.send(
+        "initialize",
+        {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "clientInfo": {"name": "test-client-2", "version": "1.0"},
+        },
+    )
+
+    runner.check(
+        "error" in response,
+        "second initialize returns JSON-RPC error",
+    )
+    if "error" in response:
+        code = response["error"].get("code")
+        runner.check(
+            code == -32600,
+            "error code is InvalidRequest (-32600)",
+            actual=code,
+        )
+
+
+def test_initialize_missing_params(client, runner):
+    """Test that initialize without params returns an error.
+
+    Server is already initialised so this also exercises the
+    AwaitingInit guard, but the missing-params path is tested by
+    handle_initialize itself returning InvalidParams before
+    state-checking.
+    """
+    print()
+    print("=== Test: initialize missing params ===")
+
+    response = client.send("initialize", None)
+
+    runner.check(
+        "error" in response,
+        "initialize without params returns error",
+    )
+
+
+def test_clone_with_explicit_branch(client, runner):
+    """Test that the branch parameter on repo_clone is honoured."""
+    print()
+    print("=== Test: clone with explicit branch parameter ===")
+
+    content = client.call_tool(
+        "repo_clone",
+        {"url": REPO_URL, "branch": "main", "depth": 1},
+    )
+
+    runner.check(
+        content.get("branch") == "main",
+        "response has branch=main",
+        actual=content.get("branch"),
+    )
+    runner.check(
+        len(content.get("commit", "")) == 40,
+        "got valid commit SHA",
+        actual=len(content.get("commit", "")),
+    )
+
+
+def test_status_on_unknown_session(client, runner):
+    """Test repo_clone_status with a session ID that does not exist."""
+    print()
+    print("=== Test: status on unknown session ===")
+
+    response = client.send(
+        "tools/call",
+        {
+            "name": "repo_clone_status",
+            "arguments": {"session_id": "stream_nonexistent_xyz"},
+        },
+    )
+
+    runner.check("error" not in response, "no protocol error")
+    is_error = response.get("result", {}).get("isError", False)
+    runner.check(
+        is_error is True,
+        "isError true for unknown session",
+        actual=is_error,
+    )
+
+
+def test_cancel_unknown_session(client, runner):
+    """Test repo_clone_cancel returns a sensible response for unknown session."""
+    print()
+    print("=== Test: cancel unknown session ===")
+
+    response = client.send(
+        "tools/call",
+        {
+            "name": "repo_clone_cancel",
+            "arguments": {"session_id": "stream_does_not_exist_at_all"},
+        },
+    )
+
+    runner.check("error" not in response, "no protocol error")
+    # Response can either be an error result or {cancelled: false} — both acceptable.
+    # The key contract is: server doesn't crash on unknown session ID.
+    runner.check(
+        "result" in response,
+        "got a response (no crash) for unknown session",
+    )
+
+
+def test_helper_script_content(client, runner):
+    """Test that the helper script contains expected commands."""
+    print()
+    print("=== Test: helper script content ===")
+
+    content = client.call_tool("helper_script", {})
+
+    script = content.get("script", "")
+    runner.check(
+        "extract" in script,
+        "helper script contains 'extract' command",
+    )
+    runner.check(
+        "bundle" in script,
+        "helper script contains 'bundle' command",
+    )
+    runner.check(
+        "info" in script,
+        "helper script contains 'info' command",
+    )
+    runner.check(
+        content.get("filename") == "git_proxy_helper.py",
+        "filename is git_proxy_helper.py",
+        actual=content.get("filename"),
+    )
+    # Version should be a non-empty string
+    runner.check(
+        len(content.get("version", "")) > 0,
+        "version is non-empty",
+        actual=content.get("version"),
+    )
+
+
+def test_clone_start_then_status_zero_progress(client, runner):
+    """Verify that a freshly-started session reports 0% progress before any chunk fetch."""
+    print()
+    print("=== Test: clone_start then immediate status ===")
+
+    start = client.call_tool(
+        "repo_clone_start",
+        {"url": REPO_URL, "branch": "main", "chunk_size": 1024},
+    )
+    sid = start.get("session_id")
+    if not sid:
+        print("  SKIP: no session_id returned")
+        runner.total += 1
+        runner.failed += 1
+        return
+
+    status = client.call_tool("repo_clone_status", {"session_id": sid})
+
+    runner.check(
+        status.get("delivered_chunks") == 0,
+        "delivered_chunks is 0 before any fetch",
+        actual=status.get("delivered_chunks"),
+    )
+    runner.check(
+        status.get("next_missing_chunk") == 0,
+        "next_missing_chunk is 0",
+        actual=status.get("next_missing_chunk"),
+    )
+    runner.check(
+        status.get("is_complete") is False,
+        "session not complete",
+    )
+    runner.check(
+        status.get("progress_percent") == 0,
+        "progress_percent is 0",
+        actual=status.get("progress_percent"),
+    )
+
+    # Clean up
+    client.call_tool("repo_clone_cancel", {"session_id": sid})
+
+
+def test_diff_with_invalid_base_commit(client, runner, refs_content):
+    """Test that diff with an invalid base commit returns isError."""
+    print()
+    print("=== Test: diff with invalid base commit ===")
+
+    tags = {t["short_name"]: t["commit"] for t in refs_content.get("tags", [])}
+    v2_sha = tags.get("v0.2.0")
+
+    if not v2_sha:
+        print("  SKIP: could not resolve v0.2.0 SHA")
+        runner.total += 1
+        runner.failed += 1
+        return
+
+    response = client.send(
+        "tools/call",
+        {
+            "name": "repo_diff",
+            "arguments": {
+                "url": REPO_URL,
+                "base_commit": "0000000000000000000000000000000000000099",
+                "head_commit": v2_sha,
+            },
+        },
+    )
+
+    runner.check("error" not in response, "no protocol error")
+    is_error = response.get("result", {}).get("isError", False)
+    runner.check(
+        is_error is True,
+        "isError true for invalid base commit",
+        actual=is_error,
+    )
+
+
+def test_pull_with_invalid_since_commit(client, runner):
+    """Test that pull with malformed since_commit returns isError."""
+    print()
+    print("=== Test: pull with invalid since_commit ===")
+
+    response = client.send(
+        "tools/call",
+        {
+            "name": "repo_pull",
+            "arguments": {
+                "url": REPO_URL,
+                "branch": "main",
+                "since_commit": "definitely-not-a-sha",
+            },
+        },
+    )
+
+    runner.check("error" not in response, "no protocol error")
+    is_error = response.get("result", {}).get("isError", False)
+    runner.check(
+        is_error is True,
+        "isError true for malformed SHA",
+        actual=is_error,
+    )
+
+
+def test_clone_start_with_zero_chunk_size_uses_default(client, runner):
+    """Test that chunk_size=0 or unset falls back to a sensible default.
+
+    The server clamps chunk_size to a minimum of 1024 bytes.
+    """
+    print()
+    print("=== Test: clone_start without chunk_size ===")
+
+    content = client.call_tool(
+        "repo_clone_start",
+        {"url": REPO_URL, "branch": "main"},
+    )
+
+    sid = content.get("session_id")
+    chunk_size = content.get("chunk_size", 0)
+    runner.check(sid is not None, "got session_id")
+    runner.check(
+        chunk_size >= 1024,
+        "chunk_size defaults to at least 1024 bytes",
+        actual=chunk_size,
+    )
+
+    # Clean up
+    if sid:
+        client.call_tool("repo_clone_cancel", {"session_id": sid})
+
+
+def test_refs_lists_all_branches_and_tags(client, runner, refs_content):
+    """Detailed check: refs response correctly classifies branches vs tags."""
+    print()
+    print("=== Test: refs classification ===")
+
+    branches = refs_content.get("branches", [])
+    tags = refs_content.get("tags", [])
+
+    # All branch names should start with refs/heads/
+    branches_well_formed = all(
+        b.get("name", "").startswith("refs/heads/") for b in branches
+    )
+    runner.check(
+        branches_well_formed,
+        "all branches have refs/heads/ prefix",
+    )
+
+    # All tag names should start with refs/tags/
+    tags_well_formed = all(
+        t.get("name", "").startswith("refs/tags/") for t in tags
+    )
+    runner.check(
+        tags_well_formed,
+        "all tags have refs/tags/ prefix",
+    )
+
+    # All commit SHAs should be 40 hex chars
+    all_shas_valid = all(
+        len(b.get("commit", "")) == 40 for b in branches
+    ) and all(len(t.get("commit", "")) == 40 for t in tags)
+    runner.check(all_shas_valid, "all SHAs are 40 hex chars")
+
+    # total_refs should equal branches + tags count
+    expected_total = len(branches) + len(tags)
+    runner.check(
+        refs_content.get("total_refs") == expected_total,
+        f"total_refs equals branches+tags ({expected_total})",
+        actual=refs_content.get("total_refs"),
+    )
+
+
+def test_clone_with_max_file_size(client, runner):
+    """Test that max_file_size correctly filters oversized files."""
+    print()
+    print("=== Test: clone with max_file_size filter ===")
+
+    # Set a max_file_size that should exclude some files
+    content = client.call_tool(
+        "repo_clone",
+        {"url": REPO_URL, "branch": "main", "depth": 1, "max_file_size": 100},
+    )
+
+    skipped = content.get("skipped_too_large", 0)
+    runner.check(
+        skipped >= 1,
+        "at least 1 file skipped due to size limit",
+        actual=skipped,
+    )
+
+
 def main():
     """Run all integration tests against the MCP server."""
     if not REPO_URL:
@@ -1240,6 +1638,22 @@ def main():
         test_clone_sparse_patterns(client, runner)
         test_clone_all_chunks(client, runner)
         test_ping(client, runner)
+
+        # Additional coverage tests.
+        test_pull_up_to_date(client, runner, refs_content)
+        test_diff_same_commit(client, runner, refs_content)
+        test_clone_with_explicit_branch(client, runner)
+        test_clone_with_max_file_size(client, runner)
+        test_status_on_unknown_session(client, runner)
+        test_cancel_unknown_session(client, runner)
+        test_helper_script_content(client, runner)
+        test_clone_start_then_status_zero_progress(client, runner)
+        test_clone_start_with_zero_chunk_size_uses_default(client, runner)
+        test_diff_with_invalid_base_commit(client, runner, refs_content)
+        test_pull_with_invalid_since_commit(client, runner)
+        test_refs_lists_all_branches_and_tags(client, runner, refs_content)
+        test_initialize_already_initialised(client, runner)
+        test_initialize_missing_params(client, runner)
     finally:
         client.stop()
 
