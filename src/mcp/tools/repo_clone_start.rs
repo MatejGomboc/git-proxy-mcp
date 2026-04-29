@@ -485,4 +485,85 @@ mod tests {
         assert!(json.contains("\"submodules_included\":2"));
         assert!(json.contains("\"submodules_failed\":1"));
     }
+
+    #[test]
+    fn repo_clone_start_args_rejects_missing_url() {
+        let json = "{}";
+        let result: Result<RepoCloneStartArgs, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn repo_clone_start_args_with_submodule_options() {
+        let json = r#"{
+            "url": "https://github.com/owner/repo.git",
+            "submodule_depth": 3,
+            "submodule_include": ["vendor/*"],
+            "submodule_exclude": ["vendor/old/*"]
+        }"#;
+        let args: RepoCloneStartArgs = serde_json::from_str(json).unwrap();
+        assert_eq!(args.submodule_depth, Some(3));
+        assert_eq!(args.submodule_include.as_ref().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn repo_clone_start_error_displays() {
+        let err = RepoCloneStartError {
+            message: "test error".to_string(),
+        };
+        assert_eq!(format!("{err}"), "test error");
+    }
+
+    #[test]
+    fn repo_clone_start_error_from_git2_error() {
+        let git2_err = Git2Error::InvalidUrl;
+        let err: RepoCloneStartError = git2_err.into();
+        assert!(err.message.contains("invalid"));
+    }
+
+    #[test]
+    fn handle_repo_clone_start_with_invalid_url() {
+        let args = RepoCloneStartArgs {
+            url: "not-a-url".to_string(),
+            branch: None,
+            depth: None,
+            chunk_size: None,
+            sparse: None,
+            exclude_binary: None,
+            max_file_size: None,
+            resolve_lfs: None,
+            include_submodules: None,
+            submodule_depth: None,
+            submodule_include: None,
+            submodule_exclude: None,
+        };
+        let proxy = ProxyConfig::default();
+        let lfs = LfsConfig::default();
+        let submods = SubmoduleConfig::default();
+        let manager = StreamingSessionManager::default();
+        assert!(handle_repo_clone_start(args, &proxy, &lfs, &submods, &manager).is_err());
+    }
+
+    #[test]
+    fn handle_repo_clone_start_rejects_file_url() {
+        let args = RepoCloneStartArgs {
+            url: "file:///etc/passwd".to_string(),
+            branch: None,
+            depth: None,
+            chunk_size: None,
+            sparse: None,
+            exclude_binary: None,
+            max_file_size: None,
+            resolve_lfs: None,
+            include_submodules: None,
+            submodule_depth: None,
+            submodule_include: None,
+            submodule_exclude: None,
+        };
+        let proxy = ProxyConfig::default();
+        let lfs = LfsConfig::default();
+        let submods = SubmoduleConfig::default();
+        let manager = StreamingSessionManager::default();
+        assert!(handle_repo_clone_start(args, &proxy, &lfs, &submods, &manager).is_err());
+    }
 }

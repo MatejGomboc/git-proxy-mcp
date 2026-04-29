@@ -806,4 +806,201 @@ mod tests {
         // Same repo with different URL form — should be detected as a cycle
         assert!(!visited.insert(norm_b));
     }
+
+    /// Build a bare repo containing a `.gitmodules` file and a submodule entry
+    /// at `vendor/lib`.
+    fn build_repo_with_submodule() -> (tempfile::TempDir, Oid) {
+        let temp = tempfile::TempDir::new().unwrap();
+        let commit_oid = {
+            let repo = Repository::init_bare(temp.path()).unwrap();
+
+            let gitmodules_content = b"[submodule \"vendor/lib\"]\n\
+                                       \tpath = vendor/lib\n\
+                                       \turl = https://github.com/example/lib.git\n";
+            let gitmodules_oid = repo.blob(gitmodules_content).unwrap();
+
+            // Create a fake submodule commit OID (must be a valid OID, doesn't
+            // need to point to anything that exists).
+            let fake_submod_oid = Oid::from_str("0000000000000000000000000000000000000001")
+                .unwrap_or_else(|_| Oid::zero());
+
+            // Build root tree containing .gitmodules and a submodule entry.
+            let mut tb = repo.treebuilder(None).unwrap();
+            tb.insert(".gitmodules", gitmodules_oid, 0o100_644).unwrap();
+
+            // Submodules use mode 160000 (0o160_000) and reference a commit OID
+            // even though we never actually fetched that commit. The treebuilder
+            // accepts this as long as the OID format is valid.
+            let _ = tb.insert("vendor", fake_submod_oid, SUBMODULE_MODE);
+            // Note: the above might not work without the actual submodule commit;
+            // we'll only test the .gitmodules parsing for now.
+            let tree_oid = tb.write().unwrap();
+
+            let signature = git2::Signature::now("Test", "test@example.com").unwrap();
+            let tree = repo.find_tree(tree_oid).unwrap();
+            repo.commit(
+                Some("HEAD"),
+                &signature,
+                &signature,
+                "with submodules",
+                &tree,
+                &[],
+            )
+            .unwrap()
+        };
+        (temp, commit_oid)
+    }
+
+    #[test]
+    fn get_gitmodules_content_returns_content() {
+        let (temp, commit_oid) = build_repo_with_submodule();
+        let repo = Repository::open_bare(temp.path()).unwrap();
+        let content = get_gitmodules_content(&repo, commit_oid);
+        assert!(content.is_some());
+        let bytes = content.unwrap();
+        let text = String::from_utf8_lossy(&bytes);
+        assert!(text.contains("vendor/lib"));
+        assert!(text.contains("https://github.com/example/lib.git"));
+    }
+
+    #[test]
+    fn get_gitmodules_content_returns_none_for_repo_without_gitmodules() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let commit_oid = {
+            let repo = Repository::init_bare(temp.path()).unwrap();
+            let blob = repo.blob(b"hi\n").unwrap();
+            let mut tb = repo.treebuilder(None).unwrap();
+            tb.insert("README.md", blob, 0o100_644).unwrap();
+            let tree_oid = tb.write().unwrap();
+            let signature = git2::Signature::now("Test", "test@example.com").unwrap();
+            let tree = repo.find_tree(tree_oid).unwrap();
+            repo.commit(Some("HEAD"), &signature, &signature, "msg", &tree, &[])
+                .unwrap()
+        };
+        let repo = Repository::open_bare(temp.path()).unwrap();
+        let content = get_gitmodules_content(&repo, commit_oid);
+        assert!(content.is_none());
+    }
+
+    #[test]
+    fn get_gitmodules_content_returns_none_for_invalid_commit() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let _ = Repository::init_bare(temp.path()).unwrap();
+        let repo = Repository::open_bare(temp.path()).unwrap();
+        let bogus_oid = Oid::from_str("0000000000000000000000000000000000000001").unwrap();
+        let content = get_gitmodules_content(&repo, bogus_oid);
+        assert!(content.is_none());
+    }
+
+    #[test]
+    fn find_submodule_entries_empty_when_no_submodules() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let commit_oid = {
+            let repo = Repository::init_bare(temp.path()).unwrap();
+            let blob = repo.blob(b"hi\n").unwrap();
+            let mut tb = repo.treebuilder(None).unwrap();
+            tb.insert("README.md", blob, 0o100_644).unwrap();
+            let tree_oid = tb.write().unwrap();
+            let signature = git2::Signature::now("Test", "test@example.com").unwrap();
+            let tree = repo.find_tree(tree_oid).unwrap();
+            repo.commit(Some("HEAD"), &signature, &signature, "msg", &tree, &[])
+                .unwrap()
+        };
+        let repo = Repository::open_bare(temp.path()).unwrap();
+        let gitmodules = HashMap::new();
+        let entries = find_submodule_entries(&repo, commit_oid, &gitmodules).unwrap();
+        assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn find_submodule_entries_invalid_commit_returns_error() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let _ = Repository::init_bare(temp.path()).unwrap();
+        let repo = Repository::open_bare(temp.path()).unwrap();
+        let bogus_oid = Oid::from_str("0000000000000000000000000000000000000001").unwrap();
+        let gitmodules = HashMap::new();
+        let result = find_submodule_entries(&repo, bogus_oid, &gitmodules);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn submodule_entry_struct_fields() {
+        let entry = SubmoduleEntry {
+            path: "vendor/x".to_string(),
+            commit: Oid::zero(),
+            url: "https://example.com/x.git".to_string(),
+        };
+        assert_eq!(entry.path, "vendor/x");
+        assert_eq!(entry.url, "https://example.com/x.git");
+        let cloned = entry.clone();
+        assert_eq!(cloned.path, entry.path);
+    }
+
+    #[test]
+    fn submodule_info_struct_fields() {
+        let info = SubmoduleInfo {
+            name: "x".to_string(),
+            path: "vendor/x".to_string(),
+            url: "https://example.com/x.git".to_string(),
+            branch: Some("main".to_string()),
+        };
+        assert_eq!(info.path, "vendor/x");
+        assert_eq!(info.branch.as_deref(), Some("main"));
+    }
+
+    #[test]
+    fn submodule_filter_with_invalid_pattern_then_valid() {
+        let filter =
+            SubmoduleFilter::new(Some(&["[broken".to_string(), "vendor/*".to_string()]), None);
+        // Invalid pattern is logged + skipped; valid one still matches.
+        assert!(filter.matches("vendor/lib"));
+        assert!(!filter.matches("other"));
+    }
+
+    #[test]
+    fn fetch_submodule_with_invalid_url_fails() {
+        let entry = SubmoduleEntry {
+            path: "vendor/x".to_string(),
+            commit: Oid::zero(),
+            url: "not-a-valid-url".to_string(),
+        };
+        let result = fetch_submodule(&entry, None);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn fetch_submodule_with_file_url_rejected() {
+        let entry = SubmoduleEntry {
+            path: "vendor/x".to_string(),
+            commit: Oid::zero(),
+            url: "file:///etc/passwd".to_string(),
+        };
+        assert!(fetch_submodule(&entry, None).is_err());
+    }
+
+    #[test]
+    fn parse_gitmodules_with_branch_field() {
+        let content = b"[submodule \"foo\"]\n\
+                        \tpath = vendor/foo\n\
+                        \turl = https://example.com/foo.git\n\
+                        \tbranch = develop\n";
+        let parsed = parse_gitmodules(content);
+        assert_eq!(parsed.len(), 1);
+        let info = parsed.get("vendor/foo").unwrap();
+        assert_eq!(info.branch.as_deref(), Some("develop"));
+    }
+
+    #[test]
+    fn parse_gitmodules_multiple_submodules() {
+        let content = b"[submodule \"a\"]\n\
+                        \tpath = vendor/a\n\
+                        \turl = https://example.com/a.git\n\
+                        [submodule \"b\"]\n\
+                        \tpath = vendor/b\n\
+                        \turl = https://example.com/b.git\n";
+        let parsed = parse_gitmodules(content);
+        assert_eq!(parsed.len(), 2);
+        assert!(parsed.contains_key("vendor/a"));
+        assert!(parsed.contains_key("vendor/b"));
+    }
 }

@@ -313,4 +313,107 @@ mod tests {
         let result = generate_diff("file:///etc/passwd", "abc", "def", None);
         assert!(result.is_err());
     }
+
+    /// Helper: build a test bare repo with two commits, return temp dir + commit OIDs.
+    fn build_test_repo_with_two_commits() -> (tempfile::TempDir, git2::Oid, git2::Oid) {
+        let temp = tempfile::TempDir::new().unwrap();
+        let (oid1, oid2) = {
+            let repo = Repository::init_bare(temp.path()).unwrap();
+            let signature = git2::Signature::now("Test", "test@example.com").unwrap();
+
+            // Commit 1: README.md only
+            let blob1 = repo.blob(b"# Test\n").unwrap();
+            let mut tb = repo.treebuilder(None).unwrap();
+            tb.insert("README.md", blob1, 0o100_644).unwrap();
+            let tree1_oid = tb.write().unwrap();
+            let tree1 = repo.find_tree(tree1_oid).unwrap();
+            let commit1 = repo
+                .commit(Some("HEAD"), &signature, &signature, "first", &tree1, &[])
+                .unwrap();
+
+            // Commit 2: README.md modified + main.rs added
+            let blob2 = repo.blob(b"# Test (updated)\n").unwrap();
+            let blob3 = repo.blob(b"fn main() {}\n").unwrap();
+            let mut tb = repo.treebuilder(None).unwrap();
+            tb.insert("README.md", blob2, 0o100_644).unwrap();
+            tb.insert("main.rs", blob3, 0o100_644).unwrap();
+            let tree2_oid = tb.write().unwrap();
+            let tree2 = repo.find_tree(tree2_oid).unwrap();
+            let parent = repo.find_commit(commit1).unwrap();
+            let commit2 = repo
+                .commit(
+                    Some("HEAD"),
+                    &signature,
+                    &signature,
+                    "second",
+                    &tree2,
+                    &[&parent],
+                )
+                .unwrap();
+
+            // Tag the second commit
+            repo.tag_lightweight(
+                "v1.0",
+                &repo.find_commit(commit2).unwrap().into_object(),
+                false,
+            )
+            .unwrap();
+
+            (commit1, commit2)
+        };
+        (temp, oid1, oid2)
+    }
+
+    #[test]
+    fn resolve_commit_full_sha() {
+        let (temp, oid1, _) = build_test_repo_with_two_commits();
+        let repo = Repository::open_bare(temp.path()).unwrap();
+        let resolved = resolve_commit(&repo, &oid1.to_string()).unwrap();
+        assert_eq!(resolved, oid1);
+    }
+
+    #[test]
+    fn resolve_commit_branch_name() {
+        let (temp, _, oid2) = build_test_repo_with_two_commits();
+        let repo = Repository::open_bare(temp.path()).unwrap();
+        // The default branch is "master" or "main" depending on git config.
+        // After commit, HEAD points to the active branch.
+        let head = repo.head().unwrap();
+        let branch_name = head.shorthand().unwrap().to_string();
+        let resolved = resolve_commit(&repo, &branch_name).unwrap();
+        assert_eq!(resolved, oid2);
+    }
+
+    #[test]
+    fn resolve_commit_tag_name() {
+        let (temp, _, oid2) = build_test_repo_with_two_commits();
+        let repo = Repository::open_bare(temp.path()).unwrap();
+        let resolved = resolve_commit(&repo, "v1.0").unwrap();
+        assert_eq!(resolved, oid2);
+    }
+
+    #[test]
+    fn resolve_commit_invalid_reference() {
+        let (temp, _, _) = build_test_repo_with_two_commits();
+        let repo = Repository::open_bare(temp.path()).unwrap();
+        let result = resolve_commit(&repo, "nonexistent_ref");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn resolve_commit_head_relative() {
+        let (temp, _, oid2) = build_test_repo_with_two_commits();
+        let repo = Repository::open_bare(temp.path()).unwrap();
+        // HEAD~0 = HEAD = second commit
+        let resolved = resolve_commit(&repo, "HEAD").unwrap();
+        assert_eq!(resolved, oid2);
+    }
+
+    #[test]
+    fn resolve_commit_invalid_sha_format() {
+        let (temp, _, _) = build_test_repo_with_two_commits();
+        let repo = Repository::open_bare(temp.path()).unwrap();
+        let result = resolve_commit(&repo, "not-a-sha-or-anything");
+        assert!(result.is_err());
+    }
 }
