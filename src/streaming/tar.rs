@@ -989,8 +989,7 @@ mod tests {
     #[test]
     fn create_tar_with_invalid_commit() {
         let temp = tempfile::TempDir::new().unwrap();
-        let _ = Repository::init_bare(temp.path()).unwrap();
-        let repo = open_test_repo(&temp);
+        let repo = Repository::init_bare(temp.path()).unwrap();
         let bogus_oid = Oid::from_str("0000000000000000000000000000000000000001").unwrap();
         let result = create_tar_from_tree(&repo, bogus_oid);
         assert!(result.is_err());

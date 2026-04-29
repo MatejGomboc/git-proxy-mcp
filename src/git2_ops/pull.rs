@@ -524,4 +524,113 @@ mod tests {
         let result = pull_changes("file:///etc/passwd", "main", "abc123", None);
         assert!(result.is_err());
     }
+
+    /// Helper: build a test bare repo with commits, return temp dir + commit OIDs.
+    fn build_repo_with_history(n_commits: usize) -> (tempfile::TempDir, Vec<Oid>) {
+        let temp = tempfile::TempDir::new().unwrap();
+        let oids = {
+            let repo = Repository::init_bare(temp.path()).unwrap();
+            let signature = git2::Signature::now("Test", "test@example.com").unwrap();
+            let mut oids = Vec::new();
+            let mut parents: Vec<Oid> = Vec::new();
+
+            for i in 0..n_commits {
+                let blob = repo
+                    .blob(format!("file content v{i}\n").as_bytes())
+                    .unwrap();
+                let mut tb = repo.treebuilder(None).unwrap();
+                tb.insert("file.txt", blob, 0o100_644).unwrap();
+                let tree_oid = tb.write().unwrap();
+                let tree = repo.find_tree(tree_oid).unwrap();
+
+                let parent_commits: Vec<git2::Commit> = parents
+                    .iter()
+                    .map(|p| repo.find_commit(*p).unwrap())
+                    .collect();
+                let parent_refs: Vec<&git2::Commit> = parent_commits.iter().collect();
+
+                let oid = repo
+                    .commit(
+                        Some("HEAD"),
+                        &signature,
+                        &signature,
+                        &format!("commit {i}"),
+                        &tree,
+                        &parent_refs,
+                    )
+                    .unwrap();
+                oids.push(oid);
+                parents = vec![oid];
+            }
+            oids
+        };
+        (temp, oids)
+    }
+
+    #[test]
+    fn count_commits_between_zero_when_same() {
+        let (temp, oids) = build_repo_with_history(3);
+        let repo = Repository::open_bare(temp.path()).unwrap();
+        let count = count_commits_between(&repo, oids[2], oids[2]).unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn count_commits_between_one_step() {
+        let (temp, oids) = build_repo_with_history(3);
+        let repo = Repository::open_bare(temp.path()).unwrap();
+        // From oids[0] to oids[1] = 1 commit (oids[1])
+        let count = count_commits_between(&repo, oids[0], oids[1]).unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn count_commits_between_multiple_steps() {
+        let (temp, oids) = build_repo_with_history(5);
+        let repo = Repository::open_bare(temp.path()).unwrap();
+        // From oids[0] to oids[4] = 4 commits
+        let count = count_commits_between(&repo, oids[0], oids[4]).unwrap();
+        assert_eq!(count, 4);
+    }
+
+    #[test]
+    fn create_files_archive_empty_list() {
+        let (temp, oids) = build_repo_with_history(1);
+        let repo = Repository::open_bare(temp.path()).unwrap();
+        let commit = repo.find_commit(oids[0]).unwrap();
+        let tree = commit.tree().unwrap();
+        let files: Vec<String> = vec![];
+        // An empty file list still produces a valid (but tiny) tar.gz with
+        // no entries — the function should succeed.
+        let _ = create_files_archive(&repo, &tree, &files).unwrap();
+    }
+
+    #[test]
+    fn create_files_archive_with_matching_file() {
+        let (temp, oids) = build_repo_with_history(1);
+        let repo = Repository::open_bare(temp.path()).unwrap();
+        let commit = repo.find_commit(oids[0]).unwrap();
+        let tree = commit.tree().unwrap();
+        let files = vec!["file.txt".to_string()];
+        let archive = create_files_archive(&repo, &tree, &files).unwrap();
+        assert!(!archive.is_empty()); // Base64 encoded tar.gz
+    }
+
+    #[test]
+    fn create_files_archive_with_non_matching_files() {
+        let (temp, oids) = build_repo_with_history(1);
+        let repo = Repository::open_bare(temp.path()).unwrap();
+        let commit = repo.find_commit(oids[0]).unwrap();
+        let tree = commit.tree().unwrap();
+        let files = vec!["nonexistent.txt".to_string()];
+        let archive = create_files_archive(&repo, &tree, &files).unwrap();
+        // No files matched, so the archive should contain at most an empty
+        // tar.gz envelope — much smaller than any real archive with content.
+        // (file.txt would be ~17 bytes uncompressed plus tar header overhead.)
+        assert!(
+            archive.len() < 100,
+            "expected near-empty archive, got {} bytes",
+            archive.len()
+        );
+    }
 }
