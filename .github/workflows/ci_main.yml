@@ -215,6 +215,12 @@ jobs:
                 git config --global user.name "integration-test"
                 git config --global user.email "integration-test@ci.local"
 
+            - name: Install git-lfs
+              run: |
+                sudo apt-get update
+                sudo apt-get install -y git-lfs
+                git lfs install
+
             - name: Rebuild test fixture repo
               env:
                 TEST_REPO_URL: ${{ secrets.TEST_REPO_URL }}
