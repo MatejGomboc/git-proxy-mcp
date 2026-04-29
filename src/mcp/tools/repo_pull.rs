@@ -225,5 +225,87 @@ mod tests {
         assert_eq!(format!("{err}"), "test error");
     }
 
-    // Integration tests that require network access are in tests/
+    #[test]
+    fn repo_pull_args_rejects_missing_url() {
+        let json = r#"{"branch": "main", "since_commit": "abc"}"#;
+        let result: Result<RepoPullArgs, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn repo_pull_args_rejects_missing_branch() {
+        let json = r#"{"url": "https://x.com/r.git", "since_commit": "abc"}"#;
+        let result: Result<RepoPullArgs, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn repo_pull_args_rejects_missing_since_commit() {
+        let json = r#"{"url": "https://x.com/r.git", "branch": "main"}"#;
+        let result: Result<RepoPullArgs, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn repo_pull_error_from_git2_error() {
+        let git2_err = Git2Error::InvalidUrl;
+        let err: RepoPullError = git2_err.into();
+        assert!(err.message.contains("invalid"));
+    }
+
+    #[test]
+    fn handle_repo_pull_with_invalid_url() {
+        let args = RepoPullArgs {
+            url: "not-a-url".to_string(),
+            branch: "main".to_string(),
+            since_commit: "abc123".to_string(),
+        };
+        let proxy = ProxyConfig::default();
+        assert!(handle_repo_pull(args, &proxy).is_err());
+    }
+
+    #[test]
+    fn handle_repo_pull_rejects_file_url() {
+        let args = RepoPullArgs {
+            url: "file:///etc/passwd".to_string(),
+            branch: "main".to_string(),
+            since_commit: "abc".to_string(),
+        };
+        let proxy = ProxyConfig::default();
+        assert!(handle_repo_pull(args, &proxy).is_err());
+    }
+
+    #[test]
+    fn pull_stats_default_is_all_zeros() {
+        let stats = PullStats::default();
+        assert_eq!(stats.files_changed, 0);
+        assert_eq!(stats.files_added, 0);
+        assert_eq!(stats.files_modified, 0);
+        assert_eq!(stats.files_deleted, 0);
+        assert_eq!(stats.commits, 0);
+    }
+
+    #[test]
+    fn changed_file_serialises_with_optional_old_path() {
+        let cf = ChangedFile {
+            path: "new.rs".into(),
+            change_type: "renamed".into(),
+            old_path: Some("old.rs".into()),
+        };
+        let json = serde_json::to_value(&cf).unwrap();
+        assert_eq!(json["path"], "new.rs");
+        assert_eq!(json["old_path"], "old.rs");
+    }
+
+    #[test]
+    fn changed_file_serialises_without_old_path() {
+        let cf = ChangedFile {
+            path: "file.rs".into(),
+            change_type: "added".into(),
+            old_path: None,
+        };
+        let json = serde_json::to_value(&cf).unwrap();
+        assert_eq!(json["path"], "file.rs");
+        assert!(json.get("old_path").is_none() || json["old_path"].is_null());
+    }
 }

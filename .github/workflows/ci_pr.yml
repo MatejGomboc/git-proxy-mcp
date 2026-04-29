@@ -131,9 +131,63 @@ jobs:
             - name: Run tests
               run: cargo test --verbose
 
+    coverage:
+        name: Code Coverage
+        needs: build
+        runs-on: ubuntu-latest
+        timeout-minutes: 20
+
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+            - name: Install Rust toolchain
+              uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+              with:
+                toolchain: stable
+                components: llvm-tools-preview
+
+            - name: Install cargo-llvm-cov
+              uses: taiki-e/install-action@b651345a718c8f44efa2460560b3dbf29cbd7ee1 # v2.75.26
+              with:
+                tool: cargo-llvm-cov
+
+            - name: Get Rust version
+              id: rust-version
+              shell: bash
+              run: echo "version=$(rustc --version | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+            # Restore cache from main branch (read-only)
+            - name: Restore Rust cache
+              uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+              with:
+                path: |
+                    ~/.cargo/registry/index/
+                    ~/.cargo/registry/cache/
+                    ~/.cargo/git/db/
+                    target/
+                key: rust-coverage-${{ runner.os }}-${{ steps.rust-version.outputs.version }}-${{ hashFiles('**/Cargo.lock') }}
+                restore-keys: |
+                    rust-coverage-${{ runner.os }}-${{ steps.rust-version.outputs.version }}-
+
+            - name: Generate coverage report (lcov)
+              run: cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info
+
+            - name: Generate coverage summary
+              run: cargo llvm-cov report --summary-only
+
+            - name: Upload coverage to Codecov
+              uses: codecov/codecov-action@75cd11691c0faa626561e295848008c8a7dddffe # v5.5.4
+              with:
+                files: lcov.info
+                fail_ci_if_error: false
+                verbose: true
+              env:
+                CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
     ci-success:
         name: CI Success
-        needs: [quick-checks, build]
+        needs: [quick-checks, build, coverage]
         runs-on: ubuntu-latest
         timeout-minutes: 5
         if: ${{ !cancelled() }}
@@ -142,7 +196,9 @@ jobs:
             - name: Check if all jobs succeeded
               run: |
                 if [[ "${{ needs.quick-checks.result }}" != "success" ]] || \
-                   [[ "${{ needs.build.result }}" != "success" ]]; then
+                   [[ "${{ needs.build.result }}" != "success" ]] || \
+                   [[ "${{ needs.coverage.result }}" != "success" && \
+                      "${{ needs.coverage.result }}" != "skipped" ]]; then
                     echo "One or more jobs failed"
                     exit 1
                 fi

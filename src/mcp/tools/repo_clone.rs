@@ -503,5 +503,112 @@ mod tests {
         assert_eq!(args.resolve_lfs, Some(true));
     }
 
-    // Integration tests that require network access are in tests/
+    #[test]
+    fn repo_clone_args_rejects_missing_url() {
+        let json = "{}";
+        let result: Result<RepoCloneArgs, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn repo_clone_args_with_submodule_options() {
+        let json = r#"{
+            "url": "https://github.com/owner/repo.git",
+            "include_submodules": true,
+            "submodule_depth": 2,
+            "submodule_include": ["vendor/*"],
+            "submodule_exclude": ["vendor/old/*"]
+        }"#;
+        let args: RepoCloneArgs = serde_json::from_str(json).unwrap();
+        assert_eq!(args.include_submodules, Some(true));
+        assert_eq!(args.submodule_depth, Some(2));
+        assert_eq!(args.submodule_include.as_ref().unwrap().len(), 1);
+        assert_eq!(args.submodule_exclude.as_ref().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn repo_clone_args_with_sparse_patterns() {
+        let json = r#"{
+            "url": "https://github.com/owner/repo.git",
+            "sparse": ["src/**/*.rs", "*.md"]
+        }"#;
+        let args: RepoCloneArgs = serde_json::from_str(json).unwrap();
+        let patterns = args.sparse.unwrap();
+        assert_eq!(patterns.len(), 2);
+        assert!(patterns.contains(&"src/**/*.rs".to_string()));
+    }
+
+    #[test]
+    fn repo_clone_args_with_depth() {
+        let json = r#"{
+            "url": "https://github.com/owner/repo.git",
+            "depth": 1
+        }"#;
+        let args: RepoCloneArgs = serde_json::from_str(json).unwrap();
+        assert_eq!(args.depth, Some(1));
+    }
+
+    #[test]
+    fn repo_clone_error_displays() {
+        let err = RepoCloneError {
+            message: "test error".to_string(),
+        };
+        assert_eq!(format!("{err}"), "test error");
+    }
+
+    #[test]
+    fn repo_clone_error_from_git2_error() {
+        let git2_err = Git2Error::InvalidUrl;
+        let err: RepoCloneError = git2_err.into();
+        assert!(err.message.contains("invalid"));
+    }
+
+    #[test]
+    fn handle_repo_clone_with_invalid_url() {
+        let args = RepoCloneArgs {
+            url: "not-a-url".to_string(),
+            branch: None,
+            depth: None,
+            sparse: None,
+            exclude_binary: None,
+            max_file_size: None,
+            resolve_lfs: None,
+            include_submodules: None,
+            submodule_depth: None,
+            submodule_include: None,
+            submodule_exclude: None,
+        };
+        let proxy = ProxyConfig::default();
+        let lfs = LfsConfig::default();
+        let submods = SubmoduleConfig::default();
+        assert!(handle_repo_clone(args, &proxy, &lfs, &submods).is_err());
+    }
+
+    #[test]
+    fn handle_repo_clone_rejects_file_url() {
+        let args = RepoCloneArgs {
+            url: "file:///etc/passwd".to_string(),
+            branch: None,
+            depth: None,
+            sparse: None,
+            exclude_binary: None,
+            max_file_size: None,
+            resolve_lfs: None,
+            include_submodules: None,
+            submodule_depth: None,
+            submodule_include: None,
+            submodule_exclude: None,
+        };
+        let proxy = ProxyConfig::default();
+        let lfs = LfsConfig::default();
+        let submods = SubmoduleConfig::default();
+        assert!(handle_repo_clone(args, &proxy, &lfs, &submods).is_err());
+    }
+
+    #[test]
+    fn is_zero_helper() {
+        assert!(is_zero(&0));
+        assert!(!is_zero(&1));
+        assert!(!is_zero(&100));
+    }
 }

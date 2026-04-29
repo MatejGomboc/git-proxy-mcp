@@ -489,4 +489,250 @@ mod tests {
         assert_eq!(format!("{}", RequestId::Number(42)), "42");
         assert_eq!(format!("{}", RequestId::String("abc".to_string())), "abc");
     }
+
+    #[test]
+    fn request_validate_rejects_wrong_jsonrpc() {
+        let req = JsonRpcRequest {
+            jsonrpc: "1.0".to_string(),
+            id: RequestId::Number(1),
+            method: "x".to_string(),
+            params: None,
+        };
+        assert_eq!(req.validate(), Some("jsonrpc field must be \"2.0\""));
+    }
+
+    #[test]
+    fn request_validate_rejects_empty_method() {
+        let req = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: RequestId::Number(1),
+            method: String::new(),
+            params: None,
+        };
+        assert_eq!(req.validate(), Some("method field cannot be empty"));
+    }
+
+    #[test]
+    fn request_validate_accepts_valid_request() {
+        let req = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: RequestId::Number(1),
+            method: "x".to_string(),
+            params: None,
+        };
+        assert!(req.validate().is_none());
+    }
+
+    #[test]
+    fn parse_message_rejects_non_object() {
+        let err = parse_message("[1, 2, 3]").unwrap_err();
+        assert_eq!(err.error.code, ErrorCode::ParseError.code());
+    }
+
+    #[test]
+    fn parse_message_rejects_jsonrpc_not_string() {
+        let json = r#"{"jsonrpc": 2.0, "id": 1, "method": "test"}"#;
+        let err = parse_message(json).unwrap_err();
+        assert_eq!(err.error.code, ErrorCode::InvalidRequest.code());
+    }
+
+    #[test]
+    fn parse_request_with_invalid_method_returns_invalid_request_with_id() {
+        let json = r#"{"jsonrpc": "2.0", "id": 7, "method": ""}"#;
+        let err = parse_message(json).unwrap_err();
+        assert_eq!(err.error.code, ErrorCode::InvalidRequest.code());
+        // ID should be preserved
+        assert_eq!(err.id, Some(RequestId::Number(7)));
+    }
+
+    #[test]
+    fn parse_request_with_malformed_id_returns_invalid_request() {
+        let json = r#"{"jsonrpc": "2.0", "id": null, "method": "x"}"#;
+        let err = parse_message(json).unwrap_err();
+        assert_eq!(err.error.code, ErrorCode::InvalidRequest.code());
+    }
+
+    #[test]
+    fn parse_notification_with_missing_method_returns_invalid_request() {
+        let json = r#"{"jsonrpc": "2.0"}"#;
+        let err = parse_message(json).unwrap_err();
+        assert_eq!(err.error.code, ErrorCode::InvalidRequest.code());
+    }
+
+    #[test]
+    fn error_code_to_numeric() {
+        assert_eq!(ErrorCode::ParseError.code(), -32700);
+        assert_eq!(ErrorCode::InvalidRequest.code(), -32600);
+        assert_eq!(ErrorCode::MethodNotFound.code(), -32601);
+        assert_eq!(ErrorCode::InvalidParams.code(), -32602);
+        assert_eq!(ErrorCode::InternalError.code(), -32603);
+        assert_eq!(ErrorCode::ServerError(-32000).code(), -32000);
+    }
+
+    #[test]
+    fn error_code_default_messages() {
+        assert_eq!(ErrorCode::ParseError.default_message(), "Parse error");
+        assert_eq!(
+            ErrorCode::InvalidRequest.default_message(),
+            "Invalid Request"
+        );
+        assert_eq!(
+            ErrorCode::MethodNotFound.default_message(),
+            "Method not found"
+        );
+        assert_eq!(ErrorCode::InvalidParams.default_message(), "Invalid params");
+        assert_eq!(ErrorCode::InternalError.default_message(), "Internal error");
+        assert_eq!(ErrorCode::ServerError(0).default_message(), "Server error");
+    }
+
+    #[test]
+    fn error_data_with_data_attaches_payload() {
+        let data = JsonRpcErrorData::from_code(ErrorCode::InternalError)
+            .with_data(serde_json::json!({"reason": "x"}));
+        assert!(data.data.is_some());
+    }
+
+    #[test]
+    fn error_data_with_message_overrides_default() {
+        let data = JsonRpcErrorData::with_message(ErrorCode::InvalidParams, "missing url");
+        assert_eq!(data.code, ErrorCode::InvalidParams.code());
+        assert_eq!(data.message, "missing url");
+        assert!(data.data.is_none());
+    }
+
+    #[test]
+    fn error_response_invalid_params_includes_id_and_message() {
+        let err = JsonRpcError::invalid_params(RequestId::Number(3), "bad arg");
+        assert_eq!(err.id, Some(RequestId::Number(3)));
+        assert_eq!(err.error.code, ErrorCode::InvalidParams.code());
+        assert_eq!(err.error.message, "bad arg");
+    }
+
+    #[test]
+    fn error_response_internal_error_includes_id_and_message() {
+        let err = JsonRpcError::internal_error(RequestId::Number(5), "boom");
+        assert_eq!(err.id, Some(RequestId::Number(5)));
+        assert_eq!(err.error.code, ErrorCode::InternalError.code());
+        assert_eq!(err.error.message, "boom");
+    }
+
+    #[test]
+    fn error_response_parse_error_has_no_id() {
+        let err = JsonRpcError::parse_error();
+        assert!(err.id.is_none());
+        assert_eq!(err.error.code, ErrorCode::ParseError.code());
+    }
+
+    #[test]
+    fn error_response_invalid_request_can_have_id() {
+        let err = JsonRpcError::invalid_request(Some(RequestId::Number(2)));
+        assert_eq!(err.id, Some(RequestId::Number(2)));
+        let err_no_id = JsonRpcError::invalid_request(None);
+        assert!(err_no_id.id.is_none());
+    }
+
+    #[test]
+    fn outgoing_notification_progress_includes_token_and_message() {
+        let notif = OutgoingNotification::progress("token-1", 50, Some(100), Some("syncing"));
+        assert_eq!(notif.method, "notifications/progress");
+        let params = notif.params.unwrap();
+        assert_eq!(params["progressToken"], "token-1");
+        assert_eq!(params["progress"], 50);
+        assert_eq!(params["total"], 100);
+        assert_eq!(params["message"], "syncing");
+    }
+
+    #[test]
+    fn outgoing_notification_progress_handles_none_total_and_message() {
+        let notif = OutgoingNotification::progress("token", 10, None, None);
+        let params = notif.params.unwrap();
+        assert!(params["total"].is_null());
+        assert!(params["message"].is_null());
+    }
+
+    #[test]
+    fn outgoing_notification_new_with_no_params() {
+        let notif = OutgoingNotification::new("custom/method", None);
+        assert_eq!(notif.method, "custom/method");
+        assert_eq!(notif.jsonrpc, "2.0");
+        assert!(notif.params.is_none());
+    }
+
+    #[test]
+    fn outgoing_notification_no_params_skipped_in_json() {
+        let notif = OutgoingNotification::new("x", None);
+        let json = serde_json::to_string(&notif).unwrap();
+        assert!(!json.contains("\"params\""));
+    }
+
+    #[test]
+    fn incoming_message_method_for_request() {
+        let json = r#"{"jsonrpc": "2.0", "id": 1, "method": "foo/bar"}"#;
+        let msg = parse_message(json).unwrap();
+        assert_eq!(msg.method(), "foo/bar");
+    }
+
+    #[test]
+    fn incoming_message_method_for_notification() {
+        let json = r#"{"jsonrpc": "2.0", "method": "ping"}"#;
+        let msg = parse_message(json).unwrap();
+        assert_eq!(msg.method(), "ping");
+    }
+
+    #[test]
+    fn incoming_message_params_for_request() {
+        let json = r#"{"jsonrpc": "2.0", "id": 1, "method": "x", "params": {"a": 1}}"#;
+        let msg = parse_message(json).unwrap();
+        assert!(msg.params().is_some());
+        assert_eq!(msg.params().unwrap()["a"], 1);
+    }
+
+    #[test]
+    fn incoming_message_params_for_notification() {
+        let json = r#"{"jsonrpc": "2.0", "method": "x", "params": {"b": 2}}"#;
+        let msg = parse_message(json).unwrap();
+        assert!(msg.params().is_some());
+    }
+
+    #[test]
+    fn incoming_message_params_none_when_absent() {
+        let json = r#"{"jsonrpc": "2.0", "id": 1, "method": "x"}"#;
+        let msg = parse_message(json).unwrap();
+        assert!(msg.params().is_none());
+    }
+
+    #[test]
+    fn incoming_message_id_for_request() {
+        let json = r#"{"jsonrpc": "2.0", "id": 99, "method": "x"}"#;
+        let msg = parse_message(json).unwrap();
+        assert_eq!(msg.id(), Some(&RequestId::Number(99)));
+    }
+
+    #[test]
+    fn incoming_message_id_none_for_notification() {
+        let json = r#"{"jsonrpc": "2.0", "method": "x"}"#;
+        let msg = parse_message(json).unwrap();
+        assert!(msg.id().is_none());
+    }
+
+    #[test]
+    fn protocol_constants_are_stable() {
+        assert_eq!(MCP_PROTOCOL_VERSION, "2024-11-05");
+        assert_eq!(SERVER_NAME, "git-proxy-mcp");
+    }
+
+    #[test]
+    fn error_data_serialises_without_optional_data() {
+        let err = JsonRpcErrorData::from_code(ErrorCode::ParseError);
+        let json = serde_json::to_string(&err).unwrap();
+        assert!(!json.contains("\"data\""));
+    }
+
+    #[test]
+    fn error_data_serialises_with_optional_data() {
+        let err = JsonRpcErrorData::from_code(ErrorCode::ParseError)
+            .with_data(serde_json::json!({"x": 1}));
+        let json = serde_json::to_string(&err).unwrap();
+        assert!(json.contains("\"data\""));
+    }
 }

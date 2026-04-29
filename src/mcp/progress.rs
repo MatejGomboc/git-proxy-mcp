@@ -548,4 +548,322 @@ mod tests {
         let (sender, _receiver) = ProgressSender::new("my-progress-token".to_string());
         assert_eq!(sender.token(), "my-progress-token");
     }
+
+    #[test]
+    fn lfs_download_percentage() {
+        let update = ProgressUpdate::LfsDownload {
+            downloaded: 3,
+            total: 10,
+            current_file: None,
+            bytes_downloaded: 0,
+            bytes_total: 0,
+        };
+        assert_eq!(update.percentage(), Some(30));
+    }
+
+    #[test]
+    fn lfs_download_percentage_zero_total() {
+        let update = ProgressUpdate::LfsDownload {
+            downloaded: 0,
+            total: 0,
+            current_file: None,
+            bytes_downloaded: 0,
+            bytes_total: 0,
+        };
+        assert_eq!(update.percentage(), None);
+    }
+
+    #[test]
+    fn submodule_fetch_percentage() {
+        let update = ProgressUpdate::SubmoduleFetch {
+            fetched: 2,
+            total: 5,
+            current_path: Some("vendor/x".to_string()),
+        };
+        assert_eq!(update.percentage(), Some(40));
+    }
+
+    #[test]
+    fn submodule_fetch_percentage_zero_total() {
+        let update = ProgressUpdate::SubmoduleFetch {
+            fetched: 0,
+            total: 0,
+            current_path: None,
+        };
+        assert_eq!(update.percentage(), None);
+    }
+
+    #[test]
+    fn message_progress_percentage() {
+        let update = ProgressUpdate::Message {
+            progress: 73,
+            message: "working".to_string(),
+        };
+        assert_eq!(update.percentage(), Some(73));
+    }
+
+    #[test]
+    fn file_processing_percentage_zero_total() {
+        let update = ProgressUpdate::FileProcessing {
+            processed: 0,
+            total: 0,
+            current_file: None,
+        };
+        assert_eq!(update.percentage(), None);
+    }
+
+    #[test]
+    fn transfer_description_no_total_bytes() {
+        let update = ProgressUpdate::Transfer {
+            received_bytes: 100,
+            total_bytes: 0,
+            received_objects: 5,
+            total_objects: 10,
+            indexed_objects: 5,
+        };
+        let desc = update.description();
+        assert!(desc.contains("5/10 objects"));
+        assert!(desc.contains("100 B"));
+    }
+
+    #[test]
+    fn file_processing_description_with_current() {
+        let update = ProgressUpdate::FileProcessing {
+            processed: 5,
+            total: 10,
+            current_file: Some("src/lib.rs".to_string()),
+        };
+        let desc = update.description();
+        assert!(desc.contains("5/10"));
+        assert!(desc.contains("src/lib.rs"));
+    }
+
+    #[test]
+    fn file_processing_description_zero_total() {
+        let update = ProgressUpdate::FileProcessing {
+            processed: 5,
+            total: 0,
+            current_file: None,
+        };
+        let desc = update.description();
+        assert!(desc.contains("Processing files: 5"));
+        assert!(!desc.contains('/'));
+    }
+
+    #[test]
+    fn lfs_download_description() {
+        let update = ProgressUpdate::LfsDownload {
+            downloaded: 2,
+            total: 5,
+            current_file: Some("video.mp4".to_string()),
+            bytes_downloaded: 524_288,
+            bytes_total: 1_048_576,
+        };
+        let desc = update.description();
+        assert!(desc.contains("2/5"));
+        assert!(desc.contains("video.mp4"));
+        assert!(desc.contains("KB"));
+    }
+
+    #[test]
+    fn lfs_download_description_no_bytes() {
+        let update = ProgressUpdate::LfsDownload {
+            downloaded: 1,
+            total: 3,
+            current_file: None,
+            bytes_downloaded: 0,
+            bytes_total: 0,
+        };
+        let desc = update.description();
+        assert!(desc.contains("1/3"));
+    }
+
+    #[test]
+    fn submodule_fetch_description_with_path() {
+        let update = ProgressUpdate::SubmoduleFetch {
+            fetched: 1,
+            total: 3,
+            current_path: Some("vendor/lib".to_string()),
+        };
+        let desc = update.description();
+        assert!(desc.contains("1/3"));
+        assert!(desc.contains("vendor/lib"));
+    }
+
+    #[test]
+    fn submodule_fetch_description_without_path() {
+        let update = ProgressUpdate::SubmoduleFetch {
+            fetched: 0,
+            total: 2,
+            current_path: None,
+        };
+        let desc = update.description();
+        assert!(desc.contains("0/2"));
+    }
+
+    #[test]
+    fn message_description_returns_message() {
+        let update = ProgressUpdate::Message {
+            progress: 50,
+            message: "halfway done".to_string(),
+        };
+        assert_eq!(update.description(), "halfway done");
+    }
+
+    #[test]
+    fn complete_description_includes_duration() {
+        let update = ProgressUpdate::Complete {
+            duration: Duration::from_secs_f64(3.5),
+        };
+        let desc = update.description();
+        assert!(desc.contains("3.5"));
+        assert!(desc.contains("Complete"));
+    }
+
+    #[test]
+    fn format_bytes_just_below_kb() {
+        assert_eq!(format_bytes(1023), "1023 B");
+    }
+
+    #[test]
+    fn format_bytes_just_below_mb() {
+        let result = format_bytes(1024 * 1024 - 1);
+        assert!(result.contains("KB"));
+    }
+
+    #[test]
+    fn format_bytes_just_below_gb() {
+        let result = format_bytes(1024 * 1024 * 1024 - 1);
+        assert!(result.contains("MB"));
+    }
+
+    #[test]
+    fn format_bytes_zero() {
+        assert_eq!(format_bytes(0), "0 B");
+    }
+
+    #[test]
+    fn format_bytes_large_gb() {
+        let result = format_bytes(5 * 1024 * 1024 * 1024);
+        assert!(result.contains("GB"));
+        assert!(result.contains("5.0"));
+    }
+
+    #[test]
+    fn progress_sender_send_transfer() {
+        let (tx, rx) = ProgressSender::new("t".to_string());
+        tx.send_transfer(100, 200, 5, 10, 5);
+        let received = rx.recv().unwrap();
+        match received {
+            ProgressUpdate::Transfer {
+                received_bytes,
+                total_bytes,
+                received_objects,
+                total_objects,
+                indexed_objects,
+            } => {
+                assert_eq!(received_bytes, 100);
+                assert_eq!(total_bytes, 200);
+                assert_eq!(received_objects, 5);
+                assert_eq!(total_objects, 10);
+                assert_eq!(indexed_objects, 5);
+            }
+            other => panic!("expected Transfer, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn progress_sender_send_file_progress() {
+        let (tx, rx) = ProgressSender::new("t".to_string());
+        tx.send_file_progress(1, 5, Some("a.txt"));
+        let received = rx.recv().unwrap();
+        match received {
+            ProgressUpdate::FileProcessing {
+                processed,
+                total,
+                current_file,
+            } => {
+                assert_eq!(processed, 1);
+                assert_eq!(total, 5);
+                assert_eq!(current_file, Some("a.txt".to_string()));
+            }
+            other => panic!("expected FileProcessing, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn progress_sender_send_lfs_progress() {
+        let (tx, rx) = ProgressSender::new("t".to_string());
+        tx.send_lfs_progress(1, 3, Some("file.bin"), 100, 200);
+        let received = rx.recv().unwrap();
+        assert!(matches!(received, ProgressUpdate::LfsDownload { .. }));
+    }
+
+    #[test]
+    fn progress_sender_send_submodule_progress() {
+        let (tx, rx) = ProgressSender::new("t".to_string());
+        tx.send_submodule_progress(2, 4, Some("vendor/x"));
+        let received = rx.recv().unwrap();
+        assert!(matches!(received, ProgressUpdate::SubmoduleFetch { .. }));
+    }
+
+    #[test]
+    fn progress_sender_send_complete() {
+        let (tx, rx) = ProgressSender::new("t".to_string());
+        tx.send_complete(Duration::from_secs(2));
+        let received = rx.recv().unwrap();
+        assert!(matches!(received, ProgressUpdate::Complete { .. }));
+    }
+
+    #[test]
+    fn progress_sender_can_be_cloned() {
+        let (tx, _rx) = ProgressSender::new("t".to_string());
+        let cloned = tx.clone();
+        assert_eq!(cloned.token(), tx.token());
+    }
+
+    #[test]
+    fn progress_sender_send_after_receiver_dropped_returns_false() {
+        let (tx, rx) = ProgressSender::new("t".to_string());
+        drop(rx);
+        // Even though it's a Complete (no rate limit), channel is closed
+        assert!(!tx.send(ProgressUpdate::Complete {
+            duration: Duration::from_secs(1),
+        }));
+    }
+
+    #[test]
+    fn progress_notification_from_update_includes_message() {
+        let update = ProgressUpdate::Message {
+            progress: 42,
+            message: "test message".to_string(),
+        };
+        let notif = ProgressNotification::from_update("tok", &update);
+        assert_eq!(notif.progress_token, "tok");
+        assert_eq!(notif.progress, 42);
+        assert_eq!(notif.total, Some(100));
+        assert_eq!(notif.message.as_deref(), Some("test message"));
+    }
+
+    #[test]
+    fn progress_notification_from_unknown_total_uses_zero() {
+        let update = ProgressUpdate::FileProcessing {
+            processed: 5,
+            total: 0,
+            current_file: None,
+        };
+        let notif = ProgressNotification::from_update("tok", &update);
+        assert_eq!(notif.progress, 0);
+    }
+
+    #[test]
+    fn create_progress_notification_has_jsonrpc_envelope() {
+        let update = ProgressUpdate::Complete {
+            duration: Duration::from_secs(1),
+        };
+        let json = create_progress_notification("tok", &update);
+        assert_eq!(json["jsonrpc"], "2.0");
+        assert_eq!(json["method"], "notifications/progress");
+        assert!(json["params"].is_object());
+    }
 }

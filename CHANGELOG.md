@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Code coverage reporting** — `cargo-llvm-cov` runs on every PR and push to main,
+  uploading lcov reports to Codecov. Patch coverage target is 80% for changed lines;
+  project coverage cannot drop more than 1% on main. Coverage badge added to README.
+- **400+ new unit tests** across `git2_ops`, `mcp`, `streaming`, and `config` modules
+  to push coverage from ~58% to ~72%+. Tests cover URL validation, error paths,
+  argument parsing, server request routing, tar archive creation with local bare repos,
+  LFS pointer parsing, and progress notification serialisation.
+
 ## [1.1.0] - 2026-03-14
 
 ### Added

@@ -103,4 +103,76 @@ mod tests {
         assert!(path.is_some());
         assert!(path.unwrap().to_string_lossy().contains("config.json"));
     }
+
+    #[test]
+    fn load_config_with_nonexistent_path_returns_not_found() {
+        let path = std::path::Path::new("/nonexistent/path/config.json");
+        let result = load_config(Some(path));
+        assert!(matches!(result, Err(ConfigError::NotFound { .. })));
+    }
+
+    #[test]
+    fn load_config_parses_valid_json() {
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        let json = r#"{
+            "git_identity": {"name": "Test", "email": "t@x.com"},
+            "security": {},
+            "logging": {},
+            "timeouts": {},
+            "rate_limits": {}
+        }"#;
+        std::fs::write(temp.path(), json).unwrap();
+
+        let config = load_config(Some(temp.path())).unwrap();
+        assert_eq!(config.git_identity.name.as_deref(), Some("Test"));
+    }
+
+    #[test]
+    fn load_config_rejects_malformed_json() {
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(temp.path(), "{ not valid json").unwrap();
+
+        let result = load_config(Some(temp.path()));
+        assert!(matches!(result, Err(ConfigError::ParseError { .. })));
+    }
+
+    #[test]
+    fn load_config_rejects_unknown_field() {
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        // unknown field at top level
+        let json = r#"{"unknown_field": 123}"#;
+        std::fs::write(temp.path(), json).unwrap();
+
+        let result = load_config(Some(temp.path()));
+        assert!(matches!(result, Err(ConfigError::ParseError { .. })));
+    }
+
+    #[test]
+    fn load_config_minimal_empty_object() {
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(temp.path(), "{}").unwrap();
+
+        let config = load_config(Some(temp.path())).unwrap();
+        // All defaults
+        assert!(config.git_identity.name.is_none());
+    }
+
+    #[test]
+    fn load_config_with_full_configuration() {
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        let json = r#"{
+            "git_identity": {"name": "AI", "email": "ai@x.com"},
+            "security": {"allow_force_push": false, "protected_branches": ["main"]},
+            "logging": {"level": "info"},
+            "timeouts": {"request_timeout_secs": 60},
+            "rate_limits": {"max_burst": 50, "refill_rate_per_sec": 10.0},
+            "proxy": {"url": "http://proxy:8080"},
+            "sessions": {"timeout_secs": 1800, "max_streaming_sessions": 5, "max_repo_sessions": 50},
+            "lfs": {"retry_max_attempts": 5},
+            "submodules": {"max_concurrent": 2}
+        }"#;
+        std::fs::write(temp.path(), json).unwrap();
+        let config = load_config(Some(temp.path())).unwrap();
+        assert_eq!(config.timeouts.request_timeout_secs, 60);
+    }
 }

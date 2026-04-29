@@ -996,4 +996,173 @@ mod tests {
             reqwest::StatusCode::BAD_REQUEST
         ));
     }
+
+    #[test]
+    fn is_transient_status_rejects_2xx() {
+        assert!(!LfsClient::is_transient_status(reqwest::StatusCode::OK));
+        assert!(!LfsClient::is_transient_status(
+            reqwest::StatusCode::CREATED
+        ));
+        assert!(!LfsClient::is_transient_status(
+            reqwest::StatusCode::NO_CONTENT
+        ));
+    }
+
+    #[test]
+    fn is_transient_status_rejects_3xx() {
+        assert!(!LfsClient::is_transient_status(
+            reqwest::StatusCode::MOVED_PERMANENTLY
+        ));
+        assert!(!LfsClient::is_transient_status(reqwest::StatusCode::FOUND));
+    }
+
+    #[test]
+    fn is_transient_status_only_accepts_specific_5xx_codes() {
+        // Implementation only retries 500, 502, 503, 504 — not all 5xx
+        assert!(LfsClient::is_transient_status(
+            reqwest::StatusCode::INTERNAL_SERVER_ERROR
+        ));
+        assert!(!LfsClient::is_transient_status(
+            reqwest::StatusCode::NOT_IMPLEMENTED // 501 — not retryable
+        ));
+        assert!(!LfsClient::is_transient_status(
+            reqwest::StatusCode::HTTP_VERSION_NOT_SUPPORTED // 505 — not retryable
+        ));
+    }
+
+    #[test]
+    fn lfs_pointer_struct_fields() {
+        let pointer = LfsPointer {
+            oid: "abc123".to_string(),
+            size: 1024,
+        };
+        assert_eq!(pointer.oid, "abc123");
+        assert_eq!(pointer.size, 1024);
+        // Verify Clone works
+        let cloned = pointer.clone();
+        assert_eq!(cloned.oid, pointer.oid);
+    }
+
+    #[test]
+    fn parse_lfs_pointer_with_extra_fields_is_robust() {
+        let pointer = b"version https://git-lfs.github.com/spec/v1\n\
+                        oid sha256:abc123def456\n\
+                        size 999\n\
+                        extra-field something\n";
+        let parsed = parse_lfs_pointer(pointer);
+        assert!(parsed.is_some());
+        let p = parsed.unwrap();
+        assert_eq!(p.oid, "abc123def456");
+        assert_eq!(p.size, 999);
+    }
+
+    #[test]
+    fn parse_lfs_pointer_invalid_size() {
+        let pointer = b"version https://git-lfs.github.com/spec/v1\n\
+                        oid sha256:abc\n\
+                        size not_a_number\n";
+        assert!(parse_lfs_pointer(pointer).is_none());
+    }
+
+    #[test]
+    fn parse_lfs_pointer_zero_size() {
+        let pointer = b"version https://git-lfs.github.com/spec/v1\n\
+                        oid sha256:abc\n\
+                        size 0\n";
+        let parsed = parse_lfs_pointer(pointer).unwrap();
+        assert_eq!(parsed.size, 0);
+    }
+
+    #[test]
+    fn parse_lfs_pointer_oid_without_sha256_prefix() {
+        // OID line without sha256: prefix should be rejected
+        let pointer = b"version https://git-lfs.github.com/spec/v1\n\
+                        oid abc123\n\
+                        size 100\n";
+        assert!(parse_lfs_pointer(pointer).is_none());
+    }
+
+    #[test]
+    fn parse_lfs_pointer_empty_input() {
+        assert!(parse_lfs_pointer(b"").is_none());
+    }
+
+    #[test]
+    fn parse_lfs_pointer_missing_version_line() {
+        let pointer = b"oid sha256:abc\nsize 100\n";
+        assert!(parse_lfs_pointer(pointer).is_none());
+    }
+
+    #[test]
+    fn is_lfs_pointer_empty_input() {
+        assert!(!is_lfs_pointer(b""));
+    }
+
+    #[test]
+    fn is_lfs_pointer_partial_match() {
+        // Has "version" but not the LFS spec URL
+        let content = b"version 1.0\n";
+        assert!(!is_lfs_pointer(content));
+    }
+
+    #[test]
+    fn derive_lfs_url_http() {
+        let url = derive_lfs_url("http://example.com/owner/repo.git").unwrap();
+        assert_eq!(url, "http://example.com/owner/repo/info/lfs");
+    }
+
+    #[test]
+    fn derive_lfs_url_ssh_no_git_suffix() {
+        let url = derive_lfs_url("git@gitlab.com:group/project").unwrap();
+        assert_eq!(url, "https://gitlab.com/group/project/info/lfs");
+    }
+
+    #[test]
+    fn derive_lfs_url_ssh_self_hosted() {
+        let url = derive_lfs_url("git@gitlab.example.com:group/project.git").unwrap();
+        assert_eq!(url, "https://gitlab.example.com/group/project/info/lfs");
+    }
+
+    #[test]
+    fn derive_lfs_url_rejects_unknown_scheme() {
+        assert!(derive_lfs_url("ftp://example.com/repo").is_err());
+        assert!(derive_lfs_url("gopher://example.com/repo").is_err());
+    }
+
+    #[test]
+    fn derive_lfs_url_rejects_no_scheme() {
+        assert!(derive_lfs_url("example.com/repo").is_err());
+    }
+
+    #[test]
+    fn lfs_client_with_progress() {
+        let (sender, _receiver) = crate::mcp::progress::ProgressSender::new("t".to_string());
+        let config = LfsConfig::default();
+        let client = LfsClient::new(
+            "https://github.com/owner/repo.git",
+            None,
+            None,
+            None,
+            &config,
+            Some(sender),
+        );
+        assert!(client.is_ok());
+    }
+
+    #[test]
+    fn lfs_client_invalid_repo_url() {
+        let config = LfsConfig::default();
+        let client = LfsClient::new("ftp://invalid.com/repo", None, None, None, &config, None);
+        assert!(client.is_err());
+    }
+
+    #[test]
+    fn lfs_batch_result_construction() {
+        let result = LfsBatchResult {
+            contents: std::collections::HashMap::new(),
+            skipped_too_large: 0,
+        };
+        assert_eq!(result.skipped_too_large, 0);
+        assert!(result.contents.is_empty());
+    }
 }

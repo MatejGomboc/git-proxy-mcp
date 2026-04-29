@@ -166,5 +166,51 @@ mod tests {
         assert_eq!(format!("{err}"), "test error");
     }
 
-    // Integration tests that require network access are in tests/
+    #[test]
+    fn repo_refs_args_rejects_missing_url() {
+        let json = "{}";
+        let result: Result<RepoRefsArgs, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn repo_refs_args_rejects_non_string_url() {
+        let json = r#"{"url": 123}"#;
+        let result: Result<RepoRefsArgs, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn repo_refs_error_from_git2_error_invalid_url() {
+        let git2_err = Git2Error::InvalidUrl;
+        let refs_err: RepoRefsError = git2_err.into();
+        assert!(refs_err.message.contains("invalid"));
+    }
+
+    #[test]
+    fn repo_refs_error_from_git2_error_auth_failed() {
+        let git2_err = Git2Error::AuthenticationFailed;
+        let refs_err: RepoRefsError = git2_err.into();
+        assert!(refs_err.message.contains("auth"));
+    }
+
+    #[test]
+    fn handle_repo_refs_with_invalid_url() {
+        let args = RepoRefsArgs {
+            url: "not-a-valid-url".to_string(),
+        };
+        let proxy = ProxyConfig::default();
+        let result = handle_repo_refs(args, &proxy);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn handle_repo_refs_with_file_url_rejected() {
+        let args = RepoRefsArgs {
+            url: "file:///etc/passwd".to_string(),
+        };
+        let proxy = ProxyConfig::default();
+        let result = handle_repo_refs(args, &proxy);
+        assert!(result.is_err());
+    }
 }
