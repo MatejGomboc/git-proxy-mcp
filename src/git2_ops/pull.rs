@@ -624,8 +624,13 @@ mod tests {
         let tree = commit.tree().unwrap();
         let files = vec!["nonexistent.txt".to_string()];
         let archive = create_files_archive(&repo, &tree, &files).unwrap();
-        // No files match — empty archive content (but tar.gz header may still
-        // produce some bytes when finalised)
-        assert!(archive.is_empty() || !archive.is_empty());
+        // No files matched, so the archive should contain at most an empty
+        // tar.gz envelope — much smaller than any real archive with content.
+        // (file.txt would be ~17 bytes uncompressed plus tar header overhead.)
+        assert!(
+            archive.len() < 100,
+            "expected near-empty archive, got {} bytes",
+            archive.len()
+        );
     }
 }

@@ -807,9 +807,14 @@ mod tests {
         assert!(!visited.insert(norm_b));
     }
 
-    /// Build a bare repo containing a `.gitmodules` file and a submodule entry
-    /// at `vendor/lib`.
-    fn build_repo_with_submodule() -> (tempfile::TempDir, Oid) {
+    /// Build a bare repo containing only a `.gitmodules` blob in the root tree.
+    ///
+    /// Note: this does NOT create an actual submodule tree entry (mode 160000)
+    /// because that would require a valid submodule commit reachable from the
+    /// parent, which we cannot fabricate without a real fetch. Tests that need
+    /// to exercise the tree-walking code path with submodule entries should
+    /// build a more elaborate fixture.
+    fn build_repo_with_gitmodules_blob() -> (tempfile::TempDir, Oid) {
         let temp = tempfile::TempDir::new().unwrap();
         let commit_oid = {
             let repo = Repository::init_bare(temp.path()).unwrap();
@@ -819,21 +824,8 @@ mod tests {
                                        \turl = https://github.com/example/lib.git\n";
             let gitmodules_oid = repo.blob(gitmodules_content).unwrap();
 
-            // Create a fake submodule commit OID (must be a valid OID, doesn't
-            // need to point to anything that exists).
-            let fake_submod_oid = Oid::from_str("0000000000000000000000000000000000000001")
-                .unwrap_or_else(|_| Oid::zero());
-
-            // Build root tree containing .gitmodules and a submodule entry.
             let mut tb = repo.treebuilder(None).unwrap();
             tb.insert(".gitmodules", gitmodules_oid, 0o100_644).unwrap();
-
-            // Submodules use mode 160000 (0o160_000) and reference a commit OID
-            // even though we never actually fetched that commit. The treebuilder
-            // accepts this as long as the OID format is valid.
-            let _ = tb.insert("vendor", fake_submod_oid, SUBMODULE_MODE);
-            // Note: the above might not work without the actual submodule commit;
-            // we'll only test the .gitmodules parsing for now.
             let tree_oid = tb.write().unwrap();
 
             let signature = git2::Signature::now("Test", "test@example.com").unwrap();
@@ -842,7 +834,7 @@ mod tests {
                 Some("HEAD"),
                 &signature,
                 &signature,
-                "with submodules",
+                "with .gitmodules",
                 &tree,
                 &[],
             )
@@ -853,7 +845,7 @@ mod tests {
 
     #[test]
     fn get_gitmodules_content_returns_content() {
-        let (temp, commit_oid) = build_repo_with_submodule();
+        let (temp, commit_oid) = build_repo_with_gitmodules_blob();
         let repo = Repository::open_bare(temp.path()).unwrap();
         let content = get_gitmodules_content(&repo, commit_oid);
         assert!(content.is_some());
@@ -885,8 +877,7 @@ mod tests {
     #[test]
     fn get_gitmodules_content_returns_none_for_invalid_commit() {
         let temp = tempfile::TempDir::new().unwrap();
-        let _ = Repository::init_bare(temp.path()).unwrap();
-        let repo = Repository::open_bare(temp.path()).unwrap();
+        let repo = Repository::init_bare(temp.path()).unwrap();
         let bogus_oid = Oid::from_str("0000000000000000000000000000000000000001").unwrap();
         let content = get_gitmodules_content(&repo, bogus_oid);
         assert!(content.is_none());
@@ -915,8 +906,7 @@ mod tests {
     #[test]
     fn find_submodule_entries_invalid_commit_returns_error() {
         let temp = tempfile::TempDir::new().unwrap();
-        let _ = Repository::init_bare(temp.path()).unwrap();
-        let repo = Repository::open_bare(temp.path()).unwrap();
+        let repo = Repository::init_bare(temp.path()).unwrap();
         let bogus_oid = Oid::from_str("0000000000000000000000000000000000000001").unwrap();
         let gitmodules = HashMap::new();
         let result = find_submodule_entries(&repo, bogus_oid, &gitmodules);
