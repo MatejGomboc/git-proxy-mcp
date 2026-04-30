@@ -53,7 +53,10 @@ def _sanitise_repo_url(raw: str) -> str:
     return urlunsplit(("https", parts.hostname, parts.path, "", ""))
 
 
-BINARY = "./target/release/git-proxy-mcp"
+# BINARY can be overridden via the GIT_PROXY_MCP_BINARY env var so the
+# coverage workflow can point at an instrumented build under
+# `target/llvm-cov-target/`.
+BINARY = os.environ.get("GIT_PROXY_MCP_BINARY", "./target/release/git-proxy-mcp")
 REPO_URL = _sanitise_repo_url(os.environ["TEST_REPO_URL"]) if os.environ.get("TEST_REPO_URL") else ""
 REQUEST_TIMEOUT_SECS = 60
 LOG_DIR = os.path.join(tempfile.gettempdir(), "mcp-test")

@@ -826,6 +826,7 @@ fn derive_lfs_url(repo_url: &str) -> Result<String, Git2Error> {
 }
 
 #[cfg(test)]
+#[allow(clippy::significant_drop_tightening)] // mockito::Server must outlive LfsClient calls
 mod tests {
     use super::*;
 
@@ -1164,5 +1165,280 @@ mod tests {
         };
         assert_eq!(result.skipped_too_large, 0);
         assert!(result.contents.is_empty());
+    }
+
+    // ------------------------------------------------------------------
+    // Mock LFS server tests
+    //
+    // These spin up a `mockito` HTTP server, configure an `LfsClient`
+    // pointing at it, and exercise the retry/error-mapping paths that are
+    // otherwise only reached by talking to a real LFS endpoint.
+    //
+    // The `lfs_url` is derived from the repo_url as `{repo_url_without_git}/info/lfs`,
+    // so we pass `repo_url = "{mock_server}/repo.git"` to make the derived
+    // batch endpoint `{mock_server}/repo/info/lfs/objects/batch`.
+    // ------------------------------------------------------------------
+
+    /// Build a fast-retry config so transient failures don't stall the test.
+    fn fast_retry_config(attempts: u32) -> LfsConfig {
+        LfsConfig {
+            retry_max_attempts: attempts,
+            retry_initial_backoff_ms: 1,
+            retry_max_backoff_ms: 5,
+            retry_backoff_multiplier: 2.0,
+            max_object_size: None,
+            max_total_size: None,
+        }
+    }
+
+    fn make_pointer(oid: &str, size: u64) -> LfsPointer {
+        LfsPointer {
+            oid: oid.to_string(),
+            size,
+        }
+    }
+
+    fn make_batch_response(oid: &str, size: u64, download_href: &str) -> String {
+        format!(
+            r#"{{
+                "objects": [
+                    {{
+                        "oid": "{oid}",
+                        "size": {size},
+                        "actions": {{
+                            "download": {{
+                                "href": "{download_href}",
+                                "header": {{}}
+                            }}
+                        }}
+                    }}
+                ]
+            }}"#
+        )
+    }
+
+    #[test]
+    fn fetch_content_succeeds_against_mock_server() {
+        let mut server = mockito::Server::new();
+        let oid = "abc123def4567890abc123def4567890abc123def4567890abc123def4567890";
+        let payload = b"hello LFS world";
+        let download_path = "/repo/info/lfs/objects/abc123";
+        let download_href = format!("{}{}", server.url(), download_path);
+
+        let _batch_mock = server
+            .mock("POST", "/repo/info/lfs/objects/batch")
+            .with_status(200)
+            .with_header("content-type", "application/vnd.git-lfs+json")
+            .with_body(make_batch_response(
+                oid,
+                payload.len() as u64,
+                &download_href,
+            ))
+            .create();
+
+        let _download_mock = server
+            .mock("GET", download_path)
+            .with_status(200)
+            .with_body(payload)
+            .create();
+
+        let repo_url = format!("{}/repo.git", server.url());
+        let config = fast_retry_config(3);
+        let client = LfsClient::new(&repo_url, None, None, None, &config, None).unwrap();
+
+        let pointer = make_pointer(oid, payload.len() as u64);
+        let content = client.fetch_content(&pointer).unwrap();
+        assert_eq!(content, payload);
+    }
+
+    #[test]
+    fn fetch_content_retries_on_transient_5xx_then_succeeds() {
+        let mut server = mockito::Server::new();
+        let oid = "abc123def4567890abc123def4567890abc123def4567890abc123def4567890";
+        let payload = b"recovered after retry";
+        let download_path = "/repo/info/lfs/objects/abc123";
+        let download_href = format!("{}{}", server.url(), download_path);
+
+        // First attempt: 503 Service Unavailable (transient)
+        let _failing_mock = server
+            .mock("POST", "/repo/info/lfs/objects/batch")
+            .with_status(503)
+            .expect(1)
+            .create();
+        // Second attempt: success
+        let _success_mock = server
+            .mock("POST", "/repo/info/lfs/objects/batch")
+            .with_status(200)
+            .with_header("content-type", "application/vnd.git-lfs+json")
+            .with_body(make_batch_response(
+                oid,
+                payload.len() as u64,
+                &download_href,
+            ))
+            .expect(1)
+            .create();
+
+        let _download_mock = server
+            .mock("GET", download_path)
+            .with_status(200)
+            .with_body(payload)
+            .create();
+
+        let repo_url = format!("{}/repo.git", server.url());
+        let config = fast_retry_config(5);
+        let client = LfsClient::new(&repo_url, None, None, None, &config, None).unwrap();
+
+        let pointer = make_pointer(oid, payload.len() as u64);
+        let content = client.fetch_content(&pointer).unwrap();
+        assert_eq!(content, payload);
+    }
+
+    #[test]
+    fn fetch_content_does_not_retry_on_4xx() {
+        let mut server = mockito::Server::new();
+        let oid = "abc123def4567890abc123def4567890abc123def4567890abc123def4567890";
+
+        // 401 Unauthorized — not retryable.
+        let _mock = server
+            .mock("POST", "/repo/info/lfs/objects/batch")
+            .with_status(401)
+            .expect(1) // Must only be called once.
+            .create();
+
+        let repo_url = format!("{}/repo.git", server.url());
+        let config = fast_retry_config(5);
+        let client = LfsClient::new(&repo_url, None, None, None, &config, None).unwrap();
+
+        let pointer = make_pointer(oid, 100);
+        let result = client.fetch_content(&pointer);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn fetch_content_gives_up_after_max_retries_on_persistent_5xx() {
+        let mut server = mockito::Server::new();
+        let oid = "abc123def4567890abc123def4567890abc123def4567890abc123def4567890";
+        let max_attempts = 3;
+
+        // All requests return 502 Bad Gateway (transient).
+        let _mock = server
+            .mock("POST", "/repo/info/lfs/objects/batch")
+            .with_status(502)
+            .expect(max_attempts as usize)
+            .create();
+
+        let repo_url = format!("{}/repo.git", server.url());
+        let config = fast_retry_config(max_attempts);
+        let client = LfsClient::new(&repo_url, None, None, None, &config, None).unwrap();
+
+        let pointer = make_pointer(oid, 100);
+        let result = client.fetch_content(&pointer);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn fetch_content_rejects_oversized_object_before_request() {
+        let mut server = mockito::Server::new();
+        let oid = "abc123def4567890abc123def4567890abc123def4567890abc123def4567890";
+
+        // No mock should be reached — the size check fails first.
+        let _mock = server
+            .mock("POST", "/repo/info/lfs/objects/batch")
+            .with_status(200)
+            .expect(0) // Must NOT be called.
+            .create();
+
+        let repo_url = format!("{}/repo.git", server.url());
+        let config = LfsConfig {
+            retry_max_attempts: 3,
+            retry_initial_backoff_ms: 1,
+            retry_max_backoff_ms: 5,
+            retry_backoff_multiplier: 2.0,
+            max_object_size: Some(50),
+            max_total_size: None,
+        };
+        let client = LfsClient::new(&repo_url, None, None, None, &config, None).unwrap();
+
+        let pointer = make_pointer(oid, 1_000_000);
+        let result = client.fetch_content(&pointer);
+        assert!(result.is_err());
+        let msg = format!("{}", result.unwrap_err());
+        assert!(msg.contains("max_object_size"));
+    }
+
+    #[test]
+    fn fetch_content_returns_error_when_lfs_response_has_error_field() {
+        let mut server = mockito::Server::new();
+        let oid = "abc123def4567890abc123def4567890abc123def4567890abc123def4567890";
+
+        let response_body = format!(
+            r#"{{
+                "objects": [
+                    {{
+                        "oid": "{oid}",
+                        "size": 100,
+                        "error": {{
+                            "code": 404,
+                            "message": "Object does not exist on the server"
+                        }}
+                    }}
+                ]
+            }}"#
+        );
+
+        let _mock = server
+            .mock("POST", "/repo/info/lfs/objects/batch")
+            .with_status(200)
+            .with_header("content-type", "application/vnd.git-lfs+json")
+            .with_body(response_body)
+            .create();
+
+        let repo_url = format!("{}/repo.git", server.url());
+        let config = fast_retry_config(3);
+        let client = LfsClient::new(&repo_url, None, None, None, &config, None).unwrap();
+
+        let pointer = make_pointer(oid, 100);
+        let result = client.fetch_content(&pointer);
+        assert!(result.is_err());
+        let msg = format!("{}", result.unwrap_err());
+        assert!(msg.contains("Object does not exist") || msg.contains("LFS error"));
+    }
+
+    #[test]
+    fn fetch_content_sends_basic_auth_when_credentials_set() {
+        let mut server = mockito::Server::new();
+        let oid = "abc123def4567890abc123def4567890abc123def4567890abc123def4567890";
+        let payload = b"authenticated content";
+        let download_path = "/repo/info/lfs/objects/abc123";
+        let download_href = format!("{}{}", server.url(), download_path);
+
+        // Expect the Authorization header to be present (Basic base64(user:pass)).
+        // base64(test-user:s3cret) = dGVzdC11c2VyOnMzY3JldA==
+        let _batch_mock = server
+            .mock("POST", "/repo/info/lfs/objects/batch")
+            .match_header("authorization", "Basic dGVzdC11c2VyOnMzY3JldA==")
+            .with_status(200)
+            .with_header("content-type", "application/vnd.git-lfs+json")
+            .with_body(make_batch_response(
+                oid,
+                payload.len() as u64,
+                &download_href,
+            ))
+            .create();
+
+        let _download_mock = server
+            .mock("GET", download_path)
+            .with_status(200)
+            .with_body(payload)
+            .create();
+
+        let repo_url = format!("{}/repo.git", server.url());
+        let config = fast_retry_config(3);
+        let creds = Some(("test-user".to_string(), "s3cret".to_string()));
+        let client = LfsClient::new(&repo_url, creds, None, None, &config, None).unwrap();
+
+        let pointer = make_pointer(oid, payload.len() as u64);
+        let content = client.fetch_content(&pointer).unwrap();
+        assert_eq!(content, payload);
     }
 }

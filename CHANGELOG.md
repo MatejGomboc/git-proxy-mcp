@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Integration coverage merging** — the `coverage` job in `ci_main.yml` now
+  builds an instrumented release binary (via `cargo llvm-cov show-env`) and
+  runs the Python integration tests against it. The resulting coverage data
+  merges with the unit-test data into a single Codecov upload. The standalone
+  `integration` job has been removed; its responsibilities are now part of
+  `coverage` (avoids duplicate fixture rebuild and the resulting force-push
+  race condition).
+- **Mock LFS server tests** — 7 new Rust unit tests in `git2_ops::lfs::tests`
+  using `mockito` to verify retry-on-5xx, no-retry-on-4xx, exhaust-after-N,
+  oversized-object pre-check, batch-API error mapping, and Basic auth header
+  emission. Previously these paths only ran against a real LFS endpoint.
+- **Property-based tests** — new `tests/property_tests.rs` using `proptest`
+  for URL sanitisation (no panic, bounded growth, credential-stripping
+  invariants), URL validation (schema rejection consistency), and LFS
+  pointer detection/parsing (no panic on adversarial bytes, valid-input
+  round-tripping). 11 properties run with 256 cases each by default.
 - **Expanded integration test fixture** — fixture now includes a renamed-file
   commit (commit 4: `docs/DESIGN.md` → `docs/ARCHITECTURE.md`) and an
   LFS-tracked binary file (commit 5: `docs/large.bin`). Adds 4 integration
