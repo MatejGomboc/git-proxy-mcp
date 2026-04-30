@@ -1222,7 +1222,7 @@ mod tests {
         let mut server = mockito::Server::new();
         let oid = "abc123def4567890abc123def4567890abc123def4567890abc123def4567890";
         let payload = b"hello LFS world";
-        let download_path = "/repo/info/lfs/objects/abc123";
+        let download_path = format!("/repo/info/lfs/objects/{oid}");
         let download_href = format!("{}{}", server.url(), download_path);
 
         let _batch_mock = server
@@ -1237,7 +1237,7 @@ mod tests {
             .create();
 
         let _download_mock = server
-            .mock("GET", download_path)
+            .mock("GET", download_path.as_str())
             .with_status(200)
             .with_body(payload)
             .create();
@@ -1256,7 +1256,7 @@ mod tests {
         let mut server = mockito::Server::new();
         let oid = "abc123def4567890abc123def4567890abc123def4567890abc123def4567890";
         let payload = b"recovered after retry";
-        let download_path = "/repo/info/lfs/objects/abc123";
+        let download_path = format!("/repo/info/lfs/objects/{oid}");
         let download_href = format!("{}{}", server.url(), download_path);
 
         // First attempt: 503 Service Unavailable (transient)
@@ -1279,7 +1279,7 @@ mod tests {
             .create();
 
         let _download_mock = server
-            .mock("GET", download_path)
+            .mock("GET", download_path.as_str())
             .with_status(200)
             .with_body(payload)
             .create();
@@ -1409,7 +1409,7 @@ mod tests {
         let mut server = mockito::Server::new();
         let oid = "abc123def4567890abc123def4567890abc123def4567890abc123def4567890";
         let payload = b"authenticated content";
-        let download_path = "/repo/info/lfs/objects/abc123";
+        let download_path = format!("/repo/info/lfs/objects/{oid}");
         let download_href = format!("{}{}", server.url(), download_path);
 
         // Expect the Authorization header to be present (Basic base64(user:pass)).
@@ -1427,7 +1427,7 @@ mod tests {
             .create();
 
         let _download_mock = server
-            .mock("GET", download_path)
+            .mock("GET", download_path.as_str())
             .with_status(200)
             .with_body(payload)
             .create();

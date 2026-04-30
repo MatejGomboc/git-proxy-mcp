@@ -80,12 +80,11 @@ proptest! {
     }
 
     /// Inputs without `://` and without a `git@` prefix must be rejected.
+    /// The regex [a-zA-Z0-9/.-]+ cannot produce `:` or `@`, so by
+    /// construction any generated input has no scheme and validation
+    /// must fail.
     #[test]
     fn validate_url_rejects_no_scheme(s in "[a-zA-Z0-9/.-]+") {
-        // Skip cases that accidentally form a valid scheme.
-        if s.contains("://") || s.starts_with("git@") {
-            return Ok(());
-        }
         prop_assert!(validate_url(&s).is_err());
     }
 }
@@ -124,10 +123,12 @@ proptest! {
     }
 
     /// A well-formed pointer with valid OID and size must parse successfully.
+    /// Cover the full u64 range — `format!("size {N}")` and the `parse::<u64>()`
+    /// round-trip work correctly for all values up to `u64::MAX`.
     #[test]
     fn parse_lfs_pointer_accepts_well_formed_input(
         oid in "[0-9a-f]{64}",
-        size in 0u64..u64::MAX / 2,
+        size in any::<u64>(),
     ) {
         let content = format!(
             "version https://git-lfs.github.com/spec/v1\n\
