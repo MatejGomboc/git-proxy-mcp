@@ -53,10 +53,31 @@ def _sanitise_repo_url(raw: str) -> str:
     return urlunsplit(("https", parts.hostname, parts.path, "", ""))
 
 
+_BINARY_RE = re.compile(r"\A[A-Za-z0-9_./\-]+\Z")
+
+
+def _sanitise_binary_path(raw: str) -> str:
+    """Validate and reconstruct the binary path.
+
+    The path can be overridden by the coverage workflow to point at an
+    instrumented build under `target/llvm-cov-target/`, so we must
+    accept absolute and relative paths but reject anything that could
+    smuggle shell metacharacters into the spawn argv. Reconstructing
+    via `os.path.normpath` produces a fresh string that CodeQL
+    recognises as sanitised, closing the `py/command-line-injection`
+    alert at the `subprocess.Popen` call site.
+    """
+    if not _BINARY_RE.fullmatch(raw):
+        raise ValueError(f"GIT_PROXY_MCP_BINARY contains unsafe characters: {raw!r}")
+    return os.path.normpath(raw)
+
+
 # BINARY can be overridden via the GIT_PROXY_MCP_BINARY env var so the
 # coverage workflow can point at an instrumented build under
 # `target/llvm-cov-target/`.
-BINARY = os.environ.get("GIT_PROXY_MCP_BINARY", "./target/release/git-proxy-mcp")
+BINARY = _sanitise_binary_path(
+    os.environ.get("GIT_PROXY_MCP_BINARY", "./target/release/git-proxy-mcp")
+)
 REPO_URL = _sanitise_repo_url(os.environ["TEST_REPO_URL"]) if os.environ.get("TEST_REPO_URL") else ""
 REQUEST_TIMEOUT_SECS = 60
 LOG_DIR = os.path.join(tempfile.gettempdir(), "mcp-test")
