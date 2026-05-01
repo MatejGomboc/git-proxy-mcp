@@ -190,18 +190,40 @@ fn credentials_callback(
 
 /// Sanitise a URL for logging by removing any embedded credentials.
 ///
-/// URLs like `https://user:token@github.com/...` become `https://***@github.com/...`
+/// URLs like `https://user:token@github.com/...` become `https://***@github.com/...`.
+/// Per RFC 3986, the userinfo `@` separator can only appear in the authority
+/// component (between `://` and the first `/` `?` or `#`); any `@` later in
+/// the URL is part of the path, query, or fragment and is left untouched.
+/// SSH-style URLs without `://` (e.g. `git@host:path`) are also returned
+/// unchanged — SSH authentication uses keys via `ssh-agent` rather than
+/// inline URL credentials, so there's nothing to strip.
 #[must_use]
 pub fn sanitize_url_for_logging(url: &str) -> String {
-    // Check for credentials in URL (https://user:pass@host/...)
-    if let Some(at_pos) = url.find('@') {
-        if let Some(scheme_end) = url.find("://") {
-            let scheme = &url[..scheme_end + 3];
-            let after_at = &url[at_pos + 1..];
-            return format!("{scheme}***@{after_at}");
-        }
-    }
-    url.to_string()
+    let Some(scheme_end) = url.find("://") else {
+        // No scheme separator: SSH-style or otherwise non-URL input.
+        // We never inject `@`-style userinfo into these, so leave alone.
+        return url.to_string();
+    };
+
+    let after_scheme_idx = scheme_end + 3;
+    let after_scheme = &url[after_scheme_idx..];
+
+    // The authority ends at the first path/query/fragment delimiter.
+    let authority_end = after_scheme
+        .find(['/', '?', '#'])
+        .unwrap_or(after_scheme.len());
+    let authority = &after_scheme[..authority_end];
+
+    // `rfind('@')` so any (would-be percent-encoded) `@` earlier in userinfo
+    // doesn't fool us into stripping less than the full userinfo.
+    let Some(at_in_authority) = authority.rfind('@') else {
+        return url.to_string();
+    };
+
+    let scheme_part = &url[..after_scheme_idx];
+    let after_at_idx = after_scheme_idx + at_in_authority + 1;
+    let host_and_rest = &url[after_at_idx..];
+    format!("{scheme_part}***@{host_and_rest}")
 }
 
 /// Validate that a URL is acceptable for operations.
@@ -275,39 +297,97 @@ pub fn get_credentials_for_url(url: &str) -> Option<(String, String)> {
         parsed.1  // host (github.com)
     );
 
-    // Run git credential fill
-    let output = Command::new("git")
+    // Run `git credential fill`. Each failure mode is debug-traced so a
+    // user investigating "no credentials" in LFS logs can tell whether
+    // the cause was missing git, a stdin write error, an exit-non-zero
+    // helper, or a malformed response. `GIT_TERMINAL_PROMPT=0` forbids
+    // git from prompting on the terminal — an MCP server has no UI to
+    // surface a prompt to anyway, and an unattended prompt would just
+    // hang the subprocess until timeout.
+    let mut child = match Command::new("git")
         .args(["credential", "fill"])
+        .env("GIT_TERMINAL_PROMPT", "0")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .ok()
-        .and_then(|mut child| {
-            // Write input to stdin
-            if let Some(stdin) = child.stdin.as_mut() {
-                stdin.write_all(input.as_bytes()).ok()?;
-            }
-            child.wait_with_output().ok()
-        })?;
+    {
+        Ok(child) => child,
+        Err(e) => {
+            debug!(error = %e, "failed to spawn `git credential fill` (is `git` on PATH?)");
+            return None;
+        }
+    };
+
+    if let Some(stdin) = child.stdin.as_mut() {
+        if let Err(e) = stdin.write_all(input.as_bytes()) {
+            debug!(error = %e, "failed to write to `git credential fill` stdin");
+            return None;
+        }
+    }
+
+    let output = match child.wait_with_output() {
+        Ok(output) => output,
+        Err(e) => {
+            debug!(error = %e, "failed to wait for `git credential fill`");
+            return None;
+        }
+    };
 
     if !output.status.success() {
-        debug!("git credential helper returned non-zero status");
+        debug!(exit = ?output.status.code(), "`git credential fill` exited non-zero (no credential helper configured?)");
         return None;
     }
 
-    // Parse the output
-    let stdout = String::from_utf8(output.stdout).ok()?;
-    parse_credential_output(&stdout)
+    parse_credential_fill_stdout(&output.stdout)
+}
+
+/// Parse the stdout of a successful `git credential fill` invocation
+/// into `(username, password)`.
+///
+/// Returns `None` if:
+/// - `stdout` is not valid UTF-8.
+/// - The output is missing `username=` or `password=` lines.
+///
+/// Extracted from `get_credentials_for_url` so the post-subprocess
+/// parsing logic is unit-testable without spawning a real `git` process.
+fn parse_credential_fill_stdout(stdout: &[u8]) -> Option<(String, String)> {
+    let stdout_str = match std::str::from_utf8(stdout) {
+        Ok(s) => s,
+        Err(e) => {
+            debug!(error = %e, "`git credential fill` stdout was not valid UTF-8");
+            return None;
+        }
+    };
+    let creds = parse_credential_output(stdout_str);
+    if creds.is_none() {
+        debug!("`git credential fill` returned without `username` and `password` fields");
+    }
+    creds
 }
 
 /// Parse a URL into (protocol, host) for credential lookup.
+///
+/// SSH URLs are recognised only in the canonical `git@host:path` form;
+/// alternative SSH users (`gitea@`, `gerrit@`, etc.) and `ssh://` URLs
+/// are handled by the second branch via `Url::parse`.
 fn parse_url_for_credentials(url: &str) -> Option<(String, String)> {
     // Handle SSH URLs: git@github.com:owner/repo.git
     if url.starts_with("git@") {
         // Extract host from git@host:path
         let without_prefix = url.strip_prefix("git@")?;
-        let host = without_prefix.split(':').next()?;
+        // Trim whitespace so a malformed-but-recoverable host like
+        // `git@ github.com :path` resolves to `github.com` rather than
+        // ` github.com` (which would silently miss credentials).
+        let host = without_prefix.split(':').next()?.trim();
+        // Defensive: empty or whitespace-only host (e.g. `git@`,
+        // `git@:path`, `git@   :path`) is not a valid lookup key —
+        // `git credential fill` with `host=` (or whitespace) would
+        // either fail or, worse, return credentials for a different
+        // configured host by accident.
+        if host.is_empty() {
+            return None;
+        }
         return Some(("https".to_string(), host.to_string()));
     }
 
@@ -646,5 +726,184 @@ mod tests {
             result,
             Some(("https".to_string(), "github.com".to_string()))
         );
+    }
+
+    #[test]
+    fn parse_url_for_credentials_rejects_empty_ssh_host() {
+        // `git@:path` has an empty host before the colon — sending
+        // `host=` to `git credential fill` would either fail or match
+        // a default-configured host by accident. Must reject.
+        assert!(parse_url_for_credentials("git@:owner/repo.git").is_none());
+    }
+
+    #[test]
+    fn parse_url_for_credentials_rejects_just_git_at() {
+        // `git@` alone (no host, no path) — also empty-host.
+        assert!(parse_url_for_credentials("git@").is_none());
+    }
+
+    #[test]
+    fn parse_url_for_credentials_rejects_whitespace_only_ssh_host() {
+        // Whitespace-only hosts must be rejected too — `host.is_empty()`
+        // alone wouldn't catch them, so the impl trims first.
+        assert!(parse_url_for_credentials("git@   :path").is_none());
+        assert!(parse_url_for_credentials("git@\t:path").is_none());
+    }
+
+    #[test]
+    fn parse_url_for_credentials_trims_whitespace_padded_ssh_host() {
+        // A non-empty host with surrounding whitespace gets trimmed
+        // rather than passed through as `" github.com"`, which
+        // `git credential fill` would silently miss.
+        let result = parse_url_for_credentials("git@ github.com :owner/repo.git");
+        assert_eq!(
+            result,
+            Some(("https".to_string(), "github.com".to_string()))
+        );
+    }
+
+    #[test]
+    fn sanitize_url_strips_userinfo_when_fragment_also_has_at() {
+        // Combinatorial check: BOTH userinfo `@` AND a later `@` in the
+        // fragment must result in only the userinfo being stripped — the
+        // fragment must survive intact (this case wasn't covered
+        // separately by the path/query combo test).
+        let url = "https://user:secret@github.com/owner/repo#section@anchor";
+        let sanitized = sanitize_url_for_logging(url);
+        assert!(!sanitized.contains("secret"));
+        assert!(!sanitized.contains("user:"));
+        assert!(sanitized.contains("***@github.com/owner/repo#section@anchor"));
+    }
+
+    #[test]
+    fn parse_credential_fill_stdout_returns_creds_on_well_formed_output() {
+        // Happy-path: the helper parses well-formed `git credential fill`
+        // stdout and returns the username/password.
+        let stdout = b"protocol=https\nhost=github.com\nusername=alice\npassword=tok\n";
+        let result = parse_credential_fill_stdout(stdout);
+        assert_eq!(result, Some(("alice".to_string(), "tok".to_string())));
+    }
+
+    #[test]
+    fn parse_credential_fill_stdout_returns_none_on_missing_fields() {
+        // No username/password lines — the helper returns None and
+        // (under debug-level tracing) emits a diagnostic.
+        let stdout = b"protocol=https\nhost=github.com\n";
+        let result = parse_credential_fill_stdout(stdout);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn parse_credential_fill_stdout_returns_none_on_invalid_utf8() {
+        // Helpers that emit binary garbage (or a wrong-encoding output)
+        // hit the UTF-8 error arm — the helper returns None rather than
+        // panicking.
+        let stdout = &[0xFFu8, 0xFE, 0xFD];
+        let result = parse_credential_fill_stdout(stdout);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn parse_credential_fill_stdout_returns_none_on_empty_input() {
+        let result = parse_credential_fill_stdout(b"");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn get_credentials_for_url_returns_none_for_unconfigured_host() {
+        // End-to-end test that exercises `get_credentials_for_url`'s
+        // subprocess success path: spawn `git`, write to stdin, wait for
+        // output, parse the result. We use a host under `.invalid` (an
+        // RFC 6761 reserved TLD that is guaranteed never to be configured
+        // anywhere) so any installed credential helper will return
+        // nothing, and `GIT_TERMINAL_PROMPT=0` (set inside the function)
+        // prevents any helper from prompting on a developer machine.
+        //
+        // The function must return `None` (no credentials available),
+        // having gone through the spawn / write / wait / parse pipeline.
+        // This pulls coverage of the credential-fill body up from zero
+        // — the function's existing rustdoc was not backed by any test.
+        let result = get_credentials_for_url("https://nonexistent-coverage-test.invalid/repo.git");
+        assert!(
+            result.is_none(),
+            "no credentials should be configured for an .invalid TLD host"
+        );
+    }
+
+    #[test]
+    fn credentials_callback_falls_through_when_no_supported_method_allowed() {
+        // The callback supports SSH_KEY, USER_PASS_PLAINTEXT, and DEFAULT
+        // credential types; if `allowed_types` contains none of these
+        // (e.g. `CredentialType::empty()` or only USERNAME / SSH_INTERACTIVE
+        // / SSH_MEMORY / SSH_CUSTOM), every branch is skipped and the
+        // function returns the fallback `git2::Error`. This is the only
+        // branch testable without a live remote — the SSH-agent and
+        // credential-helper branches depend on system state and would be
+        // flaky on CI runners without configured credentials.
+        let result = credentials_callback(
+            "https://github.com/owner/repo.git",
+            None,
+            CredentialType::empty(),
+        );
+        // `Cred` doesn't implement `Debug`, so we can't use `.unwrap_err()`
+        // here — go through `Option<E>` instead.
+        let err = result
+            .err()
+            .expect("expected error when no credential type is allowed");
+        assert!(
+            err.message()
+                .contains("no suitable credential method available"),
+            "expected fallback message, got: {}",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn sanitize_url_does_not_mangle_at_in_query() {
+        // Regression: previously, the function found the FIRST `@` anywhere
+        // in the URL and treated everything between `://` and that `@` as
+        // userinfo. So a URL with `@` in a query string was mangled — the
+        // host and path were silently dropped from the log output. RFC 3986
+        // restricts the userinfo `@` separator to the authority component.
+        let url = "https://github.com/owner/repo?email=foo@bar.com";
+        let sanitized = sanitize_url_for_logging(url);
+        assert_eq!(
+            sanitized, url,
+            "URL with `@` only in query string must round-trip unchanged"
+        );
+    }
+
+    #[test]
+    fn sanitize_url_does_not_mangle_at_in_path() {
+        // Same regression for `@` in path component.
+        let url = "https://github.com/owner@user/repo.git";
+        let sanitized = sanitize_url_for_logging(url);
+        assert_eq!(sanitized, url);
+    }
+
+    #[test]
+    fn sanitize_url_does_not_mangle_at_in_fragment() {
+        let url = "https://github.com/owner/repo#sec@something";
+        let sanitized = sanitize_url_for_logging(url);
+        assert_eq!(sanitized, url);
+    }
+
+    #[test]
+    fn sanitize_url_strips_userinfo_when_path_also_has_at() {
+        // Both userinfo `@` and a later `@` in path/query: only userinfo
+        // should be replaced, the rest of the URL must survive intact.
+        let url = "https://user:secret@github.com/owner/repo?email=foo@bar.com";
+        let sanitized = sanitize_url_for_logging(url);
+        assert!(!sanitized.contains("secret"));
+        assert!(!sanitized.contains("user:"));
+        assert!(sanitized.contains("***@github.com/owner/repo?email=foo@bar.com"));
+    }
+
+    #[test]
+    fn sanitize_url_handles_authority_with_port_and_userinfo() {
+        let url = "https://user:tok@gitlab.example.com:8443/group/project.git";
+        let sanitized = sanitize_url_for_logging(url);
+        assert!(!sanitized.contains("tok"));
+        assert!(sanitized.contains("***@gitlab.example.com:8443/group/project.git"));
     }
 }
