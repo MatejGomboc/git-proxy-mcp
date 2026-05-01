@@ -324,6 +324,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the JSON-RPC method names `initialize` and `notifications/initialized`
   are spec identifiers and stay American — backticked in narrative
   text.
+- **`docs/AI_WORKFLOW.md` "Use Shallow Clone for Large Repos" tip
+  recommended `repo_clone` for monorepos** without mentioning that
+  truly large repos won't fit in a single MCP response and need
+  Tier 2 (`repo_clone_start` + `repo_clone_chunk`). Reframed: shallow +
+  sparse for medium repos, Tier 2 for everything that doesn't fit.
+- **`helper_script.py` top-of-file docstring usage line for `bundle`
+  was missing `[head_ref]`.** The runtime `Usage:` string printed when
+  the user runs `bundle` with too few arguments correctly shows
+  `bundle <repo_dir> <since_commit> [head_ref] [output_file]`, and
+  `create_bundle` accepts both optional arguments, but the module
+  docstring at the top of the script only listed `[output_file]` —
+  inconsistent. Added `[head_ref]` so the module docstring matches the
+  runtime help and the `Examples:` block (which already showed
+  `bundle ./my-repo abc123def HEAD`).
+- **`helper_script.py` `show_info` reported `archive_b64_length` for
+  `repo_clone` results but no equivalent size for `repo_pull`.** The
+  function now also reports `files_archive_b64_length` when a
+  `files_archive` field is present, so `info` output is symmetric
+  between the two result shapes.
 - Dependabot CI failures caused by orphaned `dtolnay/rust-toolchain` SHAs. The
   previous `# stable` pin pointed to a commit that fell off the remote when
   the rolling `stable` branch advanced, breaking Dependabot's

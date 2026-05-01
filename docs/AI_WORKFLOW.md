@@ -354,6 +354,9 @@ Total: 1 MCP call for all changes
 
 ### 1. Use Shallow Clone for Large Repos
 
+For medium-sized repositories, combine `depth: 1` with `sparse` patterns
+to keep the single MCP response small:
+
 ```json
 {
   "name": "repo_clone",
@@ -364,6 +367,11 @@ Total: 1 MCP call for all changes
   }
 }
 ```
+
+For repositories that genuinely don't fit in a single response, switch
+to Tier 2 (`repo_clone_start` + `repo_clone_chunk`), which streams the
+archive in 1 MiB chunks and supports resume on interruption — see the
+"Tier 2: Chunked Streaming" section in `README.md` for the protocol.
 
 ### 2. Bundle Multiple Commits
 

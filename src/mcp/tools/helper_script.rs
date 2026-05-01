@@ -48,7 +48,7 @@ JSON parsing, base64 decoding, and archive extraction automatically.
 
 Usage:
     python git_proxy_helper.py extract <result_json> [output_dir]
-    python git_proxy_helper.py bundle <repo_dir> <since_commit> [output_file]
+    python git_proxy_helper.py bundle <repo_dir> <since_commit> [head_ref] [output_file]
     python git_proxy_helper.py info <result_json>
 
 Examples:
@@ -229,6 +229,7 @@ def show_info(json_path: str) -> dict:
         info['archive_b64_length'] = len(data['archive'])
     if 'files_archive' in data:
         info['has_files_archive'] = True
+        info['files_archive_b64_length'] = len(data['files_archive'])
     if 'diff' in data:
         info['has_diff'] = True
         info['diff_lines'] = data['diff'].count('\n')
