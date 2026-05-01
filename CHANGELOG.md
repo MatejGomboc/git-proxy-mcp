@@ -83,6 +83,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `$CARGO_LLVM_COV_TARGET_DIR` (the workspace target directory exposed by
   current cargo-llvm-cov) and switches `--export-prefix` to its non-deprecated
   `--sh` alias.
+- **LFS endpoint URL incorrectly stripped `.git` suffix** — `derive_lfs_url`
+  in `src/git2_ops/lfs.rs` was calling `trim_end_matches(".git")` before
+  appending `/info/lfs`. GitHub's LFS service is mounted at
+  `<repo>.git/info/lfs/objects/batch`; without `.git`, the request reaches
+  GitHub's web frontend instead and gets a 422 + HTML response, causing
+  `lfs_failed += 1` for every LFS pointer. Removed the strip — the URL is
+  now passed through verbatim, matching the canonical `git-lfs` client
+  behaviour. Existing `*_no_git_suffix` tests still pass (those URLs never
+  had a suffix to begin with); the four tests that asserted the stripped
+  form have been updated to expect the correct preserved form.
 
 ### Security
 

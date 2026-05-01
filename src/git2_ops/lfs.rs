@@ -821,7 +821,12 @@ impl LfsClient {
 
 /// Derive LFS server URL from git repository URL.
 ///
-/// For GitHub/GitLab, the LFS URL is typically: `{repo_url}/info/lfs`
+/// The LFS endpoint is `<repo_url>/info/lfs` with the repo URL preserved
+/// verbatim — including any `.git` suffix. GitHub in particular requires
+/// the `.git` to remain (e.g. `https://github.com/o/r.git/info/lfs/...`);
+/// stripping it routes the request to the web frontend, which returns a
+/// 422 + HTML page instead of an LFS batch JSON response. This matches
+/// the canonical `git-lfs` client behaviour.
 fn derive_lfs_url(repo_url: &str) -> Result<String, Git2Error> {
     // Handle SSH URLs: git@github.com:owner/repo.git -> https://github.com/owner/repo.git
     let https_url = if repo_url.starts_with("git@") {
@@ -839,11 +844,8 @@ fn derive_lfs_url(repo_url: &str) -> Result<String, Git2Error> {
         )));
     };
 
-    // Remove .git suffix if present
-    let base = https_url.trim_end_matches(".git");
-
-    // LFS endpoint
-    Ok(format!("{base}/info/lfs"))
+    // LFS endpoint — preserve any `.git` suffix in https_url.
+    Ok(format!("{https_url}/info/lfs"))
 }
 
 #[cfg(test)]
@@ -908,20 +910,25 @@ mod tests {
 
     #[test]
     fn derive_lfs_url_https() {
+        // The `.git` suffix must be preserved — GitHub returns 422 + HTML
+        // if we strip it.
         let url = derive_lfs_url("https://github.com/owner/repo.git").unwrap();
-        assert_eq!(url, "https://github.com/owner/repo/info/lfs");
+        assert_eq!(url, "https://github.com/owner/repo.git/info/lfs");
     }
 
     #[test]
     fn derive_lfs_url_https_no_git_suffix() {
+        // Already lacks `.git` — passed through verbatim. The user is
+        // responsible for providing a URL their LFS server accepts.
         let url = derive_lfs_url("https://github.com/owner/repo").unwrap();
         assert_eq!(url, "https://github.com/owner/repo/info/lfs");
     }
 
     #[test]
     fn derive_lfs_url_ssh() {
+        // SSH `.git` is preserved through the SSH-to-HTTPS rewrite.
         let url = derive_lfs_url("git@github.com:owner/repo.git").unwrap();
-        assert_eq!(url, "https://github.com/owner/repo/info/lfs");
+        assert_eq!(url, "https://github.com/owner/repo.git/info/lfs");
     }
 
     #[test]
@@ -1130,7 +1137,7 @@ mod tests {
     #[test]
     fn derive_lfs_url_http() {
         let url = derive_lfs_url("http://example.com/owner/repo.git").unwrap();
-        assert_eq!(url, "http://example.com/owner/repo/info/lfs");
+        assert_eq!(url, "http://example.com/owner/repo.git/info/lfs");
     }
 
     #[test]
@@ -1142,7 +1149,7 @@ mod tests {
     #[test]
     fn derive_lfs_url_ssh_self_hosted() {
         let url = derive_lfs_url("git@gitlab.example.com:group/project.git").unwrap();
-        assert_eq!(url, "https://gitlab.example.com/group/project/info/lfs");
+        assert_eq!(url, "https://gitlab.example.com/group/project.git/info/lfs");
     }
 
     #[test]
