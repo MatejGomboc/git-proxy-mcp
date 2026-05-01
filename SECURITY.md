@@ -1,5 +1,9 @@
 # Security Policy
 
+> **Scope of this document:** vulnerability reporting, supported versions, and what counts as a security issue.
+> For the *technical* design — threat model, architecture-level controls, and how each principle is enforced in the
+> code — see [`docs/SECURITY.md`](docs/SECURITY.md).
+
 ## Our Commitment
 
 **git-proxy-mcp** is a security-focused project designed to let AI assistants work with private
@@ -10,11 +14,13 @@ with credential callbacks that delegate to your existing Git configuration (cred
 
 ## Supported Versions
 
-| Version | Supported              |
-| ------- | ---------------------- |
-| 0.x.x   | ✅ Yes (development) |
+| Version | Supported                   |
+| ------- | --------------------------- |
+| 1.x.x   | ✅ Yes (current)            |
+| 0.x.x   | ❌ No (pre-v1, unsupported) |
 
-Once we reach v1.0, we will maintain security updates for the current major version and one previous major version.
+Security updates are maintained for the current major version. Once we reach v2.0, we will also maintain
+updates for the most recent v1.x release.
 
 ## Reporting a Vulnerability
 
