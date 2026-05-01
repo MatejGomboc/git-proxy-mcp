@@ -46,6 +46,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`reqwest` requirement bumped 0.12 → 0.13** (cargo-dependencies group).
+  reqwest 0.13 split the TLS feature: the old `rustls-tls` umbrella (which
+  0.12 expanded to `__rustls` + `webpki-roots`) no longer exists; callers
+  must opt into `rustls` plus an explicit cert source. Updated `Cargo.toml`
+  to `["rustls", "webpki-roots", "json", "blocking", "socks"]` — same
+  trust-anchor set as before (Mozilla's root store, embedded at build
+  time), so LFS HTTPS requests behave identically. None of the reqwest
+  API surface used by `LfsClient` (`Client`, `Proxy`, `NoProxy`,
+  `HeaderMap`, `StatusCode`, `Response`, `Error`) changed shape.
 - **Reproducible Rust toolchain pin** — `dtolnay/rust-toolchain` is now pinned
   to the immutable per-version branch SHA (`v1.95.0`) instead of the rolling
   `stable` branch, and `rust-toolchain.toml` is pinned to the matching version.
