@@ -405,6 +405,7 @@ Configuration file location:
 | `logging` | `level` | Log level: trace, debug, info, warn, error |
 | `logging` | `audit_log_path` | Path to audit log file |
 | `timeouts` | `request_timeout_secs` | Git operation timeout (default: 300) |
+| `limits` | `max_output_bytes` | Max combined stdout+stderr per command (default: 10 MiB) |
 | `rate_limits` | `max_burst` | Max burst operations (default: 20) |
 | `rate_limits` | `refill_rate_per_sec` | Sustained rate limit (default: 5.0) |
 | `proxy` | `url` | Proxy URL (HTTP, HTTPS, or SOCKS5) |
@@ -413,9 +414,13 @@ Configuration file location:
 | `sessions` | `max_streaming_sessions` | Max Tier 2 streaming sessions (default: 10) |
 | `sessions` | `max_repo_sessions` | Max repo tracking sessions (default: 100) |
 | `lfs` | `retry_max_attempts` | Max LFS download retries (default: 3) |
+| `lfs` | `retry_initial_backoff_ms` | Initial retry backoff in ms (default: 500) |
+| `lfs` | `retry_max_backoff_ms` | Maximum retry backoff in ms (default: 30000) |
+| `lfs` | `retry_backoff_multiplier` | Exponential backoff multiplier (default: 2.0) |
 | `lfs` | `max_object_size` | Max single LFS object size in bytes |
 | `lfs` | `max_total_size` | Max total LFS size per operation |
 | `submodules` | `max_concurrent` | Parallel submodule fetches (default: 4) |
+| `submodules` | `max_failures` | Max submodule failures before stopping (default: 3) |
 | `submodules` | `include_patterns` | Glob patterns to include |
 | `submodules` | `exclude_patterns` | Glob patterns to exclude |
 
