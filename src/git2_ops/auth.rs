@@ -195,8 +195,8 @@ fn credentials_callback(
 /// component (between `://` and the first `/` `?` or `#`); any `@` later in
 /// the URL is part of the path, query, or fragment and is left untouched.
 /// SSH-style URLs without `://` (e.g. `git@host:path`) are also returned
-/// unchanged — they do not embed passwords, and the credential lookup goes
-/// through the OS credential helper, not the URL.
+/// unchanged — SSH authentication uses keys via `ssh-agent` rather than
+/// inline URL credentials, so there's nothing to strip.
 #[must_use]
 pub fn sanitize_url_for_logging(url: &str) -> String {
     let Some(scheme_end) = url.find("://") else {
@@ -366,9 +366,13 @@ fn parse_url_for_credentials(url: &str) -> Option<(String, String)> {
     if url.starts_with("git@") {
         // Extract host from git@host:path
         let without_prefix = url.strip_prefix("git@")?;
-        let host = without_prefix.split(':').next()?;
-        // Defensive: empty host (e.g. `git@`, `git@:path`) is not a
-        // valid lookup key — `git credential fill` with `host=` would
+        // Trim whitespace so a malformed-but-recoverable host like
+        // `git@ github.com :path` resolves to `github.com` rather than
+        // ` github.com` (which would silently miss credentials).
+        let host = without_prefix.split(':').next()?.trim();
+        // Defensive: empty or whitespace-only host (e.g. `git@`,
+        // `git@:path`, `git@   :path`) is not a valid lookup key —
+        // `git credential fill` with `host=` (or whitespace) would
         // either fail or, worse, return credentials for a different
         // configured host by accident.
         if host.is_empty() {
@@ -726,6 +730,67 @@ mod tests {
     fn parse_url_for_credentials_rejects_just_git_at() {
         // `git@` alone (no host, no path) — also empty-host.
         assert!(parse_url_for_credentials("git@").is_none());
+    }
+
+    #[test]
+    fn parse_url_for_credentials_rejects_whitespace_only_ssh_host() {
+        // Whitespace-only hosts must be rejected too — `host.is_empty()`
+        // alone wouldn't catch them, so the impl trims first.
+        assert!(parse_url_for_credentials("git@   :path").is_none());
+        assert!(parse_url_for_credentials("git@\t:path").is_none());
+    }
+
+    #[test]
+    fn parse_url_for_credentials_trims_whitespace_padded_ssh_host() {
+        // A non-empty host with surrounding whitespace gets trimmed
+        // rather than passed through as `" github.com"`, which
+        // `git credential fill` would silently miss.
+        let result = parse_url_for_credentials("git@ github.com :owner/repo.git");
+        assert_eq!(
+            result,
+            Some(("https".to_string(), "github.com".to_string()))
+        );
+    }
+
+    #[test]
+    fn sanitize_url_strips_userinfo_when_fragment_also_has_at() {
+        // Combinatorial check: BOTH userinfo `@` AND a later `@` in the
+        // fragment must result in only the userinfo being stripped — the
+        // fragment must survive intact (this case wasn't covered
+        // separately by the path/query combo test).
+        let url = "https://user:secret@github.com/owner/repo#section@anchor";
+        let sanitized = sanitize_url_for_logging(url);
+        assert!(!sanitized.contains("secret"));
+        assert!(!sanitized.contains("user:"));
+        assert!(sanitized.contains("***@github.com/owner/repo#section@anchor"));
+    }
+
+    #[test]
+    fn credentials_callback_falls_through_when_no_supported_method_allowed() {
+        // The callback supports SSH_KEY, USER_PASS_PLAINTEXT, and DEFAULT
+        // credential types; if `allowed_types` contains none of these
+        // (e.g. `CredentialType::empty()` or only USERNAME / SSH_INTERACTIVE
+        // / SSH_MEMORY / SSH_CUSTOM), every branch is skipped and the
+        // function returns the fallback `git2::Error`. This is the only
+        // branch testable without a live remote — the SSH-agent and
+        // credential-helper branches depend on system state and would be
+        // flaky on CI runners without configured credentials.
+        let result = credentials_callback(
+            "https://github.com/owner/repo.git",
+            None,
+            CredentialType::empty(),
+        );
+        // `Cred` doesn't implement `Debug`, so we can't use `.unwrap_err()`
+        // here — go through `Option<E>` instead.
+        let err = result
+            .err()
+            .expect("expected error when no credential type is allowed");
+        assert!(
+            err.message()
+                .contains("no suitable credential method available"),
+            "expected fallback message, got: {}",
+            err.message()
+        );
     }
 
     #[test]
