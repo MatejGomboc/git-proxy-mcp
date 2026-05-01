@@ -38,18 +38,18 @@
 //!
 //! ## Disk-Backed Sessions
 //!
-//! For archives larger than `DISK_THRESHOLD` (default 10MB), the data is
+//! For archives larger than `DISK_THRESHOLD` (10 MiB), the data is
 //! stored in a temporary file instead of memory. This allows handling
 //! repositories larger than available RAM while only keeping the current
 //! chunk in memory.
 //!
-//! Default chunk size: 1MB (adjustable per request)
+//! Default chunk size: 1 MiB (adjustable per request, clamped to 1 KiB – 4 MiB).
 //!
 //! # Resume Support
 //!
 //! Sessions persist until:
 //! - All chunks retrieved (auto-cleanup)
-//! - Session timeout (1 hour)
+//! - Session timeout reached (default 1 hour, configurable via `sessions.timeout_secs`)
 //! - Explicit cleanup call
 //!
 //! AI can resume interrupted transfers by requesting missing chunks.
@@ -63,13 +63,13 @@ use serde::{Deserialize, Serialize};
 use tempfile::NamedTempFile;
 use tracing::{debug, info, warn};
 
-/// Default chunk size: 1MB (before base64 encoding)
+/// Default chunk size: 1 MiB (before base64 encoding).
 pub const DEFAULT_CHUNK_SIZE: usize = 1024 * 1024;
 
-/// Maximum chunk size: 4MB
+/// Maximum chunk size: 4 MiB.
 pub const MAX_CHUNK_SIZE: usize = 4 * 1024 * 1024;
 
-/// Threshold for disk-backed sessions: 10MB
+/// Threshold for disk-backed sessions: 10 MiB.
 /// Archives larger than this are stored in temp files instead of memory.
 pub const DISK_THRESHOLD: usize = 10 * 1024 * 1024;
 
@@ -153,7 +153,7 @@ pub struct StreamingSession {
     /// Session ID for retrieval
     pub id: String,
 
-    /// Repository URL (sanitized for display)
+    /// Repository URL (sanitised for display)
     pub url: String,
 
     /// Branch that was cloned
@@ -184,7 +184,7 @@ impl StreamingSession {
     ///
     /// # Errors
     ///
-    /// Returns an error if disk-backed storage fails to initialize
+    /// Returns an error if disk-backed storage fails to initialise
     /// (e.g., temp file creation fails).
     pub fn new(
         id: String,
@@ -360,14 +360,14 @@ impl StreamingSessionManager {
 
     /// Create a new streaming session.
     ///
-    /// For archives larger than `DISK_THRESHOLD` (10MB), the data is stored
+    /// For archives larger than `DISK_THRESHOLD` (10 MiB), the data is stored
     /// in a temp file instead of memory to reduce memory pressure.
     ///
     /// # Errors
     ///
     /// Returns an error if:
     /// - The maximum number of sessions is reached
-    /// - Disk-backed storage initialization fails (temp file creation)
+    /// - Disk-backed storage initialisation fails (temp file creation)
     #[allow(clippy::significant_drop_tightening)]
     pub fn create_session(
         &self,

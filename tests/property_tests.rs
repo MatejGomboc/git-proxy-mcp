@@ -6,8 +6,8 @@
 //!
 //! - URL sanitisation (must never leak credentials regardless of input shape)
 //! - URL validation (rejects/accepts must be consistent)
-//! - LFS pointer detection (heuristic must not panic on adversarial bytes)
-//! - `.gitmodules` parsing (must not panic on garbage input)
+//! - LFS pointer detection and parsing (must not panic on adversarial bytes,
+//!   must round-trip well-formed inputs)
 
 use git_proxy_mcp::git2_ops::auth::{sanitize_url_for_logging, validate_url};
 use git_proxy_mcp::git2_ops::lfs::{is_lfs_pointer, parse_lfs_pointer};

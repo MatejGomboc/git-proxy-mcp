@@ -9,10 +9,15 @@ Requires:
     - TEST_REPO_URL environment variable (private test fixture repo)
     - git credentials configured (for private repo access)
 
-Test fixture repo (git-proxy-mcp-test-dummy) has:
-    - 2 commits, 2 tags (v0.1.0, v0.2.0)
-    - 5 files: README.md, src/main.rs, src/lib.rs, docs/DESIGN.md, docs/pixel.png
-    - v0.1.0 -> v0.2.0 diff: 2 files changed (src/lib.rs, docs/DESIGN.md)
+Test fixture repo (git-proxy-mcp-test-dummy) layout - see
+`tests/integration/rebuild_fixture.py` for the canonical source:
+
+    - 5 commits, 2 tags (v0.1.0 = commit 1, v0.2.0 = commit 2)
+    - Commit 3 adds 40+ generated data files
+    - Commit 4 renames `docs/DESIGN.md` -> `docs/ARCHITECTURE.md`
+    - Commit 5 adds an LFS-tracked binary `docs/large.bin`
+      (via `*.bin filter=lfs` in `.gitattributes`)
+    - 45+ source files + 1 submodule total
 """
 
 import base64

@@ -15,8 +15,13 @@
 //!
 //! ## Tier 2 (Chunked Streaming)
 //!
+//! Chunk-related handlers (`chunk`, `cancel`, `status`) all live in
+//! [`repo_clone_chunk`] but are exposed as separate MCP tools:
+//!
 //! - [`repo_clone_start`] — Start a chunked clone, returns session info
 //! - [`repo_clone_chunk`] — Get a chunk from a streaming session
+//! - [`repo_clone_status`](repo_clone_chunk::handle_repo_clone_status) — Check progress and resume state of a streaming session
+//! - [`repo_clone_cancel`](repo_clone_chunk::handle_repo_clone_cancel) — Cancel and clean up a streaming session
 //!
 //! ## Utilities
 //!
@@ -27,7 +32,7 @@
 //! All tool handlers follow the security principles:
 //! - Credentials never leave the user's PC
 //! - No source files written to disk (bare repos only)
-//! - All responses are sanitized for credential leakage
+//! - All responses are sanitised for credential leakage
 
 pub mod helper_script;
 pub mod repo_clone;

@@ -212,7 +212,7 @@ pub struct TarResult {
 /// - The commit cannot be found
 /// - The tree cannot be retrieved
 /// - The tree walk fails
-/// - The tar archive cannot be finalized
+/// - The tar archive cannot be finalised
 ///
 /// # Memory
 ///
@@ -249,7 +249,7 @@ pub fn create_tar_from_tree(repo: &Repository, commit_id: Oid) -> Result<TarResu
 /// - The commit cannot be found
 /// - The tree cannot be retrieved
 /// - The tree walk fails
-/// - The tar archive cannot be finalized
+/// - The tar archive cannot be finalised
 #[allow(clippy::too_many_lines)] // Tree walk + tar creation is naturally verbose
 pub fn create_tar_from_tree_with_options(
     repo: &Repository,

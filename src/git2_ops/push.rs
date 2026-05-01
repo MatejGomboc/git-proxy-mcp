@@ -32,7 +32,7 @@ pub struct PushResult {
     pub branch: String,
     /// The commit ID that was pushed
     pub commit: String,
-    /// Remote URL (sanitized for display)
+    /// Remote URL (sanitised for display)
     pub remote_url: String,
 }
 

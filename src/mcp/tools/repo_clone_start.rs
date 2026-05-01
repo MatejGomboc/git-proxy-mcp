@@ -24,7 +24,7 @@
 //!
 //! # Memory Model
 //!
-//! For archives larger than 10MB, data is stored in a temp file instead
+//! For archives larger than 10 MiB, data is stored in a temp file instead
 //! of memory (disk-backed storage). The benefits are:
 //! - O(chunk size) memory instead of O(archive size)
 //! - Progress tracking via chunk retrieval
@@ -61,7 +61,7 @@ pub struct RepoCloneStartArgs {
     #[serde(default)]
     pub sparse: Option<Vec<String>>,
 
-    /// Chunk size in bytes (default: 1MB, max: 4MB)
+    /// Chunk size in bytes (default: 1 MiB, range: 1 KiB – 4 MiB after clamping).
     #[serde(default)]
     pub chunk_size: Option<usize>,
 

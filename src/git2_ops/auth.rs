@@ -188,7 +188,7 @@ fn credentials_callback(
     ))
 }
 
-/// Sanitize a URL for logging by removing any embedded credentials.
+/// Sanitise a URL for logging by removing any embedded credentials.
 ///
 /// URLs like `https://user:token@github.com/...` become `https://***@github.com/...`
 #[must_use]

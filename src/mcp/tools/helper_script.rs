@@ -3,18 +3,20 @@
 //! This tool returns a Python helper script that AI assistants can save and use
 //! to simplify working with git-proxy-mcp responses. The script handles:
 //!
-//! - Parsing nested MCP JSON responses
+//! - Parsing nested MCP JSON responses (handles the `[{"type":"text","text":"…"}]` wrapper)
 //! - Base64 decoding of archives
 //! - Extracting tar.gz archives to directories
 //! - Creating git bundles for pushing changes
+//! - Inspecting result metadata without extracting
 //!
 //! # Usage by AI
 //!
 //! 1. Call `helper_script` tool once per session
 //! 2. Save the returned script as `git_proxy_helper.py`
 //! 3. Use it for all subsequent operations:
-//!    - `python git_proxy_helper.py extract <result.json> <output_dir>`
-//!    - `python git_proxy_helper.py bundle <repo_dir> <since_commit>`
+//!    - `python git_proxy_helper.py extract <result.json> [output_dir]`
+//!    - `python git_proxy_helper.py bundle <repo_dir> <since_commit> [head_ref] [output_file]`
+//!    - `python git_proxy_helper.py info <result.json>`
 
 use serde::Serialize;
 
@@ -46,7 +48,7 @@ JSON parsing, base64 decoding, and archive extraction automatically.
 
 Usage:
     python git_proxy_helper.py extract <result_json> [output_dir]
-    python git_proxy_helper.py bundle <repo_dir> <since_commit> [output_file]
+    python git_proxy_helper.py bundle <repo_dir> <since_commit> [head_ref] [output_file]
     python git_proxy_helper.py info <result_json>
 
 Examples:
@@ -106,8 +108,8 @@ def extract_archive(json_path: str, output_dir: str = ".") -> dict:
     """
     data = parse_mcp_result(json_path)
 
-    # Get the archive field (repo_clone uses 'archive', repo_pull uses 'changed_files_archive')
-    archive_b64 = data.get('archive') or data.get('changed_files_archive')
+    # Get the archive field (repo_clone uses 'archive', repo_pull uses 'files_archive')
+    archive_b64 = data.get('archive') or data.get('files_archive')
 
     if not archive_b64:
         raise ValueError("No archive found in result. Is this a clone/pull result?")
@@ -208,9 +210,12 @@ def show_info(json_path: str) -> dict:
 
     info = {}
 
-    # Common fields
+    # Common fields. `base_commit`/`new_commit` are repo_pull,
+    # `base_commit`/`head_commit` are repo_diff, `commit` is repo_clone /
+    # repo_clone_start / repo_push, and the skipped/lfs/submodule counters
+    # appear on repo_clone and repo_clone_start.
     for key in ['commit', 'branch', 'file_count', 'archive_size',
-                'new_commit', 'old_commit', 'up_to_date',
+                'base_commit', 'new_commit', 'head_commit', 'up_to_date',
                 'skipped_by_filter', 'skipped_binary', 'skipped_too_large',
                 'lfs_resolved', 'lfs_failed',
                 'submodules_included', 'submodules_failed',
@@ -222,8 +227,9 @@ def show_info(json_path: str) -> dict:
     if 'archive' in data:
         info['has_archive'] = True
         info['archive_b64_length'] = len(data['archive'])
-    if 'changed_files_archive' in data:
-        info['has_changed_files_archive'] = True
+    if 'files_archive' in data:
+        info['has_files_archive'] = True
+        info['files_archive_b64_length'] = len(data['files_archive'])
     if 'diff' in data:
         info['has_diff'] = True
         info['diff_lines'] = data['diff'].count('\n')
@@ -325,9 +331,9 @@ pub fn handle_helper_script() -> HelperScriptResult {
         script: HELPER_SCRIPT.to_string(),
         filename: "git_proxy_helper.py".to_string(),
         usage: "Save script and use:\n  \
-            python git_proxy_helper.py extract <result.json> <output_dir>  # Extract clone/pull\n  \
-            python git_proxy_helper.py bundle <repo_dir> <since_commit>    # Create push bundle\n  \
-            python git_proxy_helper.py info <result.json>                  # Show result info"
+            python git_proxy_helper.py extract <result.json> [output_dir]   # Extract clone/pull\n  \
+            python git_proxy_helper.py bundle <repo_dir> <since_commit>     # Create push bundle\n  \
+            python git_proxy_helper.py info <result.json>                   # Show result info"
             .to_string(),
         version: "1.1.0".to_string(),
     }
@@ -361,5 +367,43 @@ mod tests {
         // Verify the script handles the MCP wrapper format
         assert!(result.script.contains("if 'text' in data[0]"));
         assert!(result.script.contains("json.loads(data[0]['text'])"));
+    }
+
+    #[test]
+    fn helper_script_uses_correct_repo_pull_archive_field() {
+        // Regression guard: the script must look up `files_archive`
+        // (the actual `RepoPullResult` field name) and not the historical
+        // typo `changed_files_archive` it used to look for.
+        let result = handle_helper_script();
+        assert!(
+            result.script.contains("data.get('files_archive')"),
+            "script must look up the actual repo_pull archive field name"
+        );
+        assert!(
+            !result.script.contains("changed_files_archive"),
+            "script must not reference the obsolete `changed_files_archive` key"
+        );
+    }
+
+    #[test]
+    fn helper_script_show_info_uses_real_commit_field_names() {
+        // Regression guard: `show_info` used to enumerate `old_commit`,
+        // a key no MCP tool has ever returned. The real commit fields
+        // are `commit` (repo_clone / repo_clone_start / repo_push),
+        // `base_commit` + `new_commit` (repo_pull), and
+        // `base_commit` + `head_commit` (repo_diff).
+        let result = handle_helper_script();
+        assert!(
+            !result.script.contains("'old_commit'"),
+            "script must not reference the non-existent `old_commit` key"
+        );
+        assert!(
+            result.script.contains("'base_commit'"),
+            "script must enumerate `base_commit` (repo_pull / repo_diff)"
+        );
+        assert!(
+            result.script.contains("'head_commit'"),
+            "script must enumerate `head_commit` (repo_diff)"
+        );
     }
 }

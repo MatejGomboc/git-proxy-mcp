@@ -57,7 +57,7 @@ pub struct RepoPushResult {
     /// Whether force push was used
     pub force: bool,
 
-    /// Remote URL (sanitized)
+    /// Remote URL (sanitised)
     pub remote_url: String,
 
     /// Hint for AI assistants on how to create bundles

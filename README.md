@@ -150,11 +150,16 @@ Stream a repository to the AI's workspace (small-to-medium repos).
 - `max_file_size` (number, bytes) — skip files exceeding the size limit
 - `resolve_lfs` (bool) — fetch and substitute LFS pointer files with their actual content
 - `include_submodules` (bool) — recursively fetch submodules
-- `submodule_depth` (number) — submodule recursion depth (unlimited by default, mirroring `git clone --recurse-submodules`)
+- `submodule_depth` (number) — submodule recursion depth. Omit for unlimited (mirroring
+  `git clone --recurse-submodules`). `1` = top-level submodules only; `0` = skip submodules
+  entirely (overriding `include_submodules: true`).
 - `submodule_include` (array of glob patterns) — only fetch submodules matching at least one pattern
 - `submodule_exclude` (array of glob patterns) — skip submodules matching any pattern (takes precedence over include)
 
-**Response:** Base64-encoded tar.gz with commit SHA and file count.
+**Response:** Base64-encoded tar.gz `archive`, `commit` SHA, `branch`, `file_count`, `archive_size`
+(bytes, before base64), and a `hint` string pointing at `helper_script` for extraction.
+Optional counters appear only when non-zero: `skipped_by_filter`, `skipped_binary`,
+`skipped_too_large`, `lfs_resolved`, `lfs_failed`, `submodules_included`, `submodules_failed`.
 
 #### `repo_push`
 
@@ -172,7 +177,8 @@ Push a git bundle from AI's workspace to remote.
 }
 ```
 
-**Response:** Pushed commit SHA and branch name.
+**Response:** `branch`, pushed `commit` SHA, `force` flag (echoed back), sanitised `remote_url`,
+and a `hint` string explaining how to create bundles for follow-up pushes.
 
 ### Tier 2: Chunked Streaming Tools (Large Repos)
 
@@ -205,7 +211,9 @@ Start a chunked clone session.
 - `submodule_include` (array of glob patterns)
 - `submodule_exclude` (array of glob patterns)
 
-**Response:** Session ID, total chunks, total size.
+**Response:** `session_id`, `total_chunks`, `total_size` (bytes, total archive size before base64),
+`chunk_size` (bytes, the negotiated per-chunk size after clamping), `commit`, `branch`, `file_count`,
+and a `hint` string. The same optional skipped/LFS/submodule counters as `repo_clone` appear when non-zero.
 
 #### `repo_clone_chunk`
 
@@ -221,7 +229,9 @@ Get a chunk from a streaming session.
 }
 ```
 
-**Response:** Base64-encoded chunk data, is_last flag, next_missing_chunk (for resume).
+**Response:** Base64-encoded `data`, the `chunk_index` (echoed back), `chunk_size` (this chunk's
+size in bytes before base64), `is_last` flag, and `next_missing_chunk` (omitted when no chunks
+remain — used to resume after an interrupted transfer).
 
 #### `repo_clone_status`
 
@@ -236,7 +246,8 @@ Check progress and resume state of a chunked clone session.
 }
 ```
 
-**Response:** Total/delivered chunks, next missing chunk, progress percentage, completion status.
+**Response:** `session_id` (echoed back), `total_chunks`, `delivered_chunks`, `next_missing_chunk`
+(null when all chunks have been retrieved), `progress_percent` (0.0–100.0), and `is_complete` flag.
 
 #### `repo_clone_cancel`
 
@@ -271,7 +282,8 @@ Sync new changes from remote to AI's workspace.
 ```
 
 **Response:** Unified `diff`, base64 tar.gz of changed/added files (`files_archive`), `changed_files` list with per-file change types,
-`deleted_files` list, `base_commit` and `new_commit` SHAs, change `stats`, and `up_to_date` flag.
+`deleted_files` list, `base_commit` and `new_commit` SHAs, change `stats`, `up_to_date` flag, and a
+`hint` string pointing at `helper_script` for extracting `files_archive`.
 
 #### `repo_diff`
 
@@ -288,7 +300,9 @@ Get diff between two commits.
 }
 ```
 
-**Response:** Diff content with stats.
+**Response:** Unified `diff` text, `stats` (additions/deletions/files-changed counts), and the
+fully-resolved `base_commit` and `head_commit` SHAs (so the AI can cache the comparison without
+re-resolving the original refs).
 
 #### `repo_refs`
 
@@ -303,7 +317,8 @@ List remote branches and tags.
 }
 ```
 
-**Response:** List of refs with commit SHAs.
+**Response:** `branches` and `tags` lists (each entry has the ref name and commit SHA),
+`default_branch` (e.g. `main` or `master`, taken from the remote HEAD), and `total_refs` count.
 
 ### Utilities
 
@@ -325,6 +340,14 @@ Get a Python helper script for processing results (decoding base64, extracting t
 ## Installation
 
 ### Prerequisites
+
+#### Git CLI
+
+The server invokes `git` for two operations: `git credential fill` (to read your stored
+credentials via the OS credential helper — see `src/git2_ops/auth.rs`) and `git bundle unbundle`
+(to apply a `repo_push` payload before the authenticated push — see `src/git2_ops/push.rs`).
+Any reasonably modern git (2.x) on `PATH` works; bundles produced by git ≥ 2.53 (with the
+`# v3 git bundle` header) are also accepted.
 
 #### Rust toolchain
 
@@ -397,6 +420,16 @@ Configuration file location:
         "level": "warn",
         "audit_log_path": "~/.git-proxy-mcp/audit.log"
     },
+    "timeouts": {
+        "request_timeout_secs": 300
+    },
+    "limits": {
+        "max_output_bytes": 10485760
+    },
+    "rate_limits": {
+        "max_burst": 20,
+        "refill_rate_per_sec": 5.0
+    },
     "proxy": {
         "url": "http://proxy.example.com:8080",
         "no_proxy": "*.internal.com,localhost"
@@ -416,24 +449,26 @@ Configuration file location:
 }
 ```
 
+For a fully-populated example showing every section and option, see [`config/example-config.json`](config/example-config.json).
+
 ### Configuration Options
 
 | Section | Option | Description |
 |---------|--------|-------------|
-| `git_identity` | `name` | Name for AI-assisted commits (e.g., "Claude AI") |
-| `git_identity` | `email` | Email for AI-assisted commits |
+| `git_identity` | `name` | Name for AI-assisted commits, e.g. "Claude AI" (default: null — AI sets its own identity) |
+| `git_identity` | `email` | Email for AI-assisted commits (default: null) |
 | `security` | `allow_force_push` | Allow force pushes (default: false) |
-| `security` | `protected_branches` | Branches that block force push |
-| `security` | `repo_allowlist` | Only allow these repo patterns |
-| `security` | `repo_blocklist` | Block these repo patterns |
-| `logging` | `level` | Log level: trace, debug, info, warn, error |
-| `logging` | `audit_log_path` | Path to audit log file |
+| `security` | `protected_branches` | Branches that block force push and deletion. Default: empty list, which the server treats as "use the built-in safe set" (`main`, `master`, `develop`); set to any non-empty list to override the fallback. |
+| `security` | `repo_allowlist` | Only allow these repo patterns (default: null — allowlist mode disabled) |
+| `security` | `repo_blocklist` | Block these repo patterns (default: null — no blocklist) |
+| `logging` | `level` | Log level: trace, debug, info, warn, error (default: `warn`) |
+| `logging` | `audit_log_path` | Path to audit log file (default: null — audit logging disabled) |
 | `timeouts` | `request_timeout_secs` | Git operation timeout (default: 300) |
 | `limits` | `max_output_bytes` | Max combined stdout+stderr per command (default: 10 MiB) |
 | `rate_limits` | `max_burst` | Max burst operations (default: 20) |
 | `rate_limits` | `refill_rate_per_sec` | Sustained rate limit (default: 5.0) |
-| `proxy` | `url` | Proxy URL (HTTP, HTTPS, or SOCKS5) |
-| `proxy` | `no_proxy` | Comma-separated hosts to bypass proxy |
+| `proxy` | `url` | Proxy URL — HTTP, HTTPS, or SOCKS5 (default: null — no proxy, falls back to git's `http.proxy`) |
+| `proxy` | `no_proxy` | Comma-separated hosts to bypass proxy (default: null) |
 | `sessions` | `timeout_secs` | Session inactivity timeout (default: 3600) |
 | `sessions` | `max_streaming_sessions` | Max Tier 2 streaming sessions (default: 10) |
 | `sessions` | `max_repo_sessions` | Max repo tracking sessions (default: 100) |
@@ -441,12 +476,12 @@ Configuration file location:
 | `lfs` | `retry_initial_backoff_ms` | Initial retry backoff in ms (default: 500) |
 | `lfs` | `retry_max_backoff_ms` | Maximum retry backoff in ms (default: 30000) |
 | `lfs` | `retry_backoff_multiplier` | Exponential backoff multiplier (default: 2.0) |
-| `lfs` | `max_object_size` | Max single LFS object size in bytes |
-| `lfs` | `max_total_size` | Max total LFS size per operation |
+| `lfs` | `max_object_size` | Max single LFS object size in bytes (default: null — unlimited; oversized objects are kept as pointer files) |
+| `lfs` | `max_total_size` | Max total LFS size per operation (default: null — unlimited) |
 | `submodules` | `max_concurrent` | Parallel submodule fetches (default: 4) |
 | `submodules` | `max_failures` | Max submodule failures before stopping (default: 3) |
-| `submodules` | `include_patterns` | Glob patterns to include |
-| `submodules` | `exclude_patterns` | Glob patterns to exclude |
+| `submodules` | `include_patterns` | Glob patterns to include (default: null — all submodules allowed) |
+| `submodules` | `exclude_patterns` | Glob patterns to exclude (default: null — nothing excluded) |
 
 ---
 

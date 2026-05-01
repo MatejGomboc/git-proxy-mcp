@@ -27,7 +27,16 @@
 //! - Memory usage: O(chunk size)
 //! - Resume interrupted transfers
 //! - Progress reporting
-//! - Tools: `repo_clone_start`, `repo_clone_chunk`, `repo_clone_cancel`
+//! - Tools: `repo_clone_start`, `repo_clone_chunk`, `repo_clone_status`, `repo_clone_cancel`
+//!
+//! ## Other tools
+//!
+//! Independent of the Tier 1 / Tier 2 split:
+//!
+//! - `repo_pull` — Incremental sync since a known commit
+//! - `repo_diff` — Diff between two commits
+//! - `repo_refs` — List remote branches and tags
+//! - `helper_script` — Get a Python helper for parsing tool responses
 //!
 //! # Credential Handling
 //!
