@@ -53,6 +53,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   check (`.github/scripts/check-toolchain-pin.sh`) fails the quick-checks job
   if the action pin and the `rust-toolchain.toml` channel disagree, so future
   toolchain bumps must update both together.
+- **LFS error diagnostics** — three small observability improvements to make
+  LFS resolution failures actionable from CI logs alone:
+  1. `LfsClient::new` now logs a `WARN` if no credentials were provided
+     (private repos will return 401/403 — easier to spot than the eventual
+     batch-API error).
+  2. The non-retryable batch-POST error path now reads the response body
+     (which GitHub/GitLab use for structured error messages such as
+     "Bad credentials" or "Repository not found") and includes it both in
+     a `WARN` log line and the returned error string. The Authorization
+     header is in the request, never the response — so this never echoes
+     the PAT.
+  3. `tests/integration/test_mcp_tools.py` now dumps the **full** server
+     log on test-suite failure instead of `tail -50`, so the LFS batch
+     status code and body (logged at the *start* of each clone, before
+     any progress noise) are visible in the GitHub Actions step output.
 
 ### Fixed
 
