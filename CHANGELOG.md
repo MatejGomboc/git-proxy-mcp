@@ -46,6 +46,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`get_credentials_for_url` now traces each subprocess failure mode
+  at debug level.** Previously, every error path
+  (`spawn` fail, stdin write fail, wait fail, non-zero exit, non-UTF-8
+  stdout, missing `username`/`password` in helper output) was collapsed
+  silently to `None` via `.ok().and_then(...)?`. The caller (LFS)
+  reported "LFS client created without credentials" without the user
+  being able to tell whether `git` was missing from PATH, no credential
+  helper was configured, or the helper ran and returned nothing useful.
+  Now `RUST_LOG=debug` makes "no credentials" diagnosable from the
+  logs alone. No change to the function's `Option<(String, String)>`
+  return shape.
 - **Config-drift audit** — comprehensive cross-reference of every config
   option across `src/config/settings.rs` (canonical), `config/example-config.json`
   (full reference), and the README configuration table. All 26
@@ -189,6 +200,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`sanitize_url_for_logging` mangled URLs with `@` outside the
+  authority component.** The function found the FIRST `@` anywhere in
+  the URL and treated everything between `://` and that `@` as
+  userinfo, replacing it with `***`. So a URL like
+  `https://github.com/owner/repo?email=foo@bar.com` rendered as
+  `https://***@bar.com` — wrong host, missing path, missing query
+  prefix. Same shape for `@` in path or fragment. Per RFC 3986, the
+  userinfo `@` separator can only appear in the authority component
+  (between `://` and the first `/` `?` or `#`), so the fix scans only
+  that substring for `@`. Not a credential leak — the buggy code
+  over-stripped, hiding info rather than exposing it — but it produced
+  misleading log output that could mask which repository was being
+  accessed during diagnostics, and a crafted URL could exploit it for
+  minor log spoofing. Five new regression tests cover `@` in query /
+  path / fragment, `@` in both userinfo AND path simultaneously, and
+  authority with port.
+- **`parse_url_for_credentials` accepted SSH URLs with empty host.**
+  Inputs like `git@:path` or `git@` (no host) went through
+  `split(':').next()` and returned `Some(("https", ""))`, which then
+  drove `git credential fill` with `host=` — that either fails or,
+  worse, accidentally matches a default-configured host the user
+  didn't intend. Added a non-empty check before returning, plus two
+  regression tests. A short docstring note also clarifies that only
+  canonical `git@host:path` SSH URLs are recognised by that branch;
+  `gitea@`, `gerrit@`, and `ssh://` URLs go through `Url::parse`.
 - **CI Rust cache key keyed on a gitignored file.** Every Rust cache
   step in `ci_pr.yml`, `ci_main.yml`, and `ci_integration.yml` keyed
   on `hashFiles('**/Cargo.lock')`, but the project's `.gitignore`
