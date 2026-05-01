@@ -47,7 +47,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Reproducible Rust toolchain pin** — `dtolnay/rust-toolchain` is now pinned
-  to the immutable per-version branch SHA (`v1.100.0`) instead of the rolling
+  to the immutable per-version branch SHA (`v1.95.0`) instead of the rolling
   `stable` branch, and `rust-toolchain.toml` is pinned to the matching version.
   CI and local development builds now use the same compiler. A new pre-flight
   check (`.github/scripts/check-toolchain-pin.sh`) fails the quick-checks job
