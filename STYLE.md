@@ -284,4 +284,4 @@ See `CONTRIBUTING.md` § British Spelling for the full reference table.
 
 ---
 
-*Last updated: 2026-03-14*
+*Last updated: 2026-04-29*
