@@ -251,6 +251,8 @@ Cancel a streaming session (optional, auto-expires after the configured timeout)
 }
 ```
 
+**Response:** `{ "cancelled": true }` if the session existed and was removed; tool error otherwise.
+
 ### Other Tools
 
 #### `repo_pull`

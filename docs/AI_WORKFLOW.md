@@ -202,10 +202,11 @@ BUNDLE_BASE64=$(base64 -w0 /tmp/changes.bundle)
 
 ```json
 {
-  "success": true,
   "branch": "feature/add-validation",
-  "commit": "def789...",
-  "url": "https://github.com/user/my-rust-project/commit/def789..."
+  "commit": "def789abc...",
+  "force": false,
+  "remote_url": "https://github.com/user/my-rust-project",
+  "hint": "Bundle was successfully pushed to the remote."
 }
 ```
 
@@ -230,9 +231,26 @@ If someone else pushed changes:
 
 ```json
 {
-  "archive": "H4sIAAAAAAAAA+3P... (base64, only changed files)",
-  "commit": "new789...",
-  "changed": ["src/lib.rs", "Cargo.toml"]
+  "diff": "diff --git a/src/lib.rs b/src/lib.rs\n...",
+  "files_archive": "H4sIAAAAAAAAA+3P... (base64, only changed files)",
+  "changed_files": [
+    {"path": "src/lib.rs", "change_type": "modified"},
+    {"path": "Cargo.toml", "change_type": "modified"}
+  ],
+  "deleted_files": [],
+  "base_commit": "abc123def456...",
+  "new_commit": "new789...",
+  "stats": {
+    "commits": 3,
+    "files_changed": 2,
+    "files_added": 0,
+    "files_modified": 2,
+    "files_deleted": 0,
+    "insertions": 14,
+    "deletions": 3
+  },
+  "up_to_date": false,
+  "hint": "Apply the diff or extract files_archive into your local clone."
 }
 ```
 
