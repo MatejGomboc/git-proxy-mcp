@@ -126,7 +126,7 @@ jobs:
                     target/release/build/
                     target/release/.fingerprint/
                     target/release/incremental/
-                key: rust-${{ runner.os }}-${{ steps.rust-version.outputs.version }}-${{ hashFiles('**/Cargo.lock') }}
+                key: rust-${{ runner.os }}-${{ steps.rust-version.outputs.version }}-${{ hashFiles('Cargo.toml') }}
                 restore-keys: |
                     rust-${{ runner.os }}-${{ steps.rust-version.outputs.version }}-
 
@@ -165,7 +165,7 @@ jobs:
                     target/release/build/
                     target/release/.fingerprint/
                     target/release/incremental/
-                key: rust-${{ runner.os }}-${{ steps.rust-version.outputs.version }}-${{ hashFiles('**/Cargo.lock') }}
+                key: rust-${{ runner.os }}-${{ steps.rust-version.outputs.version }}-${{ hashFiles('Cargo.toml') }}
 
     # Note: the dedicated `integration` job has been merged into the
     # `coverage` job below — coverage instruments the release binary with
@@ -208,7 +208,7 @@ jobs:
                     ~/.cargo/registry/cache/
                     ~/.cargo/git/db/
                     target/
-                key: rust-coverage-${{ runner.os }}-${{ steps.rust-version.outputs.version }}-${{ hashFiles('**/Cargo.lock') }}
+                key: rust-coverage-${{ runner.os }}-${{ steps.rust-version.outputs.version }}-${{ hashFiles('Cargo.toml') }}
                 restore-keys: |
                     rust-coverage-${{ runner.os }}-${{ steps.rust-version.outputs.version }}-
 

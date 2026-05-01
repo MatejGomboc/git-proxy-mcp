@@ -46,7 +46,7 @@ jobs:
                     target/release/build/
                     target/release/.fingerprint/
                     target/release/incremental/
-                key: rust-${{ runner.os }}-${{ steps.rust-version.outputs.version }}-${{ hashFiles('**/Cargo.lock') }}
+                key: rust-${{ runner.os }}-${{ steps.rust-version.outputs.version }}-${{ hashFiles('Cargo.toml') }}
                 restore-keys: |
                     rust-${{ runner.os }}-${{ steps.rust-version.outputs.version }}-
 
