@@ -57,19 +57,34 @@ _BINARY_RE = re.compile(r"\A[A-Za-z0-9_./\-]+\Z")
 
 
 def _sanitise_binary_path(raw: str) -> str:
-    """Validate and reconstruct the binary path.
+    """Validate and constrain the binary path to trusted build outputs.
 
     The path can be overridden by the coverage workflow to point at an
-    instrumented build under `target/llvm-cov-target/`, so we must
-    accept absolute and relative paths but reject anything that could
-    smuggle shell metacharacters into the spawn argv. Reconstructing
-    via `os.path.normpath` produces a fresh string that CodeQL
-    recognises as sanitised, closing the `py/command-line-injection`
-    alert at the `subprocess.Popen` call site.
+    instrumented build under `target/llvm-cov-target/`. We allow only
+    the expected executable name in known local build directories.
     """
     if not _BINARY_RE.fullmatch(raw):
         raise ValueError(f"GIT_PROXY_MCP_BINARY contains unsafe characters: {raw!r}")
-    return os.path.normpath(raw)
+
+    candidate = os.path.realpath(os.path.abspath(os.path.normpath(raw)))
+    if os.path.basename(candidate) != "git-proxy-mcp":
+        raise ValueError(
+            f"GIT_PROXY_MCP_BINARY must point to 'git-proxy-mcp' (got {candidate!r})"
+        )
+
+    allowed_roots = (
+        os.path.realpath(os.path.abspath("./target/release")),
+        os.path.realpath(os.path.abspath("./target/llvm-cov-target")),
+    )
+    if not any(
+        candidate == root or candidate.startswith(root + os.sep) for root in allowed_roots
+    ):
+        raise ValueError(
+            "GIT_PROXY_MCP_BINARY must be under ./target/release or "
+            "./target/llvm-cov-target"
+        )
+
+    return candidate
 
 
 # BINARY can be overridden via the GIT_PROXY_MCP_BINARY env var so the
