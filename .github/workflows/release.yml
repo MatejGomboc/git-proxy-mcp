@@ -98,9 +98,8 @@ jobs:
               uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
             - name: Install Rust toolchain
-              uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+              uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # v1.95.0 (latest stable)
               with:
-                toolchain: stable
                 targets: ${{ matrix.target }}
 
             # No caching for release builds - they're one-off events triggered by

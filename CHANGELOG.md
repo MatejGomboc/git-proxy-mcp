@@ -44,6 +44,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   invasive refactoring; their behaviour is verified end-to-end by the Python
   integration tests against the real fixture repo.
 
+### Changed
+
+- **Reproducible Rust toolchain pin** — `dtolnay/rust-toolchain` is now pinned
+  to the immutable per-version branch SHA (`v1.95.0`) instead of the rolling
+  `stable` branch, and `rust-toolchain.toml` is pinned to the matching version.
+  CI and local development builds now use the same compiler. A new pre-flight
+  check (`.github/scripts/check-toolchain-pin.sh`) fails the quick-checks job
+  if the action pin and the `rust-toolchain.toml` channel disagree, so future
+  toolchain bumps must update both together.
+
+### Fixed
+
+- Dependabot CI failures caused by orphaned `dtolnay/rust-toolchain` SHAs. The
+  previous `# stable` pin pointed to a commit that fell off the remote when
+  the rolling `stable` branch advanced, breaking Dependabot's
+  `git branch --remotes --contains <sha>` lookup.
+
 ## [1.1.0] - 2026-03-14
 
 ### Added
