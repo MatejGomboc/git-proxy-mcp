@@ -144,6 +144,16 @@ Stream a repository to the AI's workspace (small-to-medium repos).
 }
 ```
 
+**Optional arguments not shown above:**
+
+- `exclude_binary` (bool) — skip binary files
+- `max_file_size` (number, bytes) — skip files exceeding the size limit
+- `resolve_lfs` (bool) — fetch and substitute LFS pointer files with their actual content
+- `include_submodules` (bool) — recursively fetch submodules
+- `submodule_depth` (number) — submodule recursion depth (unlimited by default, mirroring `git clone --recurse-submodules`)
+- `submodule_include` (array of glob patterns) — only fetch submodules matching at least one pattern
+- `submodule_exclude` (array of glob patterns) — skip submodules matching any pattern (takes precedence over include)
+
 **Response:** Base64-encoded tar.gz with commit SHA and file count.
 
 #### `repo_push`
@@ -183,6 +193,17 @@ Start a chunked clone session.
     }
 }
 ```
+
+**Optional arguments not shown above** — same semantics as the corresponding `repo_clone` arguments documented above:
+
+- `sparse` (array of paths/globs)
+- `exclude_binary` (bool)
+- `max_file_size` (number, bytes)
+- `resolve_lfs` (bool)
+- `include_submodules` (bool)
+- `submodule_depth` (number)
+- `submodule_include` (array of glob patterns)
+- `submodule_exclude` (array of glob patterns)
 
 **Response:** Session ID, total chunks, total size.
 
