@@ -302,6 +302,19 @@ Get a Python helper script for processing results (decoding base64, extracting t
 
 ### Prerequisites
 
+#### Rust toolchain
+
+- **Minimum supported Rust version (MSRV):** 1.75 — declared in `Cargo.toml` as `rust-version`.
+  Anyone consuming git-proxy-mcp as a library only needs 1.75 or newer.
+- **Pinned development version:** 1.95.0 — declared in `rust-toolchain.toml`. CI builds, releases,
+  and the `target/release/` binary you produce locally all use this exact version. Running any
+  `cargo` command inside the repo auto-installs it via rustup.
+
+This two-tier approach (loose MSRV + strict pin) gives reproducibility for our builds without forcing
+downstream consumers onto a specific point release.
+
+#### Git authentication
+
 Configure Git to authenticate without prompting:
 
 ```bash

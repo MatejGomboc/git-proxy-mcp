@@ -1,5 +1,9 @@
 # Security Model: git-proxy-mcp
 
+> **Scope of this document:** the *technical* security design — threat model, architecture-level controls,
+> and how each principle is enforced in code. For vulnerability reporting, supported versions, and what counts
+> as a security issue, see the root [`SECURITY.md`](../SECURITY.md).
+
 This document details the security design of git-proxy-mcp.
 
 ## Core Security Principles
