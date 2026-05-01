@@ -74,6 +74,12 @@ reqwest = { version = "0.12", features = ["json", "rustls-tls", "blocking", "soc
 [dev-dependencies]
 # Async testing utilities
 tokio-test = "0.4"
+# HTTP mock server for testing LFS retry/error paths against a controllable
+# fake endpoint (transient failures, 4xx/5xx mapping, download success).
+mockito = "1.6"
+# Property-based testing for parsers and validators (URL sanitisation,
+# .gitmodules parsing, glob matching).
+proptest = "1.6"
 
 [profile.release]
 opt-level = 3

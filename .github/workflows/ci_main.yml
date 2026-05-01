@@ -166,74 +166,13 @@ jobs:
                     target/release/incremental/
                 key: rust-${{ runner.os }}-${{ steps.rust-version.outputs.version }}-${{ hashFiles('**/Cargo.lock') }}
 
-    integration:
-        name: Integration Tests (private repo)
-        needs: build
-        runs-on: ubuntu-latest
-        timeout-minutes: 20
-
-        steps:
-            - name: Checkout repository
-              uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-            - name: Install Rust toolchain
-              uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
-              with:
-                toolchain: stable
-
-            - name: Get Rust version
-              id: rust-version
-              shell: bash
-              run: echo "version=$(rustc --version | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-
-            - name: Restore Rust cache
-              uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
-              with:
-                path: |
-                    ~/.cargo/bin/
-                    ~/.cargo/registry/index/
-                    ~/.cargo/registry/cache/
-                    ~/.cargo/git/db/
-                    target/.rustc_info.json
-                    target/.cargo-lock
-                    target/release/deps/
-                    target/release/build/
-                    target/release/.fingerprint/
-                    target/release/incremental/
-                key: rust-${{ runner.os }}-${{ steps.rust-version.outputs.version }}-${{ hashFiles('**/Cargo.lock') }}
-                restore-keys: |
-                    rust-${{ runner.os }}-${{ steps.rust-version.outputs.version }}-
-
-            - name: Build (release)
-              run: cargo build --release
-
-            - name: Configure git credentials
-              run: |
-                git config --global credential.helper store
-                echo "https://x-access-token:${{ secrets.TEST_REPO_PAT }}@github.com" \
-                    >> ~/.git-credentials
-                git config --global user.name "integration-test"
-                git config --global user.email "integration-test@ci.local"
-
-            - name: Install git-lfs
-              run: |
-                sudo apt-get update
-                sudo apt-get install -y git-lfs
-                git lfs install
-
-            - name: Rebuild test fixture repo
-              env:
-                TEST_REPO_URL: ${{ secrets.TEST_REPO_URL }}
-              run: python3 tests/integration/rebuild_fixture.py
-
-            - name: Run integration tests
-              env:
-                TEST_REPO_URL: ${{ secrets.TEST_REPO_URL }}
-              run: python3 tests/integration/test_mcp_tools.py
-
-            - name: Cleanup credentials
-              if: always()
-              run: rm -f ~/.git-credentials
+    # Note: the dedicated `integration` job has been merged into the
+    # `coverage` job below — coverage instruments the release binary with
+    # `-C instrument-coverage` and then runs the same Python integration
+    # tests against it, so unit and integration coverage are merged into
+    # a single Codecov report. Running both jobs separately would also
+    # cause both to call `rebuild_fixture.py` in parallel, which force-
+    # pushes to the same test repository (race condition).
 
     coverage:
         name: Code Coverage
@@ -273,8 +212,47 @@ jobs:
                 restore-keys: |
                     rust-coverage-${{ runner.os }}-${{ steps.rust-version.outputs.version }}-
 
-            - name: Generate coverage report (lcov)
-              run: cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info
+            - name: Configure git credentials for integration coverage
+              run: |
+                git config --global credential.helper store
+                echo "https://x-access-token:${{ secrets.TEST_REPO_PAT }}@github.com" \
+                    >> ~/.git-credentials
+                git config --global user.name "integration-test"
+                git config --global user.email "integration-test@ci.local"
+
+            - name: Install git-lfs for integration coverage
+              run: |
+                sudo apt-get update
+                sudo apt-get install -y git-lfs
+                git lfs install
+
+            # Run unit tests under instrumentation (no report yet) so we can
+            # later merge integration-test coverage into the same dataset.
+            - name: Run unit tests with coverage instrumentation
+              run: cargo llvm-cov --all-features --workspace --no-report
+
+            # Build the instrumented release binary so the Python integration
+            # tests can spawn it and have its execution recorded as coverage.
+            # cargo-llvm-cov's show-env exposes RUSTFLAGS, LLVM_PROFILE_FILE,
+            # and CARGO_TARGET_DIR pointing at target/llvm-cov-target/.
+            - name: Build instrumented release binary and run integration tests
+              env:
+                TEST_REPO_URL: ${{ secrets.TEST_REPO_URL }}
+              run: |
+                # Export the env vars cargo-llvm-cov needs.
+                eval "$(cargo llvm-cov show-env --export-prefix)"
+                cargo build --release
+                python3 tests/integration/rebuild_fixture.py
+                # Tell the integration tests to spawn the instrumented build.
+                GIT_PROXY_MCP_BINARY="$CARGO_TARGET_DIR/release/git-proxy-mcp" \
+                    python3 tests/integration/test_mcp_tools.py
+
+            - name: Cleanup credentials
+              if: always()
+              run: rm -f ~/.git-credentials
+
+            - name: Generate merged coverage report (lcov)
+              run: cargo llvm-cov report --lcov --output-path lcov.info
 
             - name: Generate coverage summary
               run: cargo llvm-cov report --summary-only
@@ -290,7 +268,7 @@ jobs:
 
     ci-success:
         name: CI Success
-        needs: [quick-checks, build, integration, coverage]
+        needs: [quick-checks, build, coverage]
         runs-on: ubuntu-latest
         timeout-minutes: 5
         if: ${{ !cancelled() }}
@@ -299,11 +277,11 @@ jobs:
             - name: Check if all jobs succeeded
               id: check-results
               run: |
-                # Integration and coverage are optional (may fail in forks without secrets)
+                # Coverage runs unit tests AND integration tests against the
+                # instrumented binary. It may be skipped on forks that lack
+                # the TEST_REPO_URL / TEST_REPO_PAT secrets.
                 if [[ "${{ needs.quick-checks.result }}" != "success" ]] ||
                    [[ "${{ needs.build.result }}" != "success" ]] ||
-                   [[ "${{ needs.integration.result }}" != "success" &&
-                      "${{ needs.integration.result }}" != "skipped" ]] ||
                    [[ "${{ needs.coverage.result }}" != "success" &&
                       "${{ needs.coverage.result }}" != "skipped" ]]; then
                     echo "One or more jobs failed"
