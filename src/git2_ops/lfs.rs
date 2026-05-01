@@ -1202,9 +1202,10 @@ mod tests {
     // pointing at it, and exercise the retry/error-mapping paths that are
     // otherwise only reached by talking to a real LFS endpoint.
     //
-    // The `lfs_url` is derived from the repo_url as `{repo_url_without_git}/info/lfs`,
-    // so we pass `repo_url = "{mock_server}/repo.git"` to make the derived
-    // batch endpoint `{mock_server}/repo/info/lfs/objects/batch`.
+    // The `lfs_url` is derived from the repo_url as `{repo_url}/info/lfs`
+    // (the `.git` suffix is preserved verbatim — see `derive_lfs_url` doc),
+    // so we pass `repo_url = "{mock_server}/repo.git"` and the derived batch
+    // endpoint is `{mock_server}/repo.git/info/lfs/objects/batch`.
     // ------------------------------------------------------------------
 
     /// Build a fast-retry config so transient failures don't stall the test.
@@ -1250,11 +1251,11 @@ mod tests {
         let mut server = mockito::Server::new();
         let oid = "abc123def4567890abc123def4567890abc123def4567890abc123def4567890";
         let payload = b"hello LFS world";
-        let download_path = format!("/repo/info/lfs/objects/{oid}");
+        let download_path = format!("/repo.git/info/lfs/objects/{oid}");
         let download_href = format!("{}{}", server.url(), download_path);
 
         let _batch_mock = server
-            .mock("POST", "/repo/info/lfs/objects/batch")
+            .mock("POST", "/repo.git/info/lfs/objects/batch")
             .with_status(200)
             .with_header("content-type", "application/vnd.git-lfs+json")
             .with_body(make_batch_response(
@@ -1284,18 +1285,18 @@ mod tests {
         let mut server = mockito::Server::new();
         let oid = "abc123def4567890abc123def4567890abc123def4567890abc123def4567890";
         let payload = b"recovered after retry";
-        let download_path = format!("/repo/info/lfs/objects/{oid}");
+        let download_path = format!("/repo.git/info/lfs/objects/{oid}");
         let download_href = format!("{}{}", server.url(), download_path);
 
         // First attempt: 503 Service Unavailable (transient)
         let _failing_mock = server
-            .mock("POST", "/repo/info/lfs/objects/batch")
+            .mock("POST", "/repo.git/info/lfs/objects/batch")
             .with_status(503)
             .expect(1)
             .create();
         // Second attempt: success
         let _success_mock = server
-            .mock("POST", "/repo/info/lfs/objects/batch")
+            .mock("POST", "/repo.git/info/lfs/objects/batch")
             .with_status(200)
             .with_header("content-type", "application/vnd.git-lfs+json")
             .with_body(make_batch_response(
@@ -1328,7 +1329,7 @@ mod tests {
 
         // 401 Unauthorized — not retryable.
         let _mock = server
-            .mock("POST", "/repo/info/lfs/objects/batch")
+            .mock("POST", "/repo.git/info/lfs/objects/batch")
             .with_status(401)
             .expect(1) // Must only be called once.
             .create();
@@ -1350,7 +1351,7 @@ mod tests {
 
         // All requests return 502 Bad Gateway (transient).
         let _mock = server
-            .mock("POST", "/repo/info/lfs/objects/batch")
+            .mock("POST", "/repo.git/info/lfs/objects/batch")
             .with_status(502)
             .expect(max_attempts as usize)
             .create();
@@ -1371,7 +1372,7 @@ mod tests {
 
         // No mock should be reached — the size check fails first.
         let _mock = server
-            .mock("POST", "/repo/info/lfs/objects/batch")
+            .mock("POST", "/repo.git/info/lfs/objects/batch")
             .with_status(200)
             .expect(0) // Must NOT be called.
             .create();
@@ -1415,7 +1416,7 @@ mod tests {
         );
 
         let _mock = server
-            .mock("POST", "/repo/info/lfs/objects/batch")
+            .mock("POST", "/repo.git/info/lfs/objects/batch")
             .with_status(200)
             .with_header("content-type", "application/vnd.git-lfs+json")
             .with_body(response_body)
@@ -1437,13 +1438,13 @@ mod tests {
         let mut server = mockito::Server::new();
         let oid = "abc123def4567890abc123def4567890abc123def4567890abc123def4567890";
         let payload = b"authenticated content";
-        let download_path = format!("/repo/info/lfs/objects/{oid}");
+        let download_path = format!("/repo.git/info/lfs/objects/{oid}");
         let download_href = format!("{}{}", server.url(), download_path);
 
         // Expect the Authorization header to be present (Basic base64(user:pass)).
         // base64(test-user:s3cret) = dGVzdC11c2VyOnMzY3JldA==
         let _batch_mock = server
-            .mock("POST", "/repo/info/lfs/objects/batch")
+            .mock("POST", "/repo.git/info/lfs/objects/batch")
             .match_header("authorization", "Basic dGVzdC11c2VyOnMzY3JldA==")
             .with_status(200)
             .with_header("content-type", "application/vnd.git-lfs+json")
