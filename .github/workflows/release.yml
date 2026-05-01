@@ -1,15 +1,24 @@
 name: Release
 
+# Workflow-level permissions are read-only by default; jobs that need
+# elevated scope declare it on the job itself, following least-privilege.
+# Only the `release` job creates the GitHub release and attests artefacts.
 permissions:
-    contents: write
-    id-token: write
-    attestations: write
+    contents: read
 
 on:
     push:
         tags:
             - "v[0-9]+.[0-9]+.[0-9]+"
             - "v[0-9]+.[0-9]+.[0-9]+-*"
+
+# Serialise releases per-tag so re-running a tag (or pushing two tags
+# back-to-back) doesn't race on the same GitHub release page or
+# attestation upload. Don't cancel an in-progress release — half-
+# uploaded artefacts are worse than a queued duplicate.
+concurrency:
+    group: release-${{ github.ref }}
+    cancel-in-progress: false
 
 env:
     CARGO_TERM_COLOR: always
@@ -20,6 +29,10 @@ jobs:
         name: Validate Release
         runs-on: ubuntu-latest
         timeout-minutes: 5
+
+        # Read-only: validate just inspects the tag and Cargo.toml.
+        permissions:
+            contents: read
 
         outputs:
             version: ${{ steps.version.outputs.version }}
@@ -71,6 +84,11 @@ jobs:
         name: Build (${{ matrix.target }})
         needs: validate
         timeout-minutes: 30
+
+        # Read-only: build compiles + uploads artefacts to the workflow's
+        # ephemeral artifact store (no write to repo or releases).
+        permissions:
+            contents: read
 
         strategy:
             fail-fast: false
@@ -156,6 +174,14 @@ jobs:
         needs: [validate, build]
         runs-on: ubuntu-latest
         timeout-minutes: 10
+
+        # The only job that needs elevated scope:
+        # - `contents: write` to create the GitHub release
+        # - `id-token: write` + `attestations: write` for SLSA build provenance
+        permissions:
+            contents: write
+            id-token: write
+            attestations: write
 
         steps:
             - name: Checkout repository

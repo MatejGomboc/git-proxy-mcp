@@ -1,8 +1,10 @@
 name: CI - Main Branch
 
+# Workflow-level permissions are read-only by default. Jobs that need
+# elevated scope (e.g. cache cleanup needs `actions: write`) declare
+# it on the job itself, following least-privilege.
 permissions:
     contents: read
-    actions: write
 
 on:
     push:
@@ -303,6 +305,11 @@ jobs:
         runs-on: ubuntu-latest
         timeout-minutes: 5
         if: ${{ !cancelled() }}
+
+        # Cache cleanup deletes stale Actions caches via the REST API.
+        permissions:
+            contents: read
+            actions: write
 
         steps:
             - name: Check if all jobs succeeded

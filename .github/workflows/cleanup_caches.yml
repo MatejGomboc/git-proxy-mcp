@@ -1,14 +1,23 @@
 name: Cleanup GitHub Actions Caches
 
-# Manual trigger only - use when you want to proactively clean up
+# Manual trigger only — use when you want to proactively clean up.
+# Defaults to dry-run so an accidental click doesn't delete anything;
+# uncheck to actually delete.
 on:
     workflow_dispatch:
         inputs:
             dry_run:
-                description: 'Log actions without deleting (for testing)'
+                description: 'Log actions without deleting (uncheck to actually delete)'
                 required: false
                 type: boolean
-                default: false
+                default: true
+
+# Serialise cleanups so two concurrent runs don't race to delete the
+# same caches (the script handles 404 gracefully, but counters get
+# inflated and the log becomes confusing).
+concurrency:
+    group: cleanup-caches
+    cancel-in-progress: false
 
 jobs:
     cleanup:
