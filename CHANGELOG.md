@@ -33,12 +33,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Code coverage reporting** — `cargo-llvm-cov` runs on every PR and push to main,
   uploading lcov reports to Codecov. Patch coverage target is 80% for changed lines;
   project coverage cannot drop more than 1% on main. Coverage badge added to README.
-- **501 unit tests** (up from 257 baseline) covering URL validation, error paths,
+- **508 unit tests** (up from 257 baseline) covering URL validation, error paths,
   argument parsing, server request routing, tar archive creation with local bare
   repos, LFS pointer parsing, commit resolution from branch/tag/SHA refs, commit
   counting between two refs, file archive creation from trees, `.gitmodules`
   parsing with realistic content, and progress notification serialisation.
-- Coverage rose from ~58% (baseline) to ~76% lines and ~84% functions, measured
+- Coverage rose from ~58% (baseline) to ~77% lines and ~84% functions, measured
   excluding `main.rs` (CLI entry point) and `transport.rs` (stdio I/O wrapper) —
   both excluded via `codecov.yml` since they cannot be unit-tested without
   invasive refactoring; their behaviour is verified end-to-end by the Python
