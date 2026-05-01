@@ -88,13 +88,9 @@ def _sanitise_binary_path(raw: str) -> str:
     return candidate
 
 
-# BINARY can be overridden via the GIT_PROXY_MCP_BINARY env var so the
-# coverage workflow can point at the instrumented build. The build still
-# lands in `target/release/` because cargo-llvm-cov instruments via
-# RUSTFLAGS rather than by relocating cargo's target directory.
-BINARY = _sanitise_binary_path(
-    os.environ.get("GIT_PROXY_MCP_BINARY", "./target/release/git-proxy-mcp")
-)
+# Use a fixed binary path to avoid environment-controlled command execution.
+# Coverage/instrumentation builds still produce this binary in target/release.
+BINARY = os.path.realpath("./target/release/git-proxy-mcp")
 REPO_URL = _sanitise_repo_url(os.environ["TEST_REPO_URL"]) if os.environ.get("TEST_REPO_URL") else ""
 REQUEST_TIMEOUT_SECS = 60
 LOG_DIR = os.path.join(tempfile.gettempdir(), "mcp-test")
