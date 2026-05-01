@@ -10,7 +10,7 @@ This document explains how an AI assistant uses git-proxy-mcp to work with priva
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
 │  1. CLONE                                                                   │
-│     AI calls: repo/clone { url: "...", branch: "main" }                    │
+│     AI calls: repo_clone { url: "...", branch: "main" }                    │
 │     Receives: tar.gz archive                                               │
 │     Extracts to: /home/claude/repo/                                        │
 │     Runs: git init && git add . && git commit -m "initial"                 │
@@ -25,7 +25,7 @@ This document explains how an AI assistant uses git-proxy-mcp to work with priva
 │                                                                             │
 │  3. PUSH                                                                    │
 │     AI creates: git bundle create changes.bundle main..HEAD               │
-│     AI calls: repo/push { url: "...", branch: "feature/fix-bug", bundle } │
+│     AI calls: repo_push { url: "...", branch: "feature/fix-bug", bundle } │
 │     Receives: { success: true, url: "https://github.com/.../commit/..." } │
 │                                                                             │
 │  4. ITERATE (if needed)                                                     │
@@ -78,7 +78,7 @@ This ensures all commits made by the AI are properly attributed, making it easy 
 
 ```json
 {
-  "name": "repo/clone",
+  "name": "repo_clone",
   "arguments": {
     "url": "https://github.com/user/my-rust-project",
     "branch": "main",
@@ -189,7 +189,7 @@ BUNDLE_BASE64=$(base64 -w0 /tmp/changes.bundle)
 
 ```json
 {
-  "name": "repo/push",
+  "name": "repo_push",
   "arguments": {
     "url": "https://github.com/user/my-rust-project",
     "branch": "feature/add-validation",
@@ -217,7 +217,7 @@ If someone else pushed changes:
 
 ```json
 {
-  "name": "repo/pull",
+  "name": "repo_pull",
   "arguments": {
     "url": "https://github.com/user/my-rust-project",
     "branch": "main",
@@ -267,7 +267,7 @@ Total: 100 API calls, several minutes
 **git-proxy-mcp:**
 
 ```text
-Call 1: repo/clone { url: "..." }
+Call 1: repo_clone { url: "..." }
 
 Total: 1 call, seconds
 ```
@@ -320,7 +320,7 @@ git commit -m "Fix: comprehensive change with tests"
 
 # Single push
 git bundle create changes.bundle main..HEAD
-# Call repo/push once
+# Call repo_push once
 
 Total: 1 MCP call for all changes
 ```
@@ -331,7 +331,7 @@ Total: 1 MCP call for all changes
 
 ```json
 {
-  "name": "repo/clone",
+  "name": "repo_clone",
   "arguments": {
     "url": "https://github.com/user/huge-monorepo",
     "depth": 1,
@@ -365,7 +365,7 @@ cargo fmt --check
 
 ### 4. Handle Merge Conflicts
 
-If `repo/pull` shows conflicts:
+If `repo_pull` shows conflicts:
 
 ```bash
 # Extract updates
@@ -388,7 +388,7 @@ After pushing a feature branch, you might use GitHub MCP server just for PR crea
 
 ```text
 # Use git-proxy-mcp for the code work
-repo/clone → work → repo/push to feature/my-feature
+repo_clone → work → repo_push to feature/my-feature
 
 # Use GitHub MCP for PR creation (it's good at this)
 create_pull_request(base: "main", head: "feature/my-feature", ...)

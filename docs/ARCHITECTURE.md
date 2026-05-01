@@ -162,22 +162,22 @@ For large repositories, Tier 1 may buffer too much data in memory. Tier 2 solves
 │                                                                             │
 │  AI's VM                      User's PC                       GitHub        │
 │    │                             │                               │          │
-│    │  repo/clone_start           │                               │          │
+│    │  repo_clone_start           │                               │          │
 │    ├────────────────────────────►│  fetch + tar (in memory)      │          │
 │    │                             │◄──────────────────────────────┤          │
 │    │◄────────────────────────────┤  session_id, total_chunks     │          │
 │    │                             │                               │          │
-│    │  repo/clone_chunk(0)        │                               │          │
+│    │  repo_clone_chunk(0)        │                               │          │
 │    ├────────────────────────────►│                               │          │
 │    │◄────────────────────────────┤  base64 chunk 0               │          │
 │    │                             │                               │          │
-│    │  repo/clone_chunk(1)        │                               │          │
+│    │  repo_clone_chunk(1)        │                               │          │
 │    ├────────────────────────────►│                               │          │
 │    │◄────────────────────────────┤  base64 chunk 1               │          │
 │    │                             │                               │          │
 │    │        ...                  │                               │          │
 │    │                             │                               │          │
-│    │  repo/clone_chunk(N)        │                               │          │
+│    │  repo_clone_chunk(N)        │                               │          │
 │    ├────────────────────────────►│                               │          │
 │    │◄────────────────────────────┤  base64 chunk N, is_last=true │          │
 │    │                             │  Session auto-cleaned         │          │
@@ -262,13 +262,13 @@ src/
 │   ├── progress.rs              # Progress notifications
 │   └── tools/                   # MCP tool handlers
 │       ├── mod.rs               # Module exports
-│       ├── repo_clone.rs        # Tier 1: repo/clone
-│       ├── repo_push.rs         # Tier 1: repo/push
-│       ├── repo_clone_start.rs  # Tier 2: repo/clone_start
-│       ├── repo_clone_chunk.rs  # Tier 2: repo/clone_chunk + cancel + status
-│       ├── repo_pull.rs         # repo/pull (incremental sync)
-│       ├── repo_diff.rs         # repo/diff (commit comparison)
-│       ├── repo_refs.rs         # repo/refs (list branches/tags)
+│       ├── repo_clone.rs        # Tier 1: repo_clone
+│       ├── repo_push.rs         # Tier 1: repo_push
+│       ├── repo_clone_start.rs  # Tier 2: repo_clone_start
+│       ├── repo_clone_chunk.rs  # Tier 2: repo_clone_chunk + cancel + status
+│       ├── repo_pull.rs         # repo_pull (incremental sync)
+│       ├── repo_diff.rs         # repo_diff (commit comparison)
+│       ├── repo_refs.rs         # repo_refs (list branches/tags)
 │       └── helper_script.rs     # helper_script (Python utility)
 │
 └── security/                    # Security guards

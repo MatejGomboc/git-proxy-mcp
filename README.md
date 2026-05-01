@@ -128,13 +128,13 @@ git-proxy-mcp acts as an **authenticated streaming proxy** between Git providers
 
 ### Tier 1: Single-Response Tools
 
-#### `repo/clone`
+#### `repo_clone`
 
 Stream a repository to the AI's workspace (small-to-medium repos).
 
 ```json
 {
-    "name": "repo/clone",
+    "name": "repo_clone",
     "arguments": {
         "url": "https://github.com/user/private-repo",
         "branch": "main",
@@ -146,13 +146,13 @@ Stream a repository to the AI's workspace (small-to-medium repos).
 
 **Response:** Base64-encoded tar.gz with commit SHA and file count.
 
-#### `repo/push`
+#### `repo_push`
 
 Push a git bundle from AI's workspace to remote.
 
 ```json
 {
-    "name": "repo/push",
+    "name": "repo_push",
     "arguments": {
         "url": "https://github.com/user/private-repo",
         "branch": "feature/fix-bug",
@@ -168,13 +168,13 @@ Push a git bundle from AI's workspace to remote.
 
 For repositories too large to transfer in a single response.
 
-#### `repo/clone_start`
+#### `repo_clone_start`
 
 Start a chunked clone session.
 
 ```json
 {
-    "name": "repo/clone_start",
+    "name": "repo_clone_start",
     "arguments": {
         "url": "https://gitlab.com/org/large-repo",
         "branch": "main",
@@ -186,13 +186,13 @@ Start a chunked clone session.
 
 **Response:** Session ID, total chunks, total size.
 
-#### `repo/clone_chunk`
+#### `repo_clone_chunk`
 
 Get a chunk from a streaming session.
 
 ```json
 {
-    "name": "repo/clone_chunk",
+    "name": "repo_clone_chunk",
     "arguments": {
         "session_id": "stream_abc123",
         "chunk_index": 0
@@ -217,13 +217,13 @@ Check progress and resume state of a chunked clone session.
 
 **Response:** Total/delivered chunks, next missing chunk, progress percentage, completion status.
 
-#### `repo/clone_cancel`
+#### `repo_clone_cancel`
 
 Cancel a streaming session (optional, auto-expires after the configured timeout).
 
 ```json
 {
-    "name": "repo/clone_cancel",
+    "name": "repo_clone_cancel",
     "arguments": {
         "session_id": "stream_abc123"
     }
@@ -232,13 +232,13 @@ Cancel a streaming session (optional, auto-expires after the configured timeout)
 
 ### Other Tools
 
-#### `repo/pull`
+#### `repo_pull`
 
 Sync new changes from remote to AI's workspace.
 
 ```json
 {
-    "name": "repo/pull",
+    "name": "repo_pull",
     "arguments": {
         "url": "https://github.com/user/private-repo",
         "branch": "main",
@@ -249,13 +249,13 @@ Sync new changes from remote to AI's workspace.
 
 **Response:** Streamed delta of changed files.
 
-#### `repo/diff`
+#### `repo_diff`
 
 Get diff between two commits.
 
 ```json
 {
-    "name": "repo/diff",
+    "name": "repo_diff",
     "arguments": {
         "url": "https://github.com/user/private-repo",
         "base_commit": "abc123",
@@ -266,13 +266,13 @@ Get diff between two commits.
 
 **Response:** Diff content with stats.
 
-#### `repo/refs`
+#### `repo_refs`
 
 List remote branches and tags.
 
 ```json
 {
-    "name": "repo/refs",
+    "name": "repo_refs",
     "arguments": {
         "url": "https://github.com/user/private-repo"
     }

@@ -153,7 +153,7 @@ Credentials embedded in URLs are replaced with `***` before any logging occurs.
 
 ## LFS Resolution Errors
 
-When `repo/clone` or `repo/clone_start` is invoked with `resolve_lfs: true`,
+When `repo_clone` or `repo_clone_start` is invoked with `resolve_lfs: true`,
 the server fetches LFS content from `<repo_url>.git/info/lfs/objects/batch`.
 Two log lines help diagnose failures.
 

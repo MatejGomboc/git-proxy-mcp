@@ -56,10 +56,10 @@ pub enum AuditEventType {
     /// Server stopped.
     ServerStopped,
 
-    /// Tier 1 repo/clone operation.
+    /// Tier 1 repo_clone operation.
     RepoClone,
 
-    /// Tier 1 repo/push operation.
+    /// Tier 1 repo_push operation.
     RepoPush,
 }
 
@@ -129,11 +129,11 @@ pub struct AuditEvent {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub commit: Option<String>,
 
-    /// Number of files (for repo/clone).
+    /// Number of files (for repo_clone).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file_count: Option<usize>,
 
-    /// Archive size in bytes (for repo/clone).
+    /// Archive size in bytes (for repo_clone).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub archive_size: Option<usize>,
 }
@@ -237,7 +237,7 @@ impl AuditEvent {
         event
     }
 
-    /// Creates an event for a successful repo/clone operation.
+    /// Creates an event for a successful repo_clone operation.
     #[must_use]
     pub fn repo_clone_success(
         url: impl Into<String>,
@@ -260,7 +260,7 @@ impl AuditEvent {
         event
     }
 
-    /// Creates an event for a failed repo/clone operation.
+    /// Creates an event for a failed repo_clone operation.
     #[must_use]
     pub fn repo_clone_failed(url: impl Into<String>, reason: impl Into<String>) -> Self {
         let mut event = Self::new(AuditEventType::RepoClone, AuditOutcome::Failed);
@@ -269,7 +269,7 @@ impl AuditEvent {
         event
     }
 
-    /// Creates an event for a blocked repo/clone operation.
+    /// Creates an event for a blocked repo_clone operation.
     #[must_use]
     pub fn repo_clone_blocked(url: impl Into<String>, reason: impl Into<String>) -> Self {
         let mut event = Self::new(AuditEventType::RepoClone, AuditOutcome::Blocked);
@@ -278,7 +278,7 @@ impl AuditEvent {
         event
     }
 
-    /// Creates an event for a successful repo/push operation.
+    /// Creates an event for a successful repo_push operation.
     #[must_use]
     pub fn repo_push_success(
         url: impl Into<String>,
@@ -301,7 +301,7 @@ impl AuditEvent {
         event
     }
 
-    /// Creates an event for a failed repo/push operation.
+    /// Creates an event for a failed repo_push operation.
     #[must_use]
     pub fn repo_push_failed(url: impl Into<String>, reason: impl Into<String>) -> Self {
         let mut event = Self::new(AuditEventType::RepoPush, AuditOutcome::Failed);
@@ -310,7 +310,7 @@ impl AuditEvent {
         event
     }
 
-    /// Creates an event for a blocked repo/push operation.
+    /// Creates an event for a blocked repo_push operation.
     #[must_use]
     pub fn repo_push_blocked(url: impl Into<String>, reason: impl Into<String>) -> Self {
         let mut event = Self::new(AuditEventType::RepoPush, AuditOutcome::Blocked);

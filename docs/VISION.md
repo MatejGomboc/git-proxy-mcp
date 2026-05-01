@@ -51,7 +51,7 @@ GitHub ──► MCP (buffer in RAM) ──► AI
 | Memory usage | O(repo size) |
 | Large repo support | Limited |
 | Complexity | Low |
-| Tools | `repo/clone`, `repo/push` |
+| Tools | `repo_clone`, `repo_push` |
 
 **Use case:** Small to medium repos.
 
@@ -67,7 +67,7 @@ GitHub ──► MCP (small chunks) ──► AI
 | Memory usage | O(chunk size) — constant |
 | Large repo support | Yes |
 | Complexity | Medium |
-| Tools | `repo/clone_start`, `repo/clone_chunk`, `repo_clone_status`, `repo/clone_cancel` |
+| Tools | `repo_clone_start`, `repo_clone_chunk`, `repo_clone_status`, `repo_clone_cancel` |
 
 **Use case:** Any repo size, production-ready.
 
@@ -168,15 +168,15 @@ GitHub ──► MCP (small chunks) ──► AI
 
 | Tool | Description |
 |------|-------------|
-| `repo/clone` | Authenticated fetch, stream repo as tar.gz |
-| `repo/push` | Receive bundle from AI, authenticated push |
-| `repo/clone_start` | Start chunked clone for large repos |
-| `repo/clone_chunk` | Get chunk from streaming session |
+| `repo_clone` | Authenticated fetch, stream repo as tar.gz |
+| `repo_push` | Receive bundle from AI, authenticated push |
+| `repo_clone_start` | Start chunked clone for large repos |
+| `repo_clone_chunk` | Get chunk from streaming session |
 | `repo_clone_status` | Check progress and resume state of streaming session |
-| `repo/clone_cancel` | Cancel streaming session |
-| `repo/pull` | Stream delta of changes since last sync |
-| `repo/diff` | Get diff between commits |
-| `repo/refs` | List branches and tags |
+| `repo_clone_cancel` | Cancel streaming session |
+| `repo_pull` | Stream delta of changes since last sync |
+| `repo_diff` | Get diff between commits |
+| `repo_refs` | List branches and tags |
 | `helper_script` | Get Python utility script for processing results |
 
 ---
