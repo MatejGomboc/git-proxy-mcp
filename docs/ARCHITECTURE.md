@@ -281,6 +281,8 @@ tests/
 ├── mcp_integration.rs           # Rust MCP protocol tests
 ├── perf_tests.rs                # Performance benchmarks
 ├── streaming_tests.rs           # Streaming/chunked tests
+├── property_tests.rs            # Property-based tests (URL sanitisation, LFS pointer parsing, .gitmodules)
+├── security_tests.rs            # Security guards, rate limiting, audit event safety
 └── integration/                 # End-to-end Python tests (stdlib only)
     ├── test_mcp_tools.py        # Spawn server, exercise all 10 tools
     └── rebuild_fixture.py       # Rebuild private test fixture repo
