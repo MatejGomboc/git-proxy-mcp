@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Verifies that every `dtolnay/rust-toolchain@<sha> # vX.Y.Z` pin in
-# .github/workflows/ uses the same version comment, and that the version
-# matches the channel field in rust-toolchain.toml. Exits non-zero on mismatch.
+# Verifies that every `dtolnay/rust-toolchain@<sha> # vX.Y.Z [(annotation)]`
+# pin in .github/workflows/ uses the same version comment, and that the
+# version matches the channel field in rust-toolchain.toml. Any trailing
+# annotation (e.g. " (latest stable)") is ignored — only the X.Y.Z token
+# is matched. Exits non-zero on mismatch.
 #
 # Run from the repository root.
 

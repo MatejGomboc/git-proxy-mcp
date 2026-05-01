@@ -1,2 +1,6 @@
 # automatically normalize line endings to the user's GIT preferences
 * text=auto
+
+# Shell scripts must use LF — they execute on Linux CI runners and bash
+# (including Git Bash on Windows) refuses to interpret CRLF correctly.
+*.sh text eol=lf
