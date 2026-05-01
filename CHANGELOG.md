@@ -253,13 +253,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   MD013 ignores tables and code blocks, but the project's
   `.editorconfig` declares `max_line_length = 170` for all files.
   Wrapped them.
-- **`docs/errors.md` claimed the wrong default for protected branches.**
-  It said `Default protected branches: main, master, develop`, but
-  `SecurityConfig::default()` makes `protected_branches` an empty list
-  — nothing is protected unless the user configures it (the test at
-  `src/config/settings.rs::security_config_defaults` asserts exactly
-  that). Replaced the claim with the actual default and a pointer to
-  `config/example-config.json` for the recommended set.
+- **`protected_branches` default was documented imprecisely.** Three
+  pieces of documentation (`docs/errors.md`, `README.md` configuration
+  table, `BranchGuard::with_defaults` rustdoc) each described the
+  default protected-branch set differently — and at least one was wrong
+  outright. The actual logic is two-layered: `SecurityConfig::default()`
+  sets `protected_branches` to an empty list, but `McpServer::new`
+  treats an empty list as "use the built-in safe set" and substitutes
+  `BranchGuard::with_defaults()`, which contains `main`, `master`, and
+  `develop` (not `main`, `master`, `develop`, *and* `release/*` as the
+  rustdoc had been claiming). Fixed all three: `docs/errors.md` and the
+  README table now describe the two-layer behaviour and the resulting
+  effective default; the `with_defaults` rustdoc now lists exactly what
+  the function returns and clarifies that wildcard patterns are
+  *supported* by the matcher but not part of the built-in set.
 - **`src/lib.rs` Tier 2 tools list omitted `repo_clone_status`.** Like
   the earlier `tools/mod.rs` fix, the crate-level rustdoc named only
   three of the four Tier 2 tools. Added `repo_clone_status` and a new
@@ -365,6 +372,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   function now also reports `files_archive_b64_length` when a
   `files_archive` field is present, so `info` output is symmetric
   between the two result shapes.
+- **`tests/property_tests.rs` module docstring, `.claude/CLAUDE.md`,
+  and `docs/ARCHITECTURE.md`'s source-tree comment all claimed
+  property tests covered `.gitmodules` parsing — they don't.** The
+  file actually has 11 properties across URL sanitisation (3), URL
+  validation (4), and LFS pointer detection/parsing (4). `.gitmodules`
+  parsing has unit-test coverage in `src/git2_ops/submodule.rs::tests`,
+  but no proptest. All three docstrings now describe the actual
+  coverage.
 - Dependabot CI failures caused by orphaned `dtolnay/rust-toolchain` SHAs. The
   previous `# stable` pin pointed to a commit that fell off the remote when
   the rolling `stable` branch advanced, breaking Dependabot's

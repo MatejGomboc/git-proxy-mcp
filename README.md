@@ -458,7 +458,7 @@ For a fully-populated example showing every section and option, see [`config/exa
 | `git_identity` | `name` | Name for AI-assisted commits, e.g. "Claude AI" (default: null — AI sets its own identity) |
 | `git_identity` | `email` | Email for AI-assisted commits (default: null) |
 | `security` | `allow_force_push` | Allow force pushes (default: false) |
-| `security` | `protected_branches` | Branches that block force push and deletion (default: empty list — nothing protected) |
+| `security` | `protected_branches` | Branches that block force push and deletion. Default: empty list, which the server treats as "use the built-in safe set" (`main`, `master`, `develop`); set to any non-empty list to override the fallback. |
 | `security` | `repo_allowlist` | Only allow these repo patterns (default: null — allowlist mode disabled) |
 | `security` | `repo_blocklist` | Block these repo patterns (default: null — no blocklist) |
 | `logging` | `level` | Log level: trace, debug, info, warn, error (default: `warn`) |
