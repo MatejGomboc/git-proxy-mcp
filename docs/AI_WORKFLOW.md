@@ -112,6 +112,12 @@ rm repo.tar.gz
 # Initialise git (so we can create commits later)
 cd /home/claude/repo
 git init
+
+# Configure the identity from the `initialize` response's `gitIdentity`
+# (if present) before any commit, so AI commits are clearly attributable.
+git config user.name "Claude AI"
+git config user.email "ai-assistant@example.com"
+
 git add .
 git commit -m "Initial clone from abc123def456"
 

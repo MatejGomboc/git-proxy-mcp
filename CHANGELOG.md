@@ -286,6 +286,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `cargo fmt --check`** while CONTRIBUTING.md, STYLE.md, the PR
   template, and the rest of `AI_WORKFLOW.md` all use the strict
   `cargo fmt --all --check` form CI runs. Aligned.
+- **`docs/AI_WORKFLOW.md` Step 1 (Clone) example never configured the
+  Git identity** before its `git commit -m "Initial clone …"` call,
+  even though the section above the example tells AI assistants to
+  apply the `gitIdentity` from the `initialize` response so commits
+  are clearly attributable. The example now includes the two
+  `git config user.name` / `user.email` calls between `git init` and
+  the first `git commit`.
+- **`tests/integration/test_mcp_tools.py` module docstring described
+  the wrong fixture.** The docstring still claimed the fixture had
+  "2 commits, 2 tags, 5 files" — the layout from before PR #112's
+  expanded-fixture commit. The real fixture (built by
+  `tests/integration/rebuild_fixture.py`) has 5 commits, 2 tags, ~45
+  source files plus a submodule, a renamed file, and an LFS-tracked
+  binary. Replaced with the current layout and a pointer to
+  `rebuild_fixture.py` as the canonical source.
 - Dependabot CI failures caused by orphaned `dtolnay/rust-toolchain` SHAs. The
   previous `# stable` pin pointed to a commit that fell off the remote when
   the rolling `stable` branch advanced, breaking Dependabot's
