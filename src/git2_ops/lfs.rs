@@ -17,7 +17,11 @@
 //!
 //! - LFS authentication uses the same credential helpers as git
 //! - Credentials are never stored or logged
-//! - All LFS server communication is over HTTPS
+//! - LFS server communication uses whatever scheme the repository URL
+//!   declares: `https://` repos and `git@` SSH URLs (which we rewrite
+//!   to `https://` for the LFS endpoint) communicate over HTTPS;
+//!   `http://` repos communicate over HTTP. SSH-only LFS transports
+//!   (the `lfs+ssh://` scheme) are not supported.
 
 use reqwest::blocking::Client;
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, CONTENT_TYPE};

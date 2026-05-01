@@ -5,15 +5,26 @@
 //!
 //! # Log Format
 //!
-//! Each log entry is a JSON object with:
-//! - `timestamp`: ISO 8601 timestamp
-//! - `event_type`: Type of event (`command_executed`, `command_blocked`, etc.)
-//! - `command`: The Git command that was executed
-//! - `args`: Command arguments (sanitised)
-//! - `working_dir`: Working directory (if set)
-//! - `outcome`: Success, failure, or blocked
-//! - `reason`: Reason for blocking (if blocked)
-//! - `duration_ms`: Execution time in milliseconds (if executed)
+//! Each log entry is a JSON object. Only fields that apply to the event are
+//! emitted (everything optional is `skip_serializing_if = "Option::is_none"`):
+//!
+//! - `timestamp` — ISO 8601 timestamp (always present)
+//! - `event_type` — `command_executed`, `command_blocked`, `rate_limit_exceeded`,
+//!   `server_started`, `server_stopped`, `repo_clone`, or `repo_push`
+//! - `outcome` — `success`, `failed`, or `blocked` (always present)
+//! - `command` — the git subcommand (for `command_*` events)
+//! - `args` — command arguments, sanitised (for `command_*` events)
+//! - `working_dir` — working directory (if set)
+//! - `reason` — reason for blocking (for blocked events)
+//! - `duration_ms` — execution time in milliseconds
+//! - `exit_code` — process exit code (for executed git commands)
+//! - `shutdown_reason` — `client_disconnected`, `sig_int`, or `sig_term`
+//!   (for `server_stopped` events)
+//! - `url` — repository URL, sanitised (for Tier 1 / `repo_*` events)
+//! - `branch` — branch name (for Tier 1 / `repo_*` events)
+//! - `commit` — commit SHA (for Tier 1 / `repo_*` events)
+//! - `file_count` — number of files in archive (for `repo_clone` success)
+//! - `archive_size` — archive size in bytes (for `repo_clone` success)
 
 use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Write};

@@ -42,7 +42,7 @@ Paste any error messages here (remember to redact credentials!)
 ## Environment
 
 - **OS:** [e.g., Windows 11, macOS 14.2, Ubuntu 24.04]
-- **git-proxy-mcp version:** [e.g., 0.1.0]
+- **git-proxy-mcp version:** [output of `git-proxy-mcp --version`, e.g., 1.1.0]
 - **Rust version:** [output of `rustc --version`]
 - **MCP client:** [e.g., Claude Desktop, VS Code + Continue.dev, Cursor]
 

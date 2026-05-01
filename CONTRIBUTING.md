@@ -176,8 +176,17 @@ Use British spelling in all documentation and user-facing text:
 | license (noun) | licence |
 | analyze | analyse |
 | initialize | initialise |
+| sanitize | sanitise |
+| authorize | authorise |
+| finalize | finalise |
+| recognize | recognise |
+| customize | customise |
 
-**Note:** Code identifiers may use American spelling where it matches Rust/library conventions.
+**Note:** Code identifiers may use American spelling where it matches Rust/library
+conventions (e.g. `Cred`, `Regex`, `serde::Serialize`). The JSON-RPC method names
+`initialize` and `notifications/initialized` are spec identifiers and stay American
+even in narrative text — backtick them so it's clear they are method names, not
+prose.
 
 ### Security-Conscious Coding
 

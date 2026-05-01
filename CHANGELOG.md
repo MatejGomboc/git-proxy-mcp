@@ -301,6 +301,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   source files plus a submodule, a renamed file, and an LFS-tracked
   binary. Replaced with the current layout and a pointer to
   `rebuild_fixture.py` as the canonical source.
+- **`src/security/audit.rs` module-level rustdoc Log Format list was
+  almost half empty.** It enumerated 8 of the 14 fields on `AuditEvent`,
+  omitting `exit_code`, `shutdown_reason`, `url`, `branch`, `commit`,
+  `file_count`, and `archive_size`. Replaced with a complete list and
+  noted which event types each optional field applies to, plus the
+  full set of `event_type` values (the previous list ended with "etc.").
+- **`src/git2_ops/lfs.rs` security claim was too strong.** The module
+  rustdoc said "All LFS server communication is over HTTPS", but
+  `derive_lfs_url` happily accepts `http://` repo URLs and forwards
+  the same scheme to the LFS endpoint (the `derive_lfs_url_http` test
+  pins this behaviour). Reworded to say HTTPS for `https://` and `git@`
+  URLs, HTTP for `http://`, and that `lfs+ssh://` is not supported.
+- **`.github/ISSUE_TEMPLATE/bug_report.md` example version was a
+  pre-1.0 placeholder.** The `git-proxy-mcp version: [e.g., 0.1.0]` hint
+  predated the project's 1.0 release. Replaced with a pointer to
+  `git-proxy-mcp --version` and a current-tier example (1.1.0).
+- **`CONTRIBUTING.md` British-spelling reference table was a partial
+  list.** It had 7 American/British pairs, missing the ones that came
+  up repeatedly during this audit (`sanitize`, `authorize`, `finalize`,
+  `recognize`, `customize`). Added them, plus a clarifying note that
+  the JSON-RPC method names `initialize` and `notifications/initialized`
+  are spec identifiers and stay American — backticked in narrative
+  text.
 - Dependabot CI failures caused by orphaned `dtolnay/rust-toolchain` SHAs. The
   previous `# stable` pin pointed to a commit that fell off the remote when
   the rolling `stable` branch advanced, breaking Dependabot's
