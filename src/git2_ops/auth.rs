@@ -190,18 +190,40 @@ fn credentials_callback(
 
 /// Sanitise a URL for logging by removing any embedded credentials.
 ///
-/// URLs like `https://user:token@github.com/...` become `https://***@github.com/...`
+/// URLs like `https://user:token@github.com/...` become `https://***@github.com/...`.
+/// Per RFC 3986, the userinfo `@` separator can only appear in the authority
+/// component (between `://` and the first `/` `?` or `#`); any `@` later in
+/// the URL is part of the path, query, or fragment and is left untouched.
+/// SSH-style URLs without `://` (e.g. `git@host:path`) are also returned
+/// unchanged — they do not embed passwords, and the credential lookup goes
+/// through the OS credential helper, not the URL.
 #[must_use]
 pub fn sanitize_url_for_logging(url: &str) -> String {
-    // Check for credentials in URL (https://user:pass@host/...)
-    if let Some(at_pos) = url.find('@') {
-        if let Some(scheme_end) = url.find("://") {
-            let scheme = &url[..scheme_end + 3];
-            let after_at = &url[at_pos + 1..];
-            return format!("{scheme}***@{after_at}");
-        }
-    }
-    url.to_string()
+    let Some(scheme_end) = url.find("://") else {
+        // No scheme separator: SSH-style or otherwise non-URL input.
+        // We never inject `@`-style userinfo into these, so leave alone.
+        return url.to_string();
+    };
+
+    let after_scheme_idx = scheme_end + 3;
+    let after_scheme = &url[after_scheme_idx..];
+
+    // The authority ends at the first path/query/fragment delimiter.
+    let authority_end = after_scheme
+        .find(['/', '?', '#'])
+        .unwrap_or(after_scheme.len());
+    let authority = &after_scheme[..authority_end];
+
+    // `rfind('@')` so any (would-be percent-encoded) `@` earlier in userinfo
+    // doesn't fool us into stripping less than the full userinfo.
+    let Some(at_in_authority) = authority.rfind('@') else {
+        return url.to_string();
+    };
+
+    let scheme_part = &url[..after_scheme_idx];
+    let after_at_idx = after_scheme_idx + at_in_authority + 1;
+    let host_and_rest = &url[after_at_idx..];
+    format!("{scheme_part}***@{host_and_rest}")
 }
 
 /// Validate that a URL is acceptable for operations.
@@ -646,5 +668,54 @@ mod tests {
             result,
             Some(("https".to_string(), "github.com".to_string()))
         );
+    }
+
+    #[test]
+    fn sanitize_url_does_not_mangle_at_in_query() {
+        // Regression: previously, the function found the FIRST `@` anywhere
+        // in the URL and treated everything between `://` and that `@` as
+        // userinfo. So a URL with `@` in a query string was mangled — the
+        // host and path were silently dropped from the log output. RFC 3986
+        // restricts the userinfo `@` separator to the authority component.
+        let url = "https://github.com/owner/repo?email=foo@bar.com";
+        let sanitized = sanitize_url_for_logging(url);
+        assert_eq!(
+            sanitized, url,
+            "URL with `@` only in query string must round-trip unchanged"
+        );
+    }
+
+    #[test]
+    fn sanitize_url_does_not_mangle_at_in_path() {
+        // Same regression for `@` in path component.
+        let url = "https://github.com/owner@user/repo.git";
+        let sanitized = sanitize_url_for_logging(url);
+        assert_eq!(sanitized, url);
+    }
+
+    #[test]
+    fn sanitize_url_does_not_mangle_at_in_fragment() {
+        let url = "https://github.com/owner/repo#sec@something";
+        let sanitized = sanitize_url_for_logging(url);
+        assert_eq!(sanitized, url);
+    }
+
+    #[test]
+    fn sanitize_url_strips_userinfo_when_path_also_has_at() {
+        // Both userinfo `@` and a later `@` in path/query: only userinfo
+        // should be replaced, the rest of the URL must survive intact.
+        let url = "https://user:secret@github.com/owner/repo?email=foo@bar.com";
+        let sanitized = sanitize_url_for_logging(url);
+        assert!(!sanitized.contains("secret"));
+        assert!(!sanitized.contains("user:"));
+        assert!(sanitized.contains("***@github.com/owner/repo?email=foo@bar.com"));
+    }
+
+    #[test]
+    fn sanitize_url_handles_authority_with_port_and_userinfo() {
+        let url = "https://user:tok@gitlab.example.com:8443/group/project.git";
+        let sanitized = sanitize_url_for_logging(url);
+        assert!(!sanitized.contains("tok"));
+        assert!(sanitized.contains("***@gitlab.example.com:8443/group/project.git"));
     }
 }
