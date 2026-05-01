@@ -151,6 +151,53 @@ Credentials embedded in URLs are replaced with `***` before any logging occurs.
 
 ---
 
+## LFS Resolution Errors
+
+When `repo/clone` or `repo/clone_start` is invoked with `resolve_lfs: true`,
+the server fetches LFS content from `<repo_url>.git/info/lfs/objects/batch`.
+Two log lines help diagnose failures.
+
+### Missing credentials warning
+
+If the `LfsClient` is constructed without credentials, the server emits
+a `WARN` at the start of the clone (before any batch request):
+
+```text
+WARN LFS client created without credentials — batch API requests to private
+     repos will likely return 401/403
+```
+
+For private repos this is almost always the cause of any subsequent
+401/403 from the batch endpoint.
+
+### Batch-API error includes response body
+
+Non-retryable status codes (4xx, plus 5xx after retry exhaustion) log
+the HTTP status, the request URL, and the response body:
+
+```text
+WARN LFS batch POST returned non-retryable error status
+     status=401 Unauthorized
+     url=https://github.com/owner/repo.git/info/lfs/objects/batch
+     response_body={"message":"Bad credentials"}
+```
+
+The body comes from the LFS server's response and is also included in
+the returned `Git2Error`, so it surfaces in the tool-call error too. The
+Authorization header is in the *request*, never the response — the
+logged body cannot leak the PAT.
+
+Common GitHub responses to recognise:
+
+| HTTP code | Typical body | Likely cause |
+|---|---|---|
+| 401 | `{"message":"Bad credentials"}` | Token expired or invalid |
+| 403 | `{"message":"Repository access blocked"}` | PAT lacks `repo` scope (classic) or `Contents: Read and write` (fine-grained) |
+| 404 | `{"message":"Object does not exist"}` | LFS object never uploaded to the remote |
+| 422 | `<!DOCTYPE html>...` | URL missing `.git` — request reached the web frontend, not the LFS service |
+
+---
+
 ## Troubleshooting
 
 ### Authentication Failures
@@ -196,4 +243,4 @@ ssh-add ~/.ssh/id_ed25519
 
 ---
 
-*Last updated: 2026-01-10*
+*Last updated: 2026-05-01*
