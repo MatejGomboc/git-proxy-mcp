@@ -1903,12 +1903,18 @@ def main():
 
     if exit_code != 0:
         print()
-        print("Server log (last 50 lines):")
+        print("=" * 60)
+        print("Server log (full contents — printed on failure for diagnostics):")
+        print("=" * 60)
         if os.path.exists(SERVER_LOG_PATH):
             with open(SERVER_LOG_PATH, encoding="utf-8") as f:
-                lines = f.readlines()
-                for line in lines[-50:]:
-                    print(line, end="")
+                # Full dump rather than tail -50: the LFS batch status code
+                # and response body are emitted at the start of each clone,
+                # which a tail loses if any progress noise follows. GitHub
+                # Actions truncates step logs at 4 MiB, but the server log
+                # for a single integration run is well under that.
+                print(f.read(), end="")
+        print("=" * 60)
 
     if runner.failed == 0:
         print("All integration tests passed!")

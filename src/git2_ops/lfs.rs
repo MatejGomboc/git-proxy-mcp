@@ -231,7 +231,14 @@ impl LfsClient {
     ) -> Result<Self, Git2Error> {
         let lfs_url = derive_lfs_url(repo_url)?;
 
-        debug!(lfs_url = %lfs_url, "created LFS client");
+        if credentials.is_none() {
+            warn!(
+                lfs_url = %lfs_url,
+                "LFS client created without credentials — batch API requests to private repos will likely return 401/403"
+            );
+        } else {
+            debug!(lfs_url = %lfs_url, "LFS client created with credentials");
+        }
 
         let mut builder = Client::builder().user_agent("git-proxy-mcp/0.1");
 
@@ -392,8 +399,22 @@ impl LfsClient {
                         continue;
                     }
 
+                    // Non-retryable failure: capture the response body so the
+                    // operator can see what the LFS server actually said
+                    // (e.g. "Bad credentials", "Repository not found", rate
+                    // limit details). The body is server-generated text — it
+                    // does not echo our Authorization header.
+                    let body_text = response
+                        .text()
+                        .unwrap_or_else(|e| format!("<failed to read response body: {e}>"));
+                    warn!(
+                        status = %status,
+                        url = %url,
+                        response_body = %body_text,
+                        "LFS batch POST returned non-retryable error status"
+                    );
                     return Err(Git2Error::Git2(format!(
-                        "LFS batch API returned status {status}"
+                        "LFS batch API returned status {status}: {body_text}"
                     )));
                 }
                 Err(e) => {
