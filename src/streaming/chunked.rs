@@ -11,20 +11,20 @@
 //! ```text
 //! AI                           MCP Server
 //! │                                │
-//! ├── repo/clone_start ───────────▶│
+//! ├── repo_clone_start ───────────▶│
 //! │   {url, branch, chunk_size}    │
 //! │                                │  Fetch repo, prepare for streaming
 //! │◀── {session_id, total_chunks, ─┤
 //! │     total_size, commit}        │
 //! │                                │
-//! ├── repo/clone_chunk ───────────▶│
+//! ├── repo_clone_chunk ───────────▶│
 //! │   {session_id, chunk_index}    │
 //! │                                │  Return one chunk
 //! │◀── {data, is_last} ────────────┤
 //! │                                │
 //! │    ... repeat for all chunks   │
 //! │                                │
-//! ├── repo/clone_chunk ───────────▶│  (final chunk)
+//! ├── repo_clone_chunk ───────────▶│  (final chunk)
 //! │   {session_id, chunk_index: N} │
 //! │                                │
 //! │◀── {data, is_last: true} ──────┤

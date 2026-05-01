@@ -981,7 +981,7 @@ impl McpServer {
         ]
     }
 
-    /// Calls the `repo/clone` tool.
+    /// Calls the `repo_clone` tool.
     ///
     /// This tool clones a repository and returns it as a base64-encoded tar.gz.
     /// Source files are never written to the user's disk.
@@ -1057,7 +1057,7 @@ impl McpServer {
         }
     }
 
-    /// Calls the `repo/push` tool.
+    /// Calls the `repo_push` tool.
     ///
     /// This tool receives a git bundle and pushes it to a remote repository.
     /// Only the bundle file touches disk (not source files).
@@ -1156,7 +1156,7 @@ impl McpServer {
         }
     }
 
-    /// Calls the `repo/clone_start` tool (Tier 2).
+    /// Calls the `repo_clone_start` tool (Tier 2).
     ///
     /// Starts a chunked streaming session for a repository clone.
     fn call_repo_clone_start_tool(&self, arguments: &Value) -> ToolCallResult {
@@ -1232,7 +1232,7 @@ impl McpServer {
         }
     }
 
-    /// Calls the `repo/clone_chunk` tool (Tier 2).
+    /// Calls the `repo_clone_chunk` tool (Tier 2).
     ///
     /// Retrieves a chunk from a streaming session.
     fn call_repo_clone_chunk_tool(&self, arguments: &Value) -> ToolCallResult {
@@ -1257,7 +1257,7 @@ impl McpServer {
         }
     }
 
-    /// Calls the `repo/clone_cancel` tool (Tier 2).
+    /// Calls the `repo_clone_cancel` tool (Tier 2).
     ///
     /// Cancels a streaming session and frees resources.
     fn call_repo_clone_cancel_tool(&self, arguments: &Value) -> ToolCallResult {
@@ -1282,7 +1282,7 @@ impl McpServer {
         }
     }
 
-    /// Calls the `repo/clone_status` tool (Tier 2).
+    /// Calls the `repo_clone_status` tool (Tier 2).
     ///
     /// Returns resume information for a streaming session.
     fn call_repo_clone_status_tool(&self, arguments: &Value) -> ToolCallResult {
@@ -1307,7 +1307,7 @@ impl McpServer {
         }
     }
 
-    /// Calls the `repo/refs` tool.
+    /// Calls the `repo_refs` tool.
     ///
     /// Lists branches and tags from a remote repository without cloning.
     fn call_repo_refs_tool(&self, arguments: &Value) -> ToolCallResult {
@@ -1377,7 +1377,7 @@ impl McpServer {
         }
     }
 
-    /// Calls the `repo/diff` tool.
+    /// Calls the `repo_diff` tool.
     ///
     /// Generates a unified diff between two commits from a remote repository.
     fn call_repo_diff_tool(&self, arguments: &Value) -> ToolCallResult {
@@ -1447,7 +1447,7 @@ impl McpServer {
         }
     }
 
-    /// Calls the `repo/pull` tool.
+    /// Calls the `repo_pull` tool.
     ///
     /// Fetches changes since a known commit for incremental sync.
     fn call_repo_pull_tool(&self, arguments: &Value) -> ToolCallResult {

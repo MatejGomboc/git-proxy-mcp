@@ -102,6 +102,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   previous `# stable` pin pointed to a commit that fell off the remote when
   the rolling `stable` branch advanced, breaking Dependabot's
   `git branch --remotes --contains <sha>` lookup.
+- **MCP tool names documented with the correct underscore form.** All
+  documentation, Rust doc comments, and CHANGELOG references previously
+  used the slash form (`repo/clone`, `repo/push`, etc.) as if these were
+  JSON-RPC method names. They are not — they are tool names registered
+  via `tools/list` and dispatched via `tools/call`. The actual code has
+  always registered them with underscores (`repo_clone`, `repo_push`,
+  `repo_clone_status`, etc. — see the dispatch table in
+  `src/mcp/server.rs`). This was a purely documentation-side bug —
+  no runtime behaviour change. Affected files: `README.md`,
+  `docs/{AI_WORKFLOW,ARCHITECTURE,SECURITY,VISION,errors}.md`, the
+  `[1.1.0]` section of `CHANGELOG.md`, and the doc comments in
+  `src/{lib,mcp/server,security/audit,streaming/chunked}.rs`. ~75
+  occurrences corrected. Tool names in actual code (string literals
+  in the dispatch table) were already correct and unchanged.
 - **Coverage job binary path** — the `Build instrumented release binary and
   run integration tests` step in `ci_main.yml` referenced `$CARGO_TARGET_DIR`,
   which `cargo llvm-cov show-env` has not exported since 0.1.14 (Jan 2022).
@@ -157,13 +171,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   depth control (unlimited by default, mirroring git), include/exclude glob
   pattern filtering, cycle detection, and early termination after configurable
   failure count. New `submodule_depth`, `submodule_include`, and
-  `submodule_exclude` tool arguments for `repo/clone` and `repo/clone_start`.
+  `submodule_exclude` tool arguments for `repo_clone` and `repo_clone_start`.
 - **Parallel submodule fetching** — submodules at each depth level are now
   fetched in parallel using `std::thread::scope`, controlled by the existing
   `max_concurrent` setting (default 4). When `max_concurrent` is 1, behaviour
   degrades gracefully to sequential fetching.
 - **Chunk-level resume** — new `repo_clone_status` tool to check progress and identify
-  missing chunks in a Tier 2 streaming session. `repo/clone_chunk` responses now include
+  missing chunks in a Tier 2 streaming session. `repo_clone_chunk` responses now include
   `next_missing_chunk` so the AI can resume interrupted transfers without re-downloading
   chunks it already has.
 - **Integration tests** — Python-based end-to-end tests (`tests/integration/`) that

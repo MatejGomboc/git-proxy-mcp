@@ -19,7 +19,7 @@
 //! - Clone: Fetch to bare repo, stream tree as tar.gz (in memory)
 //! - Push: Receive bundle, authenticated push
 //! - Memory usage: O(repo size)
-//! - Tools: `repo/clone`, `repo/push`
+//! - Tools: `repo_clone`, `repo_push`
 //!
 //! ## Tier 2: Chunked Streaming
 //!
@@ -27,7 +27,7 @@
 //! - Memory usage: O(chunk size)
 //! - Resume interrupted transfers
 //! - Progress reporting
-//! - Tools: `repo/clone_start`, `repo/clone_chunk`, `repo/clone_cancel`
+//! - Tools: `repo_clone_start`, `repo_clone_chunk`, `repo_clone_cancel`
 //!
 //! # Credential Handling
 //!

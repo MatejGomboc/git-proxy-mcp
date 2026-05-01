@@ -102,7 +102,7 @@ All operations are logged, but credentials are never included:
 
 ```rust
 // ✅ Good: Log operation details
-audit_log.info("repo/clone", json!({
+audit_log.info("repo_clone", json!({
     "url": sanitize_url(url),  // Removes credentials from URL
     "branch": branch,
     "success": true,
