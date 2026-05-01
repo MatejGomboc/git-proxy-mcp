@@ -28,10 +28,12 @@ jobs:
             - name: Checkout repository
               uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
+            - name: Verify Rust toolchain pin consistency
+              run: bash .github/scripts/check-toolchain-pin.sh
+
             - name: Install Rust toolchain
-              uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+              uses: dtolnay/rust-toolchain@4a76a4951e2b37e999824e644cd130c67037ee2b # v1.100.0
               with:
-                toolchain: stable
                 components: rustfmt
 
             - name: Setup Node.js
@@ -89,9 +91,8 @@ jobs:
               uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
             - name: Install Rust toolchain
-              uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+              uses: dtolnay/rust-toolchain@4a76a4951e2b37e999824e644cd130c67037ee2b # v1.100.0
               with:
-                toolchain: stable
                 components: clippy
 
             - name: Get Rust version
@@ -185,9 +186,8 @@ jobs:
               uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
             - name: Install Rust toolchain
-              uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+              uses: dtolnay/rust-toolchain@4a76a4951e2b37e999824e644cd130c67037ee2b # v1.100.0
               with:
-                toolchain: stable
                 components: llvm-tools-preview
 
             - name: Install cargo-llvm-cov

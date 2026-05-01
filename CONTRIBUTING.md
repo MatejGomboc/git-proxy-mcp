@@ -120,7 +120,7 @@ When submitting:
 
 ### Prerequisites
 
-- Rust 1.75+ (see `Cargo.toml` for minimum version, `rust-toolchain.toml` for channel)
+- Rust 1.75+ minimum (`Cargo.toml`); CI and local dev use the exact version pinned in `rust-toolchain.toml`
 - Git 2.x (must be in PATH)
 
 ### Setup
