@@ -149,13 +149,7 @@ pub fn fetch_bare(url: &str, options: Option<FetchOptions2>) -> Result<FetchResu
                     e.message()
                 ))
             })?;
-            let default_str = std::str::from_utf8(&default_buf)
-                .map_err(|e| Git2Error::Git2(format!("invalid default branch encoding: {e}")))?;
-            let resolved = default_str
-                .strip_prefix("refs/heads/")
-                .unwrap_or(default_str)
-                .trim_end_matches(['\0', '\n', '\r'])
-                .to_string();
+            let resolved = decode_default_branch(&default_buf)?;
             debug!(branch = %resolved, "resolved remote's default branch");
             resolved
         };
@@ -218,6 +212,19 @@ pub fn fetch_bare(url: &str, options: Option<FetchOptions2>) -> Result<FetchResu
     })
 }
 
+/// Decode the buffer returned by `Remote::default_branch()` into a plain
+/// branch name. libgit2 returns the full ref form (`refs/heads/<branch>`)
+/// and has historically appended trailing NUL/newline noise on some
+/// transports; we strip both.
+fn decode_default_branch(buf: &[u8]) -> Result<String, Git2Error> {
+    let s = std::str::from_utf8(buf)
+        .map_err(|e| Git2Error::Git2(format!("invalid default branch encoding: {e}")))?;
+    Ok(s.strip_prefix("refs/heads/")
+        .unwrap_or(s)
+        .trim_end_matches(['\0', '\n', '\r'])
+        .to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -230,6 +237,107 @@ mod tests {
         assert!(opts.proxy_url.is_none());
     }
 
-    // Integration tests would go here but require network access
-    // See tests/git2_integration.rs for full integration tests
+    #[test]
+    fn decode_default_branch_strips_refs_heads_prefix() {
+        assert_eq!(
+            decode_default_branch(b"refs/heads/develop").unwrap(),
+            "develop"
+        );
+        assert_eq!(
+            decode_default_branch(b"refs/heads/master").unwrap(),
+            "master"
+        );
+        assert_eq!(
+            decode_default_branch(b"refs/heads/feature/x").unwrap(),
+            "feature/x"
+        );
+    }
+
+    #[test]
+    fn decode_default_branch_trims_trailing_noise() {
+        // libgit2 has historically appended NUL or CRLF on some transports.
+        assert_eq!(
+            decode_default_branch(b"refs/heads/develop\0").unwrap(),
+            "develop"
+        );
+        assert_eq!(
+            decode_default_branch(b"refs/heads/develop\n").unwrap(),
+            "develop"
+        );
+        assert_eq!(
+            decode_default_branch(b"refs/heads/develop\r\n").unwrap(),
+            "develop"
+        );
+        assert_eq!(
+            decode_default_branch(b"refs/heads/develop\0\0").unwrap(),
+            "develop"
+        );
+    }
+
+    #[test]
+    fn decode_default_branch_passes_through_branches_without_prefix() {
+        // Defensive: bare branch name (libgit2 doesn't currently return this
+        // form, but the strip_prefix fallback shouldn't double-mangle it).
+        assert_eq!(decode_default_branch(b"develop").unwrap(), "develop");
+    }
+
+    #[test]
+    fn decode_default_branch_rejects_invalid_utf8() {
+        let bad = &[0xFFu8, 0xFE, 0xFD];
+        let err = decode_default_branch(bad).unwrap_err();
+        assert!(
+            matches!(err, Git2Error::Git2(_)),
+            "expected Git2 error, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn fetch_bare_default_branch_resolves_non_main_via_local_remote() {
+        // Validates the libgit2 contract that fetch_bare's no-branch path
+        // relies on: the remote's HEAD symref is what `Remote::default_branch()`
+        // returns. We build a bare repo whose HEAD points to `develop` (not
+        // `main`), connect a fresh anonymous remote to it via file://, and
+        // check the resolved branch name matches the on-disk HEAD target.
+        // This is the closest we can get to end-to-end coverage without
+        // weakening `validate_url`'s file:// rejection.
+        let source = tempfile::TempDir::new().unwrap();
+        let source_repo = Repository::init_bare(source.path()).unwrap();
+
+        // Point HEAD at refs/heads/develop *before* the first commit so that
+        // the commit creates the develop branch (not main/master).
+        source_repo.set_head("refs/heads/develop").unwrap();
+        let signature = git2::Signature::now("Test", "test@example.com").unwrap();
+        let tree_oid = source_repo.treebuilder(None).unwrap().write().unwrap();
+        let tree = source_repo.find_tree(tree_oid).unwrap();
+        source_repo
+            .commit(
+                Some("HEAD"),
+                &signature,
+                &signature,
+                "init on develop",
+                &tree,
+                &[],
+            )
+            .unwrap();
+
+        // Connect a fresh anonymous remote (mirroring the bare temp repo
+        // created in fetch_bare) and ask for the default branch.
+        let dest = tempfile::TempDir::new().unwrap();
+        let dest_repo = Repository::init_bare(dest.path()).unwrap();
+
+        // file:// URL form, with Windows-friendly path translation.
+        let raw_path = source.path().display().to_string();
+        let url = if cfg!(windows) {
+            format!("file:///{}", raw_path.replace('\\', "/"))
+        } else {
+            format!("file://{raw_path}")
+        };
+
+        let mut remote = dest_repo.remote_anonymous(&url).unwrap();
+        remote.connect(Direction::Fetch).unwrap();
+        let buf = remote.default_branch().unwrap();
+
+        let resolved = decode_default_branch(&buf).unwrap();
+        assert_eq!(resolved, "develop");
+    }
 }
