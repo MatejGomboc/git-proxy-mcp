@@ -800,7 +800,7 @@ impl McpServer {
                         },
                         "chunk_size": {
                             "type": "integer",
-                            "description": "Chunk size in bytes (default: 1MB, max: 4MB)"
+                            "description": "Chunk size in bytes (default: 1 MiB, range: 1 KiB – 4 MiB after clamping)"
                         },
                         "exclude_binary": {
                             "type": "boolean",

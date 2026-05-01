@@ -124,7 +124,8 @@ repo.checkout_head(...)?;                  // Would write files!
 | Git objects | Temp only | Bare repo, deleted after |
 | Bundle file | Temp only | For unbundle operation |
 | Credentials | **NO** | System helpers only |
-| Tar archive | **NO** | Built in memory |
+| Tar archive (Tier 1) | **NO** | Built in memory |
+| Tar archive (Tier 2) | Temp only when ≥ 10 MiB | Disk-backed via `NamedTempFile`; deleted when session ends or expires |
 
 ### Temp Directory Contents
 
@@ -193,7 +194,7 @@ For large repositories, Tier 1 may buffer too much data in memory. Tier 2 solves
 
 | Aspect | Tier 1 | Tier 2 |
 |--------|--------|--------|
-| Response size | Entire repo | Configurable (1KB-4MB) |
+| Response size | Entire repo | Configurable (1 KiB – 4 MiB) |
 | Resume on failure | Start over | Resume via `repo_clone_status` |
 | Progress reporting | None | chunk_index / total_chunks / progress % |
 | Memory per response | O(repo) | O(chunk) |

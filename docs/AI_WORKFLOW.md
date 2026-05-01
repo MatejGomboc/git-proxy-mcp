@@ -42,7 +42,7 @@ When the MCP server initialises, it may provide a `gitIdentity` in the response.
 This identity should be used for all commits to clearly distinguish AI-assisted
 commits from human commits.
 
-**Initialize Response (with git identity):**
+**`initialize` response (with git identity):**
 
 ```json
 {
@@ -95,7 +95,8 @@ This ensures all commits made by the AI are properly attributed, making it easy 
   "commit": "abc123def456...",
   "branch": "main",
   "file_count": 47,
-  "archive_size": 1048576
+  "archive_size": 1048576,
+  "hint": "Use helper_script tool to get git_proxy_helper.py, then: python git_proxy_helper.py extract <result.json> <output_dir>"
 }
 ```
 
@@ -161,8 +162,8 @@ cargo test
 # Format code
 cargo fmt
 
-# Check with clippy
-cargo clippy
+# Check with clippy (matches the project's CI command)
+cargo clippy --all-targets --all-features -- -D warnings
 
 # Commit
 git add .
@@ -206,7 +207,7 @@ BUNDLE_BASE64=$(base64 -w0 /tmp/changes.bundle)
   "commit": "def789abc...",
   "force": false,
   "remote_url": "https://github.com/user/my-rust-project",
-  "hint": "Bundle was successfully pushed to the remote."
+  "hint": "To create a bundle: use helper_script tool, then: python git_proxy_helper.py bundle <repo_dir> <since_commit>"
 }
 ```
 
@@ -250,7 +251,7 @@ If someone else pushed changes:
     "deletions": 3
   },
   "up_to_date": false,
-  "hint": "Apply the diff or extract files_archive into your local clone."
+  "hint": "Use helper_script tool to get git_proxy_helper.py, then: python git_proxy_helper.py extract <result.json> <output_dir>"
 }
 ```
 

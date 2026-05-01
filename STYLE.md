@@ -204,7 +204,8 @@ serde = { version = "1.0", features = ["derive"] }
 
 ### Formatter
 
-Use [Even Better TOML](https://marketplace.visualstudio.com/items?itemName=tamasfe.even-better-toml) for VS Code. Column width is set to 170 characters (configured in `.vscode/settings.json`).
+Use [Even Better TOML](https://marketplace.visualstudio.com/items?itemName=tamasfe.even-better-toml) for VS Code.
+Column width is set to 170 characters (configured in `.vscode/settings.json`).
 
 ---
 
@@ -280,8 +281,9 @@ See `CONTRIBUTING.md` § Commit Messages for conventions and allowed types.
 
 See `CONTRIBUTING.md` § British Spelling for the full reference table.
 
-**Quick rule:** Use British spelling in documentation (colour, behaviour, organisation). Code identifiers may use American spelling where it matches Rust/library conventions.
+**Quick rule:** Use British spelling in documentation (colour, behaviour, organisation).
+Code identifiers may use American spelling where it matches Rust/library conventions.
 
 ---
 
-*Last updated: 2026-04-29*
+*Last updated: 2026-05-01*

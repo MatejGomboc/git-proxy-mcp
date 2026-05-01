@@ -36,7 +36,9 @@ Since this is a credential-handling project:
 
 - [ ] Code compiles without warnings (`cargo build`)
 - [ ] Clippy passes (`cargo clippy --all-targets --all-features -- -D warnings`)
-- [ ] Code is formatted (`cargo fmt`)
+- [ ] Code is formatted (`cargo fmt --all --check`)
+- [ ] Markdown is lint-clean (`markdownlint-cli2 "**/*.md"`)
+- [ ] Toolchain pin is consistent (`bash .github/scripts/check-toolchain-pin.sh`)
 - [ ] Documentation is updated if needed
 - [ ] CHANGELOG.md is updated for user-facing changes
 

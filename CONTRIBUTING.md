@@ -75,7 +75,8 @@ When submitting:
 
 We welcome feature suggestions! Before submitting:
 
-1. Check [existing issues](https://github.com/MatejGomboc/git-proxy-mcp/issues) and [discussions](https://github.com/MatejGomboc/git-proxy-mcp/discussions) for similar ideas
+1. Check [existing issues](https://github.com/MatejGomboc/git-proxy-mcp/issues) and
+   [discussions](https://github.com/MatejGomboc/git-proxy-mcp/discussions) for similar ideas
 2. Consider how the feature fits the project's security-first philosophy
 3. Think about backwards compatibility
 
@@ -99,8 +100,10 @@ When submitting:
 
 - [ ] Code compiles without warnings (`cargo build`)
 - [ ] All tests pass (`cargo test`)
-- [ ] Code is formatted (`cargo fmt`)
+- [ ] Code is formatted (`cargo fmt --all --check`)
 - [ ] Clippy passes (`cargo clippy --all-targets --all-features -- -D warnings`)
+- [ ] Markdown is lint-clean (`markdownlint-cli2 "**/*.md"` — also runs in CI)
+- [ ] Toolchain pin is consistent (`bash .github/scripts/check-toolchain-pin.sh`)
 - [ ] Documentation is updated if needed
 - [ ] CHANGELOG.md is updated for user-facing changes
 - [ ] Commit messages follow [conventional commits](#commit-messages)
@@ -311,15 +314,24 @@ When adding or modifying code that handles credentials:
 |----------|--------|
 | `README.md` | User-facing overview and quick start |
 | `CONTRIBUTING.md` | This file — contributor guidelines |
-| `SECURITY.md` | Security policy and vulnerability reporting |
+| `STYLE.md` | Style conventions for Rust, YAML, JSON, TOML, Python, Markdown |
+| `SECURITY.md` | Security policy and vulnerability reporting (root) |
+| `docs/SECURITY.md` | Technical threat model and security controls |
+| `docs/VISION.md` | Architectural vision and design principles |
+| `docs/ARCHITECTURE.md` | Detailed architecture, source tree, disk usage |
+| `docs/AI_WORKFLOW.md` | How an AI assistant uses git-proxy-mcp end to end |
+| `docs/errors.md` | Error reference (JSON-RPC codes, guard messages, LFS diagnostics) |
 | `CHANGELOG.md` | User-facing change history |
-| Rustdoc comments | API documentation |
+| Rustdoc comments | API documentation (`cargo doc --open`) |
 
 ### Updating Documentation
 
-- Update `README.md` for user-facing changes
-- Update `CHANGELOG.md` for all notable changes
+- Update `README.md` for user-facing changes (config options, MCP tools, response shapes)
+- Update `CHANGELOG.md` `[Unreleased]` section for all notable changes
 - Update rustdoc comments when changing public APIs
+- Update files under `docs/` when changing architecture, security model, error semantics, or the AI workflow
+- Update `STYLE.md` and bump its `*Last updated:* …` timestamp when changing style conventions
+- Update `config/example-config.json` when adding or renaming configuration options
 - Keep examples up to date and working
 
 ---

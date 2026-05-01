@@ -15,8 +15,13 @@
 //!
 //! ## Tier 2 (Chunked Streaming)
 //!
+//! Chunk-related handlers (`chunk`, `cancel`, `status`) all live in
+//! [`repo_clone_chunk`] but are exposed as separate MCP tools:
+//!
 //! - [`repo_clone_start`] — Start a chunked clone, returns session info
 //! - [`repo_clone_chunk`] — Get a chunk from a streaming session
+//! - [`repo_clone_status`](repo_clone_chunk::handle_repo_clone_status) — Check progress and resume state of a streaming session
+//! - [`repo_clone_cancel`](repo_clone_chunk::handle_repo_clone_cancel) — Cancel and clean up a streaming session
 //!
 //! ## Utilities
 //!

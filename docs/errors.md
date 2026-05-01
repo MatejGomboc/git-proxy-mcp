@@ -50,7 +50,8 @@ Default rate limits: 20 operations burst, 5 operations per second sustained.
 | Delete protected branch | `Cannot delete protected branch '{branch}'` |
 | Force push to protected branch | `Cannot force push to protected branch '{branch}'` |
 
-Default protected branches: `main`, `master`, `develop`.
+No branches are protected by default — `protected_branches` is an empty list unless configured.
+The shipped `config/example-config.json` recommends `["main", "master"]`.
 
 ### Force Push Blocking
 

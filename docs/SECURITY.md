@@ -101,16 +101,17 @@ fn clone_and_stream(url: &str) -> Result<Archive> {
 All operations are logged, but credentials are never included:
 
 ```rust
-// ✅ Good: Log operation details
-audit_log.info("repo_clone", json!({
-    "url": sanitize_url(url),  // Removes credentials from URL
-    "branch": branch,
-    "success": true,
-    "duration_ms": elapsed,
-}));
+// ✅ Good: Log operation details. Audit events are constructed via
+// `AuditEvent::repo_clone_success(...)` (or _failed/_blocked) and the
+// URL is sanitised inside the constructor — see `src/security/audit.rs`.
+self.audit_logger.log_silent(&AuditEvent::repo_clone_success(
+    &sanitize_url_for_logging(url),
+    branch,
+    elapsed,
+));
 
 // ❌ Never: Log credential info
-audit_log.debug("Using credential: {:?}", cred);  // NEVER
+tracing::debug!("Using credential: {:?}", cred);  // NEVER
 ```
 
 ## Threat Model
@@ -122,7 +123,7 @@ audit_log.debug("Using credential: {:?}", cred);  // NEVER
 | **Credential theft** | Credentials handled by OS, never stored by us |
 | **Credential logging** | Code audit; no Cred in logs; URL sanitisation |
 | **Code exfiltration** | Temp files only; deleted after streaming |
-| **Unauthorized repo access** | Uses user's own credentials; can only access what they can |
+| **Unauthorised repo access** | Uses user's own credentials; can only access what they can |
 | **Malicious bundles** | Bundle validation before processing |
 | **Path traversal** | Archive extraction validates paths |
 | **Denial of service** | Rate limiting; configurable size limits |
@@ -142,52 +143,55 @@ audit_log.debug("Using credential: {:?}", cred);  // NEVER
 ### 1. Branch Protection
 
 ```rust
-let branch_guard = BranchGuard::new(vec![
-    "main".to_string(),
-    "master".to_string(),
-    "release/*".to_string(),
-]);
+// `BranchGuard::new` accepts any iterator of `Into<String>` patterns.
+let branch_guard = BranchGuard::new(["main", "master", "release/*"]);
 
-// Before push
-if branch_guard.is_protected(branch) && !is_fast_forward {
-    return Err("Cannot force-push to protected branch");
+// Before push: the actual check returns a `SecurityCheckResult` rather
+// than a bool — `Allowed` or `Blocked { reason }` — and `Blocked` is
+// surfaced to the client as a tool error.
+match branch_guard.check("push", &push_args) {
+    SecurityCheckResult::Blocked { reason } => return Err(reason),
+    SecurityCheckResult::Allowed => {}
 }
 ```
 
 ### 2. Force Push Protection
 
 ```rust
-let push_guard = PushGuard::new(allow_force_push: false);
+// `PushGuard::new(false)` blocks all `--force` / `-f` /
+// `--force-with-lease` pushes; `PushGuard::new(true)` allows them.
+let push_guard = PushGuard::new(false);
 
-// Before push
-if push_guard.is_force_push(args) {
-    return Err("Force push is disabled");
+match push_guard.check("push", &push_args) {
+    SecurityCheckResult::Blocked { reason } => return Err(reason),
+    SecurityCheckResult::Allowed => {}
 }
 ```
 
 ### 3. Repository Filtering
 
 ```rust
-// Allowlist mode: only specified repos
-let filter = RepoFilter::allowlist(vec![
-    "github.com/myorg/*",
-]);
+// Allowlist mode: only allow patterns added via `allow(...)`.
+let mut filter = RepoFilter::allowlist_mode();
+filter.allow("github.com/myorg/*");
 
-// Or blocklist mode
-let filter = RepoFilter::blocklist(vec![
-    "github.com/secrets/*",
-]);
+// Or blocklist mode (the default): block patterns added via `block(...)`,
+// allow everything else.
+let mut filter = RepoFilter::blocklist_mode();
+filter.block("github.com/secrets/*");
+
+if !filter.is_allowed(repo_url) {
+    return Err("Repository is not allowed by policy");
+}
 ```
 
 ### 4. Rate Limiting
 
 ```rust
-let limiter = RateLimiter::new(
-    max_burst: 20,
-    refill_per_sec: 5.0,
-);
+// `RateLimiter::new(max_burst, refill_rate)` — no named arguments in
+// Rust, just positional ones.
+let limiter = RateLimiter::new(20, 5.0);
 
-// Before operation
 if !limiter.try_acquire() {
     return Err("Rate limit exceeded");
 }
@@ -195,12 +199,22 @@ if !limiter.try_acquire() {
 
 ### 5. URL Sanitisation
 
+The actual implementation lives at `src/git2_ops/auth.rs::sanitize_url_for_logging`
+and uses byte-safe `find` operations rather than a regex (the project has no
+regex dependency). The behaviour is: if the URL contains both `://` and `@`,
+everything between the scheme and the `@` is replaced with `***`.
+
 ```rust
-/// Remove credentials from URLs before logging
-pub fn sanitize_url(url: &str) -> String {
-    // https://user:token@github.com/... → https://***@github.com/...
-    let re = Regex::new(r"://[^@]+@").unwrap();
-    re.replace(url, "://***@").to_string()
+/// Remove credentials from URLs before logging.
+pub fn sanitize_url_for_logging(url: &str) -> String {
+    if let Some(at_pos) = url.find('@') {
+        if let Some(scheme_end) = url.find("://") {
+            let scheme = &url[..scheme_end + 3];
+            let after_at = &url[at_pos + 1..];
+            return format!("{scheme}***@{after_at}");
+        }
+    }
+    url.to_string()
 }
 ```
 
@@ -216,8 +230,8 @@ Cred::ssh_key_from_agent(username)
 // ✅ Use TempDir for automatic cleanup
 let temp = TempDir::new()?;
 
-// ✅ Sanitise URLs in logs
-log::info!("Cloning {}", sanitize_url(url));
+// ✅ Sanitise URLs in logs (this project uses `tracing`, not `log`)
+tracing::info!("Cloning {}", sanitize_url_for_logging(url));
 
 // ✅ Validate paths in archives
 if path.starts_with("..") {
@@ -235,8 +249,8 @@ Err("Authentication failed. Check your credential configuration.")
 self.token = get_token();  // NEVER
 
 // ❌ Log credentials
-log::debug!("Token: {}", token);  // NEVER
-log::debug!("Cred: {:?}", cred);  // NEVER
+tracing::debug!("Token: {}", token);  // NEVER
+tracing::debug!("Cred: {:?}", cred);  // NEVER
 
 // ❌ Include credentials in errors
 Err(format!("Auth failed with token: {}", token))  // NEVER
@@ -250,11 +264,11 @@ let path = "/tmp/repo";  // Use TempDir instead
 ### If Credentials Are Suspected Leaked
 
 1. **Revoke immediately** — Rotate the affected credential
-2. **Check audit logs** — Look for unauthorized operations
+2. **Check audit logs** — Look for unauthorised operations
 3. **Review code** — Find the leak source
 4. **Report** — If vulnerability, follow SECURITY.md disclosure process
 
-### If Unauthorized Push Detected
+### If Unauthorised Push Detected
 
 1. **Git revert** — Undo the push on the remote
 2. **Check audit logs** — When and from where

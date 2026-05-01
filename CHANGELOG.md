@@ -113,12 +113,154 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`helper_script_uses_correct_repo_pull_archive_field`) that asserts
   the script references `files_archive` and never the obsolete
   `changed_files_archive`.
+- **`src/mcp/tools/mod.rs` rustdoc listed only 8 of the 10 MCP tools.**
+  The `Tier 2 (Chunked Streaming)` section in the module-level doc-comment
+  named `repo_clone_start` and `repo_clone_chunk` but omitted
+  `repo_clone_status` and `repo_clone_cancel`, even though both are
+  re-exported from this module and registered in the `tools/call`
+  dispatch table in `src/mcp/server.rs`. Added both to the rustdoc list
+  with intra-doc links into `repo_clone_chunk` (where their handlers
+  actually live).
+- **`docs/ARCHITECTURE.md` "What Touches Disk" table understated Tier 2
+  disk usage.** The table's `Tar archive | NO | Built in memory` row
+  applied only to Tier 1 — Tier 2 sessions whose tar.gz is at least
+  `DISK_THRESHOLD` (10 MiB, defined in `src/streaming/chunked.rs`) write
+  the archive to a `NamedTempFile` so memory usage stays O(chunk size).
+  Split the row into Tier 1 (always in memory) and Tier 2 (disk-backed
+  when the threshold is exceeded, deleted when the session ends or
+  expires). No code change.
+- **`.claude/CLAUDE.md` source-tree comments still used the slash form
+  for tool names** (`repo/clone`, `repo/push`, `repo/clone_start`, etc.)
+  in the `mcp/tools/` block, even after the wider sweep that switched
+  the rest of the docs to underscores in PR #141. Also added
+  `tests/property_tests.rs` and `tests/security_tests.rs` to the
+  `tests/` tree so it matches reality and the `docs/ARCHITECTURE.md`
+  source-tree diagram.
+- **Documentation accuracy sweep** — vague `**Response:**` summaries in
+  `README.md` for `repo_clone`, `repo_push`, `repo_clone_start`,
+  `repo_clone_chunk`, `repo_clone_status`, `repo_diff`, and `repo_refs`
+  now name the actual response fields (matching the `RepoCloneResult`,
+  `RepoPushResult`, etc. structs). The README configuration example now
+  shows the `timeouts`, `limits`, and `rate_limits` sections — they were
+  documented in the options table below but missing from the example
+  block, which made the example look smaller than the real schema. Added
+  a pointer to `config/example-config.json` for the fully-populated
+  example. `CONTRIBUTING.md` PR Requirements checklist now lists
+  `markdownlint-cli2` and the toolchain-pin pre-flight check (both run
+  in CI). `docs/AI_WORKFLOW.md`'s `Initialize Response` heading is now
+  `` `initialize` response `` — the protocol method name stays as the
+  spec spells it but the surrounding prose is consistent with the
+  British spelling used elsewhere. The `repo_clone`, `repo_push`, and
+  `repo_pull` example responses in `AI_WORKFLOW.md` now show the actual
+  `hint` strings the server returns instead of placeholder text
+  (previously `"Bundle was successfully pushed to the remote."` and
+  `"Apply the diff or extract files_archive into your local clone."`,
+  neither of which the code has ever emitted). The `cargo clippy`
+  example in the same doc now uses the strict
+  `--all-targets --all-features -- -D warnings` form that CI runs, so
+  the AI's local check matches what the project gates on.
+  `CONTRIBUTING.md`'s `Types of Documentation` table now lists
+  `STYLE.md` and every file under `docs/`, and the
+  `Updating Documentation` list now spells out when to touch
+  `docs/`, `STYLE.md`, and `config/example-config.json`.
+- **`docs/SECURITY.md` had multiple fabricated APIs in its illustrative
+  Rust snippets.** The file showed `RepoFilter::allowlist(vec![...])` and
+  `RepoFilter::blocklist(vec![...])` constructors that have never
+  existed (the real API is `RepoFilter::allowlist_mode()` /
+  `blocklist_mode()` plus `.allow(pattern)` / `.block(pattern)` — see
+  `src/security/guards.rs`); `PushGuard::new(allow_force_push: false)`
+  and `RateLimiter::new(max_burst: 20, refill_per_sec: 5.0)` using
+  Rust-doesn't-have-named-arguments syntax (and the latter also got the
+  field name wrong — the parameter is `refill_rate`); a
+  `push_guard.is_force_push(args)` method that doesn't exist (force
+  pushes are detected inside `SecurityGuard::check`); a
+  `sanitize_url(url)` function that doesn't exist (the real one is
+  `sanitize_url_for_logging` and uses byte-safe `find` rather than the
+  shown `Regex::new(...)` — the project has no regex dependency); and
+  `audit_log.info(...)` / `audit_log.debug(...)` calls against an API
+  that's never existed (audit events are constructed via
+  `AuditEvent::repo_clone_success(...)` etc. and submitted via
+  `AuditLogger::log_silent`). All snippets rewritten to compile against
+  the real APIs. The same file's `log::info!` / `log::debug!` examples
+  are now `tracing::info!` / `tracing::debug!` — this project depends on
+  `tracing`, not `log`. Three "Unauthorized" / "unauthorized" instances
+  in narrative text changed to British "Unauthorised" / "unauthorised"
+  (the only remaining `Unauthorized` is the literal HTTP `401
+  Unauthorized` reason phrase in `docs/errors.md`, which is part of the
+  HTTP standard).
+- **`README.md` Prerequisites omitted the runtime Git CLI requirement.**
+  The server shells out to `git credential fill` (in
+  `src/git2_ops/auth.rs`) and `git bundle unbundle` (in
+  `src/git2_ops/push.rs`); a user installing only the prebuilt binary
+  without git on `PATH` would have hit the credential helper failing to
+  return anything and `repo_push` failing to apply the bundle. Added a
+  `#### Git CLI` subsection explaining the requirement.
+- **`.github/PULL_REQUEST_TEMPLATE.md` Code Quality checklist drifted
+  from `CONTRIBUTING.md` § Pull Requests.** Added the same
+  `markdownlint-cli2` and toolchain-pin pre-flight items, and tightened
+  `cargo fmt` to the strict `cargo fmt --all --check` form CI runs.
 - **`helper_script` Python helper's `show_info` enumerated `old_commit`,
   a key no MCP tool has ever returned.** The actual fields are
   `base_commit` + `new_commit` (`repo_pull`) and `base_commit` +
   `head_commit` (`repo_diff`). Replaced `old_commit` with `base_commit`
   and `head_commit`, and added a regression test
   (`helper_script_show_info_uses_real_commit_field_names`).
+- **Inconsistent and imprecise size units across rustdoc and the MCP
+  tool schema.** `src/streaming/chunked.rs` and
+  `src/mcp/tools/repo_clone_start.rs` advertised the chunk and disk
+  thresholds as `1MB` / `4MB` / `10MB`, but the constants are binary
+  (`1024 * 1024`, `4 * 1024 * 1024`, `10 * 1024 * 1024`) — i.e. mebibytes,
+  not megabytes. `src/config/settings.rs` already used `MiB`. Normalised
+  every reference (rustdoc, the `tools/list` schema description for
+  `chunk_size`, the README repo_clone_chunk response summary, and the
+  ARCHITECTURE.md "Tier 2" trade-off table) to use `KiB` / `MiB`. The
+  schema description now also reports the actual clamped range (1 KiB
+  to 4 MiB) instead of just the maximum, and the `chunked.rs` module
+  doc-comment now notes that the 1-hour session timeout is the *default*
+  rather than a hard-coded value (the real timeout comes from
+  `sessions.timeout_secs`).
+- **`README.md` `submodule_depth` description omitted the `0` and `1`
+  values.** The `tools/list` schema explicitly documents `1 = top-level
+  only` and `0 = skip submodules entirely`, but the README only
+  mentioned the unlimited default. Brought the README in line with the
+  schema so callers can pick the right depth without reading the
+  source.
+- **Documentation lines exceeding the 170-character ceiling.**
+  `CONTRIBUTING.md` line 78, and `STYLE.md` lines 207 and 283 had been
+  173 / 192 / 174 columns respectively. Markdownlint was happy because
+  MD013 ignores tables and code blocks, but the project's
+  `.editorconfig` declares `max_line_length = 170` for all files.
+  Wrapped them.
+- **`docs/errors.md` claimed the wrong default for protected branches.**
+  It said `Default protected branches: main, master, develop`, but
+  `SecurityConfig::default()` makes `protected_branches` an empty list
+  — nothing is protected unless the user configures it (the test at
+  `src/config/settings.rs::security_config_defaults` asserts exactly
+  that). Replaced the claim with the actual default and a pointer to
+  `config/example-config.json` for the recommended set.
+- **`src/lib.rs` Tier 2 tools list omitted `repo_clone_status`.** Like
+  the earlier `tools/mod.rs` fix, the crate-level rustdoc named only
+  three of the four Tier 2 tools. Added `repo_clone_status` and a new
+  `Other tools` section listing the four operations that don't fit the
+  Tier 1 / Tier 2 split (`repo_pull`, `repo_diff`, `repo_refs`,
+  `helper_script`) so `cargo doc` no longer hides them.
+- **`README.md` configuration table omitted defaults for half the
+  options.** `git_identity.{name,email}`, `security.{protected_branches,
+  repo_allowlist, repo_blocklist}`, `logging.{level, audit_log_path}`,
+  `proxy.{url, no_proxy}`, `lfs.{max_object_size, max_total_size}`, and
+  `submodules.{include_patterns, exclude_patterns}` had no default
+  documented. Added the actual defaults from `src/config/settings.rs`
+  (mostly `null`/empty/`warn`) so users no longer have to guess what
+  happens when they leave a section out.
+- **`helper_script` rustdoc didn't mention the `info` subcommand or the
+  optional positional arguments.** The Python script supports `extract
+  <result.json> [output_dir]`, `bundle <repo_dir> <since_commit>
+  [head_ref] [output_file]`, and `info <result.json>`, but the
+  module-level rustdoc only listed `extract <result.json> <output_dir>`
+  and `bundle <repo_dir> <since_commit>` and presented the optional
+  arguments as required. Updated the rustdoc and the `usage` string
+  returned by `handle_helper_script` to use `[brackets]` for optionals
+  and to include the `info` subcommand.
 - Dependabot CI failures caused by orphaned `dtolnay/rust-toolchain` SHAs. The
   previous `# stable` pin pointed to a commit that fell off the remote when
   the rolling `stable` branch advanced, breaking Dependabot's
