@@ -53,6 +53,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   check (`.github/scripts/check-toolchain-pin.sh`) fails the quick-checks job
   if the action pin and the `rust-toolchain.toml` channel disagree, so future
   toolchain bumps must update both together.
+- **Codecov upload — `fail_ci_if_error: true`** — both `ci_main.yml`
+  and `ci_pr.yml` now fail the job loudly when the Codecov upload
+  fails, instead of silently going green. The `CODECOV_TOKEN` repo
+  secret has been added (previously missing — every upload was being
+  rejected with HTTP 400 "Token required - not valid tokenless upload"
+  but `fail_ci_if_error: false` masked this, leaving the badge stuck
+  at "unknown"). OIDC was attempted first but the Codecov ingest
+  endpoint reproducibly returned HTTP 500 for this repo + OIDC
+  combination — token-based auth is the working path until Codecov's
+  OIDC handling matures.
+- **Coverage merging — unit + integration tests now share an
+  `LLVM_PROFILE_FILE`** — the `coverage` job in `ci_main.yml` previously
+  ran unit tests in one shell step and integration tests in another,
+  with `cargo llvm-cov`'s env vars scoped to whichever step invoked
+  them. The integration-test `.profraw` files landed somewhere the
+  final `cargo llvm-cov report` did not look, so the merged-coverage
+  feature claimed by PR #127 silently produced unit-test-only numbers.
+  Both test phases now run in a single shell with one
+  `source <(cargo llvm-cov show-env --sh)` setup, plus a diagnostic
+  step that prints the post-run profraw count so future regressions
+  are visible in the workflow log.
 - **LFS error diagnostics** — three small observability improvements to make
   LFS resolution failures actionable from CI logs alone:
   1. `LfsClient::new` now logs a `WARN` if no credentials were provided
