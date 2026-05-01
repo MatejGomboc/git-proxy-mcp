@@ -95,18 +95,41 @@ impl Config {
 #[serde(deny_unknown_fields)]
 pub struct SecurityConfig {
     /// Whether to allow force pushes.
+    ///
+    /// Default: `false`. When `false`, `--force` / `-f` /
+    /// `--force-with-lease` pushes are rejected by `PushGuard::check`.
     #[serde(default)]
     pub allow_force_push: bool,
 
     /// List of protected branch names.
+    ///
+    /// Branches in this list block force-push and deletion attempts.
+    /// Wildcard patterns (e.g. `release/*`) are supported by the matcher.
+    ///
+    /// Default: empty list, which `McpServer::new` treats as "use the
+    /// built-in safe set" — `BranchGuard::with_defaults()` substitutes
+    /// `main`, `master`, `develop`. Setting any non-empty list overrides
+    /// the fallback (so `["main"]` protects only `main`, not also
+    /// `master`/`develop`).
     #[serde(default)]
     pub protected_branches: Vec<String>,
 
     /// Optional allowlist of repository patterns.
+    ///
+    /// If `Some`, only repository URLs matching at least one pattern are
+    /// allowed (allowlist mode). If `None`, allowlist mode is disabled
+    /// and any URL not on the blocklist is allowed.
+    ///
+    /// Default: `None` (allowlist mode disabled).
     #[serde(default)]
     pub repo_allowlist: Option<Vec<String>>,
 
     /// Optional blocklist of repository patterns.
+    ///
+    /// If `Some`, repository URLs matching any pattern are rejected
+    /// (blocklist mode). Takes precedence over the allowlist.
+    ///
+    /// Default: `None` (no blocklist).
     #[serde(default)]
     pub repo_blocklist: Option<Vec<String>>,
 }
@@ -115,11 +138,20 @@ pub struct SecurityConfig {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LoggingConfig {
-    /// Log level (trace, debug, info, warn, error).
+    /// Log level: one of `trace`, `debug`, `info`, `warn`, `error`.
+    ///
+    /// Default: `"warn"` — only warnings and errors are emitted, keeping
+    /// the JSON-RPC channel quiet for normal operation.
     #[serde(default = "default_log_level")]
     pub level: String,
 
     /// Optional path to audit log file.
+    ///
+    /// When set, every Git operation, security-guard decision, and
+    /// rate-limit event is appended to this file as a JSON line —
+    /// see `src/security/audit.rs` for the schema.
+    ///
+    /// Default: `None` (audit logging disabled).
     #[serde(default)]
     pub audit_log_path: Option<PathBuf>,
 }
