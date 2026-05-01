@@ -270,7 +270,8 @@ Sync new changes from remote to AI's workspace.
 }
 ```
 
-**Response:** Streamed delta of changed files.
+**Response:** Unified `diff`, base64 tar.gz of changed/added files (`files_archive`), `changed_files` list with per-file change types,
+`deleted_files` list, `base_commit` and `new_commit` SHAs, change `stats`, and `up_to_date` flag.
 
 #### `repo_diff`
 
@@ -317,7 +318,7 @@ Get a Python helper script for processing results (decoding base64, extracting t
 }
 ```
 
-**Response:** Python script source code.
+**Response:** Python script source code, plus suggested `filename`, brief `usage` instructions, and the script `version`.
 
 ---
 
