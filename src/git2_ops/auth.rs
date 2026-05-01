@@ -297,39 +297,83 @@ pub fn get_credentials_for_url(url: &str) -> Option<(String, String)> {
         parsed.1  // host (github.com)
     );
 
-    // Run git credential fill
-    let output = Command::new("git")
+    // Run `git credential fill`. Each failure mode is debug-traced so a
+    // user investigating "no credentials" in LFS logs can tell whether
+    // the cause was missing git, a stdin write error, an exit-non-zero
+    // helper, or a malformed response.
+    let mut child = match Command::new("git")
         .args(["credential", "fill"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .ok()
-        .and_then(|mut child| {
-            // Write input to stdin
-            if let Some(stdin) = child.stdin.as_mut() {
-                stdin.write_all(input.as_bytes()).ok()?;
-            }
-            child.wait_with_output().ok()
-        })?;
+    {
+        Ok(child) => child,
+        Err(e) => {
+            debug!(
+                error = %e,
+                "failed to spawn `git credential fill` (is `git` on PATH?)"
+            );
+            return None;
+        }
+    };
+
+    if let Some(stdin) = child.stdin.as_mut() {
+        if let Err(e) = stdin.write_all(input.as_bytes()) {
+            debug!(error = %e, "failed to write to `git credential fill` stdin");
+            return None;
+        }
+    }
+
+    let output = match child.wait_with_output() {
+        Ok(output) => output,
+        Err(e) => {
+            debug!(error = %e, "failed to wait for `git credential fill`");
+            return None;
+        }
+    };
 
     if !output.status.success() {
-        debug!("git credential helper returned non-zero status");
+        debug!(
+            exit = ?output.status.code(),
+            "`git credential fill` exited non-zero (no credential helper configured?)"
+        );
         return None;
     }
 
-    // Parse the output
-    let stdout = String::from_utf8(output.stdout).ok()?;
-    parse_credential_output(&stdout)
+    let stdout = match String::from_utf8(output.stdout) {
+        Ok(s) => s,
+        Err(e) => {
+            debug!(error = %e, "`git credential fill` stdout was not valid UTF-8");
+            return None;
+        }
+    };
+
+    let creds = parse_credential_output(&stdout);
+    if creds.is_none() {
+        debug!("`git credential fill` returned without `username` and `password` fields");
+    }
+    creds
 }
 
 /// Parse a URL into (protocol, host) for credential lookup.
+///
+/// SSH URLs are recognised only in the canonical `git@host:path` form;
+/// alternative SSH users (`gitea@`, `gerrit@`, etc.) and `ssh://` URLs
+/// are handled by the second branch via `Url::parse`.
 fn parse_url_for_credentials(url: &str) -> Option<(String, String)> {
     // Handle SSH URLs: git@github.com:owner/repo.git
     if url.starts_with("git@") {
         // Extract host from git@host:path
         let without_prefix = url.strip_prefix("git@")?;
         let host = without_prefix.split(':').next()?;
+        // Defensive: empty host (e.g. `git@`, `git@:path`) is not a
+        // valid lookup key — `git credential fill` with `host=` would
+        // either fail or, worse, return credentials for a different
+        // configured host by accident.
+        if host.is_empty() {
+            return None;
+        }
         return Some(("https".to_string(), host.to_string()));
     }
 
@@ -668,6 +712,20 @@ mod tests {
             result,
             Some(("https".to_string(), "github.com".to_string()))
         );
+    }
+
+    #[test]
+    fn parse_url_for_credentials_rejects_empty_ssh_host() {
+        // `git@:path` has an empty host before the colon — sending
+        // `host=` to `git credential fill` would either fail or match
+        // a default-configured host by accident. Must reject.
+        assert!(parse_url_for_credentials("git@:owner/repo.git").is_none());
+    }
+
+    #[test]
+    fn parse_url_for_credentials_rejects_just_git_at() {
+        // `git@` alone (no host, no path) — also empty-host.
+        assert!(parse_url_for_credentials("git@").is_none());
     }
 
     #[test]
