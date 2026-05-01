@@ -1,8 +1,10 @@
 name: CI - Main Branch
 
+# Workflow-level permissions are read-only by default. Jobs that need
+# elevated scope (e.g. cache cleanup needs `actions: write`) declare
+# it on the job itself, following least-privilege.
 permissions:
     contents: read
-    actions: write
 
 on:
     push:
@@ -126,7 +128,7 @@ jobs:
                     target/release/build/
                     target/release/.fingerprint/
                     target/release/incremental/
-                key: rust-${{ runner.os }}-${{ steps.rust-version.outputs.version }}-${{ hashFiles('**/Cargo.lock') }}
+                key: rust-${{ runner.os }}-${{ steps.rust-version.outputs.version }}-${{ hashFiles('Cargo.toml') }}
                 restore-keys: |
                     rust-${{ runner.os }}-${{ steps.rust-version.outputs.version }}-
 
@@ -165,7 +167,7 @@ jobs:
                     target/release/build/
                     target/release/.fingerprint/
                     target/release/incremental/
-                key: rust-${{ runner.os }}-${{ steps.rust-version.outputs.version }}-${{ hashFiles('**/Cargo.lock') }}
+                key: rust-${{ runner.os }}-${{ steps.rust-version.outputs.version }}-${{ hashFiles('Cargo.toml') }}
 
     # Note: the dedicated `integration` job has been merged into the
     # `coverage` job below — coverage instruments the release binary with
@@ -208,14 +210,20 @@ jobs:
                     ~/.cargo/registry/cache/
                     ~/.cargo/git/db/
                     target/
-                key: rust-coverage-${{ runner.os }}-${{ steps.rust-version.outputs.version }}-${{ hashFiles('**/Cargo.lock') }}
+                key: rust-coverage-${{ runner.os }}-${{ steps.rust-version.outputs.version }}-${{ hashFiles('Cargo.toml') }}
                 restore-keys: |
                     rust-coverage-${{ runner.os }}-${{ steps.rust-version.outputs.version }}-
 
             - name: Configure git credentials for integration coverage
+              # Pass the PAT through an env var rather than ${{ secrets... }}
+              # interpolation directly in the shell body — the env-var form
+              # keeps the secret value out of the rendered script source
+              # and matches GitHub's documented best practice.
+              env:
+                TEST_REPO_PAT: ${{ secrets.TEST_REPO_PAT }}
               run: |
                 git config --global credential.helper store
-                echo "https://x-access-token:${{ secrets.TEST_REPO_PAT }}@github.com" \
+                echo "https://x-access-token:${TEST_REPO_PAT}@github.com" \
                     >> ~/.git-credentials
                 git config --global user.name "integration-test"
                 git config --global user.email "integration-test@ci.local"
@@ -304,9 +312,13 @@ jobs:
         timeout-minutes: 5
         if: ${{ !cancelled() }}
 
+        # Cache cleanup deletes stale Actions caches via the REST API.
+        permissions:
+            contents: read
+            actions: write
+
         steps:
             - name: Check if all jobs succeeded
-              id: check-results
               run: |
                 # Coverage runs unit tests AND integration tests against the
                 # instrumented binary. It may be skipped on forks that lack

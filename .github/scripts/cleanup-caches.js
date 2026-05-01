@@ -20,9 +20,12 @@ module.exports = async ({ github, context, core }) => {
     function formatBytes(bytes) {
         if (bytes === 0) return "0 B";
         const k = 1024;
-        const sizes = ["B", "KB", "MB", "GB"];
+        // Binary units (KiB / MiB / GiB) match the rest of the project's
+        // size reporting after the PR #150 sweep — `1024 B` is a kibibyte,
+        // not a kilobyte.
+        const sizes = ["B", "KiB", "MiB", "GiB"];
         const i = Math.floor(Math.log(bytes) / Math.log(k));
-        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+        return parseFloat((bytes / k ** i).toFixed(2)) + " " + sizes[i];
     }
 
     function getDaysSinceAccess(cache) {
