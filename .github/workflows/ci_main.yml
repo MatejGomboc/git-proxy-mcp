@@ -234,17 +234,19 @@ jobs:
             # Build the instrumented release binary so the Python integration
             # tests can spawn it and have its execution recorded as coverage.
             # cargo-llvm-cov's show-env exposes RUSTFLAGS, LLVM_PROFILE_FILE,
-            # and CARGO_TARGET_DIR pointing at target/llvm-cov-target/.
+            # and CARGO_LLVM_COV_TARGET_DIR (which equals the workspace target
+            # directory — cargo-llvm-cov stopped overriding CARGO_TARGET_DIR
+            # in 0.1.14, so the build lands in the regular `target/release/`).
             - name: Build instrumented release binary and run integration tests
               env:
                 TEST_REPO_URL: ${{ secrets.TEST_REPO_URL }}
               run: |
                 # Export the env vars cargo-llvm-cov needs.
-                eval "$(cargo llvm-cov show-env --export-prefix)"
+                eval "$(cargo llvm-cov show-env --sh)"
                 cargo build --release
                 python3 tests/integration/rebuild_fixture.py
                 # Tell the integration tests to spawn the instrumented build.
-                GIT_PROXY_MCP_BINARY="$CARGO_TARGET_DIR/release/git-proxy-mcp" \
+                GIT_PROXY_MCP_BINARY="$CARGO_LLVM_COV_TARGET_DIR/release/git-proxy-mcp" \
                     python3 tests/integration/test_mcp_tools.py
 
             - name: Cleanup credentials

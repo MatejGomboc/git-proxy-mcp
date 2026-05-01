@@ -60,6 +60,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   previous `# stable` pin pointed to a commit that fell off the remote when
   the rolling `stable` branch advanced, breaking Dependabot's
   `git branch --remotes --contains <sha>` lookup.
+- **Coverage job binary path** — the `Build instrumented release binary and
+  run integration tests` step in `ci_main.yml` referenced `$CARGO_TARGET_DIR`,
+  which `cargo llvm-cov show-env` has not exported since 0.1.14 (Jan 2022).
+  The expansion collapsed to `/release/git-proxy-mcp`, causing every push to
+  main since PR #127 merged to fail with `FileNotFoundError`. Now uses
+  `$CARGO_LLVM_COV_TARGET_DIR` (the workspace target directory exposed by
+  current cargo-llvm-cov) and switches `--export-prefix` to its non-deprecated
+  `--sh` alias.
 
 ## [1.1.0] - 2026-03-14
 
