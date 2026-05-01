@@ -32,7 +32,7 @@
 //! All tool handlers follow the security principles:
 //! - Credentials never leave the user's PC
 //! - No source files written to disk (bare repos only)
-//! - All responses are sanitized for credential leakage
+//! - All responses are sanitised for credential leakage
 
 pub mod helper_script;
 pub mod repo_clone;

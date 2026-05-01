@@ -12,8 +12,8 @@ use thiserror::Error;
 /// without leaking credentials.
 #[derive(Error, Debug)]
 pub enum Git2Error {
-    /// Failed to initialize a repository
-    #[error("failed to initialize repository: {0}")]
+    /// Failed to initialise a repository.
+    #[error("failed to initialise repository: {0}")]
     InitFailed(String),
 
     /// Failed to fetch from remote
@@ -44,7 +44,7 @@ pub enum Git2Error {
     #[error("failed to create temporary directory: {0}")]
     TempDirFailed(#[from] io::Error),
 
-    /// Git2 library error (sanitized)
+    /// Git2 library error (sanitised)
     #[error("git operation failed: {0}")]
     Git2(String),
 
@@ -55,7 +55,7 @@ pub enum Git2Error {
 
 impl From<git2::Error> for Git2Error {
     fn from(err: git2::Error) -> Self {
-        // Sanitize the error message to avoid credential leakage
+        // Sanitise the error message to avoid credential leakage
         let message = err.message();
 
         // Check for authentication-related errors
@@ -69,12 +69,12 @@ impl From<git2::Error> for Git2Error {
             return Self::AuthenticationFailed;
         }
 
-        // Generic sanitized error
+        // Generic sanitised error
         Self::Git2(sanitize_error_message(message))
     }
 }
 
-/// Sanitize an error message to remove potential credential information.
+/// Sanitise an error message to remove potential credential information.
 fn sanitize_error_message(message: &str) -> String {
     // Remove anything that looks like a token or password
     // This is a basic implementation — extend as needed
@@ -223,7 +223,7 @@ mod tests {
     fn error_display_messages_match_thiserror() {
         assert_eq!(
             Git2Error::InitFailed("disk full".into()).to_string(),
-            "failed to initialize repository: disk full",
+            "failed to initialise repository: disk full",
         );
         assert_eq!(
             Git2Error::FetchFailed("timeout".into()).to_string(),

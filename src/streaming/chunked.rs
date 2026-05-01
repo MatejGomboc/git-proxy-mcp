@@ -153,7 +153,7 @@ pub struct StreamingSession {
     /// Session ID for retrieval
     pub id: String,
 
-    /// Repository URL (sanitized for display)
+    /// Repository URL (sanitised for display)
     pub url: String,
 
     /// Branch that was cloned
@@ -184,7 +184,7 @@ impl StreamingSession {
     ///
     /// # Errors
     ///
-    /// Returns an error if disk-backed storage fails to initialize
+    /// Returns an error if disk-backed storage fails to initialise
     /// (e.g., temp file creation fails).
     pub fn new(
         id: String,
@@ -367,7 +367,7 @@ impl StreamingSessionManager {
     ///
     /// Returns an error if:
     /// - The maximum number of sessions is reached
-    /// - Disk-backed storage initialization fails (temp file creation)
+    /// - Disk-backed storage initialisation fails (temp file creation)
     #[allow(clippy::significant_drop_tightening)]
     pub fn create_session(
         &self,

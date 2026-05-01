@@ -59,9 +59,9 @@ use crate::streaming::chunked::StreamingSessionManager;
 /// Server state in the MCP lifecycle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ServerState {
-    /// Waiting for initialize request.
+    /// Waiting for `initialize` request.
     AwaitingInit,
-    /// Initialize received, waiting for initialized notification.
+    /// `initialize` received, waiting for `notifications/initialized`.
     Initialising,
     /// Ready for normal operation.
     Running,
@@ -122,7 +122,7 @@ pub struct ClientInfo {
     pub version: Option<String>,
 }
 
-/// Parameters for the initialize request.
+/// Parameters for the `initialize` request.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InitializeParams {
@@ -224,7 +224,7 @@ pub struct SecurityConfig {
 
 /// Git identity configuration for AI-assisted commits.
 ///
-/// This identity is communicated to the AI during initialization so they
+/// This identity is communicated to the AI during initialisation so they
 /// can configure their local Git to use it for commits. This allows
 /// clear separation between AI-made commits and human commits.
 #[derive(Debug, Clone, Default, Serialize)]
@@ -517,7 +517,7 @@ impl McpServer {
         // All other notifications (including unknown ones) are ignored per JSON-RPC spec
     }
 
-    /// Handles the initialize request.
+    /// Handles the `initialize` request.
     fn handle_initialize(&mut self, req: &JsonRpcRequest) -> Result<JsonRpcResponse, JsonRpcError> {
         // Must be in AwaitingInit state
         if self.state != ServerState::AwaitingInit {

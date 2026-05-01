@@ -379,7 +379,7 @@ Always verify locally before pushing:
 ```bash
 cargo test
 cargo clippy --all-targets --all-features -- -D warnings
-cargo fmt --check
+cargo fmt --all --check
 ```
 
 ### 4. Handle Merge Conflicts

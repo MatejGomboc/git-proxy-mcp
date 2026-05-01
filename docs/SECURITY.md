@@ -102,11 +102,16 @@ All operations are logged, but credentials are never included:
 
 ```rust
 // ✅ Good: Log operation details. Audit events are constructed via
-// `AuditEvent::repo_clone_success(...)` (or _failed/_blocked) and the
-// URL is sanitised inside the constructor — see `src/security/audit.rs`.
+// `AuditEvent::repo_clone_success(url, branch, commit, file_count,
+// archive_size, duration)` (and matching `_failed` / `_blocked`
+// constructors) — see `src/security/audit.rs` for the full set.
+// URLs must be sanitised by the *caller* before being passed in.
 self.audit_logger.log_silent(&AuditEvent::repo_clone_success(
-    &sanitize_url_for_logging(url),
+    sanitize_url_for_logging(url),
     branch,
+    commit,
+    file_count,
+    archive_size,
     elapsed,
 ));
 

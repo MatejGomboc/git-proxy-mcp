@@ -73,7 +73,7 @@ pub struct FetchOptions2 {
 /// Returns an error if:
 /// - URL validation fails (`InvalidUrl`)
 /// - Temp directory creation fails (`TempDirFailed`)
-/// - Repository initialization fails (`InitFailed`)
+/// - Repository initialisation fails (`InitFailed`)
 /// - Fetch operation fails (`FetchFailed`)
 /// - Branch reference not found (`RefNotFound`)
 ///
@@ -112,7 +112,7 @@ pub fn fetch_bare(url: &str, options: Option<FetchOptions2>) -> Result<FetchResu
     let repo = Repository::init_bare(temp_dir.path())
         .map_err(|e| Git2Error::InitFailed(format!("failed to init bare repo: {}", e.message())))?;
 
-    debug!("initialized bare repository");
+    debug!("initialised bare repository");
 
     // Fetch the specific branch
     let refspec = format!("refs/heads/{branch_name}:refs/heads/{branch_name}");

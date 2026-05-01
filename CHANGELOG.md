@@ -261,6 +261,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   arguments as required. Updated the rustdoc and the `usage` string
   returned by `handle_helper_script` to use `[brackets]` for optionals
   and to include the `info` subcommand.
+- **British-spelling sweep across `src/`.** The project's rule (see
+  `CONTRIBUTING.md` § British Spelling) explicitly covers comments and
+  user-facing strings, but several rustdoc comments, inline `//` notes,
+  one log message, and one `thiserror`-derived `Display` string still
+  used American spellings ("sanitize", "initialize", "initialization",
+  "finalized"). Files touched: `src/session.rs`, `src/streaming/chunked.rs`,
+  `src/streaming/tar.rs`, `src/git2_ops/{auth,clone,error,push}.rs`,
+  `src/mcp/server.rs`, `src/mcp/tools/{mod,repo_push}.rs`. The user-facing
+  change is the `Git2Error::InitFailed` `Display` string, which now reads
+  `failed to initialise repository` instead of
+  `failed to initialize repository`; the unit test that asserted on the
+  literal string was updated to match. JSON-RPC method names
+  (`initialize`, `notifications/initialized`) and reqwest's
+  `StatusCode::UNAUTHORIZED` enum variant are spec/upstream identifiers
+  and stay American — backticked in narrative text to make that clear.
+- **`docs/SECURITY.md` audit-log snippet had the wrong arity** — the
+  pass-3 rewrite of the audit example called
+  `AuditEvent::repo_clone_success` with three arguments, but the real
+  constructor takes six (`url, branch, commit, file_count, archive_size,
+  duration`). Corrected, plus a note that the URL must be sanitised by
+  the caller (the constructor does not).
+- **`docs/AI_WORKFLOW.md` "Check Before Push" snippet still had
+  `cargo fmt --check`** while CONTRIBUTING.md, STYLE.md, the PR
+  template, and the rest of `AI_WORKFLOW.md` all use the strict
+  `cargo fmt --all --check` form CI runs. Aligned.
 - Dependabot CI failures caused by orphaned `dtolnay/rust-toolchain` SHAs. The
   previous `# stable` pin pointed to a commit that fell off the remote when
   the rolling `stable` branch advanced, breaking Dependabot's
