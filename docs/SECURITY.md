@@ -14,7 +14,7 @@ The MCP server runs on the user's machine and delegates all authentication to th
 
 **SSH Authentication:**
 
-```
+```text
 git2 needs to authenticate
           │
           ▼
@@ -36,7 +36,7 @@ git2 uses signature for auth
 
 **HTTPS Authentication:**
 
-```
+```text
 git2 needs to authenticate
           │
           ▼

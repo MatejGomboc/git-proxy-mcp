@@ -17,7 +17,7 @@ This is the fundamental design principle that distinguishes git-proxy-mcp from o
 
 ### Clone Flow (In Detail)
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │ CLONE: Stream directly from git objects to tar archive                      │
 ├─────────────────────────────────────────────────────────────────────────────┤
@@ -83,7 +83,7 @@ repo.checkout_head(...)?;                  // Would write files!
 
 ### Push Flow
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │ PUSH: Receive bundle, push to remote                                        │
 ├─────────────────────────────────────────────────────────────────────────────┤
@@ -128,7 +128,7 @@ repo.checkout_head(...)?;                  // Would write files!
 
 ### Temp Directory Contents
 
-```
+```text
 /tmp/git-proxy-xxxxx/        # Temp dir (auto-deleted)
 ├── objects/                 # Git object database
 │   ├── pack/               # Pack files from fetch
@@ -155,7 +155,7 @@ For large repositories, Tier 1 may buffer too much data in memory. Tier 2 solves
 
 ### Chunked Clone Flow
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │ TIER 2: Chunked streaming for large repos                                   │
 ├─────────────────────────────────────────────────────────────────────────────┤
@@ -225,7 +225,7 @@ All operations logged (without credentials), showing:
 
 ## Component Overview
 
-```
+```text
 src/
 ├── lib.rs                       # Library crate root
 ├── main.rs                      # CLI entry point
