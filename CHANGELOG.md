@@ -33,7 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Code coverage reporting** — `cargo-llvm-cov` runs on every PR and push to main,
   uploading lcov reports to Codecov. Patch coverage target is 80% for changed lines;
   project coverage cannot drop more than 1% on main. Coverage badge added to README.
-- **508 unit tests** (up from 257 baseline) covering URL validation, error paths,
+- **510 unit tests** (up from 257 baseline) covering URL validation, error paths,
   argument parsing, server request routing, tar archive creation with local bare
   repos, LFS pointer parsing, commit resolution from branch/tag/SHA refs, commit
   counting between two refs, file archive creation from trees, `.gitmodules`
@@ -98,6 +98,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`helper_script` Python helper looked for the wrong `repo_pull` archive
+  field name.** The embedded `git_proxy_helper.py` script's `extract` and
+  `info` commands expected the `repo_pull` response to carry the archive
+  under a `changed_files_archive` key, but the actual response field has
+  always been named `files_archive` (declared in `RepoPullResult` since
+  v1.1.0 — see `src/mcp/tools/repo_pull.rs`). Net effect: any AI assistant
+  that used the helper script to extract a `repo_pull` result hit
+  `ValueError: No archive found in result` and fell back to manual
+  base64+tar handling. Fixed by renaming both lookups to `files_archive`
+  and updating the resulting `info` key to `has_files_archive`. The
+  `archive` field used for `repo_clone` results was always correct and is
+  unchanged. Added a regression test
+  (`helper_script_uses_correct_repo_pull_archive_field`) that asserts
+  the script references `files_archive` and never the obsolete
+  `changed_files_archive`.
+- **`helper_script` Python helper's `show_info` enumerated `old_commit`,
+  a key no MCP tool has ever returned.** The actual fields are
+  `base_commit` + `new_commit` (`repo_pull`) and `base_commit` +
+  `head_commit` (`repo_diff`). Replaced `old_commit` with `base_commit`
+  and `head_commit`, and added a regression test
+  (`helper_script_show_info_uses_real_commit_field_names`).
 - Dependabot CI failures caused by orphaned `dtolnay/rust-toolchain` SHAs. The
   previous `# stable` pin pointed to a commit that fell off the remote when
   the rolling `stable` branch advanced, breaking Dependabot's
