@@ -27,7 +27,7 @@ Cloud-based AI coding assistants face a fundamental dilemma:
 
 git-proxy-mcp acts as an **authenticated streaming proxy** between Git providers and AI workspaces:
 
-```
+```text
 ┌─────────────────┐      ┌─────────────────┐      ┌─────────────────┐
 │  Git Providers  │      │    YOUR PC      │      │    AI's VM      │
 │                 │      │                 │      │                 │
@@ -84,7 +84,7 @@ git-proxy-mcp acts as an **authenticated streaming proxy** between Git providers
 
 ### Security Model
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────┐
 │  YOUR PC (credentials stay here, files don't)                   │
 │                                                                 │

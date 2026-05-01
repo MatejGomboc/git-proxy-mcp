@@ -190,7 +190,7 @@ Use British spelling in all documentation and user-facing text:
 
 We use [Conventional Commits](https://www.conventionalcommits.org/). Format:
 
-```
+```text
 <type>(<scope>): <description>
 
 [optional body]
@@ -215,7 +215,7 @@ We use [Conventional Commits](https://www.conventionalcommits.org/). Format:
 
 ### Examples
 
-```
+```text
 feat(git): Add clone progress streaming
 
 fix(auth): Prevent credential leak in error messages

@@ -12,7 +12,7 @@ Cloud-based AI assistants (Claude.ai, ChatGPT, Gemini) have:
 
 ## The Solution: Credential Relay
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────────────┐
 │  CREDENTIAL RELAY ARCHITECTURE                                          │
 │                                                                         │
@@ -41,7 +41,7 @@ Repo files:  Stream through MCP → land in AI's VM
 
 ### Tier 1: Single-Response Streaming
 
-```
+```text
 GitHub ──► MCP (buffer in RAM) ──► AI
 ```
 
@@ -57,7 +57,7 @@ GitHub ──► MCP (buffer in RAM) ──► AI
 
 ### Tier 2: Chunked Streaming
 
-```
+```text
 GitHub ──► MCP (small chunks) ──► AI
 ```
 
@@ -100,7 +100,7 @@ GitHub ──► MCP (small chunks) ──► AI
 
 ## Data Flow: Clone Operation
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │ CLONE: Authenticated fetch → stream to AI                                   │
 ├─────────────────────────────────────────────────────────────────────────────┤
@@ -132,7 +132,7 @@ GitHub ──► MCP (small chunks) ──► AI
 
 ## Data Flow: Push Operation
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │ PUSH: Receive changes from AI → authenticated push                          │
 ├─────────────────────────────────────────────────────────────────────────────┤

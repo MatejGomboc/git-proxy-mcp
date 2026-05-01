@@ -4,7 +4,7 @@ This document explains how an AI assistant uses git-proxy-mcp to work with priva
 
 ## The Complete Workflow
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                        AI's Development Workflow                            │
 ├─────────────────────────────────────────────────────────────────────────────┤
@@ -108,7 +108,7 @@ mkdir -p /home/claude/repo
 tar -xzf repo.tar.gz -C /home/claude/repo
 rm repo.tar.gz
 
-# Initialize git (so we can create commits later)
+# Initialise git (so we can create commits later)
 cd /home/claude/repo
 git init
 git add .
@@ -254,7 +254,7 @@ git commit -m "Sync from remote: new789..."
 
 **GitHub MCP Server:**
 
-```
+```text
 Call 1:  get_repository_content(path: "/")
 Call 2:  get_file_content(path: "src/main.rs")
 Call 3:  get_file_content(path: "src/lib.rs")
@@ -266,7 +266,7 @@ Total: 100 API calls, several minutes
 
 **git-proxy-mcp:**
 
-```
+```text
 Call 1: repo/clone { url: "..." }
 
 Total: 1 call, seconds
@@ -276,7 +276,7 @@ Total: 1 call, seconds
 
 **GitHub MCP Server:**
 
-```
+```text
 ❌ Not possible — no execution environment
 ```
 
@@ -298,7 +298,7 @@ test validation::tests::test_empty_input ... ok
 
 **GitHub MCP Server:**
 
-```
+```text
 Call 1: create_branch(name: "feature/fix")
 Call 2: update_file(path: "src/main.rs", content: "...", message: "...")
 Call 3: update_file(path: "src/lib.rs", content: "...", message: "...")
@@ -386,7 +386,7 @@ git commit -m "Merge remote changes"
 
 After pushing a feature branch, you might use GitHub MCP server just for PR creation:
 
-```
+```text
 # Use git-proxy-mcp for the code work
 repo/clone → work → repo/push to feature/my-feature
 
