@@ -226,22 +226,25 @@ jobs:
                 sudo apt-get install -y git-lfs
                 git lfs install
 
-            # Run unit tests AND integration tests in a single shell so
-            # both write `.profraw` files to the same `LLVM_PROFILE_FILE`
-            # location set up by `show-env`. Splitting these into separate
-            # steps (as the previous workflow did) ran them in different
-            # subshells with cargo-llvm-cov's env scoped to whichever step
-            # invoked it — the integration-test profraw files landed
-            # somewhere the final `cargo llvm-cov report` didn't look, so
-            # the merged-coverage feature claimed by PR #127 silently
-            # produced unit-test-only numbers.
+            # Run tests + integration tests + report generation all in
+            # a single shell so they share the env that `show-env --sh`
+            # exports — most importantly `LLVM_PROFILE_FILE` (where
+            # binaries write profraw) and `CARGO_LLVM_COV_TARGET_DIR`
+            # (the workspace target directory). When `cargo llvm-cov
+            # report` runs in a *separate* shell without these env vars,
+            # it defaults to looking for profraw in `target/llvm-cov-target/`
+            # instead of where show-env actually wrote them (`target/`),
+            # and fails with "not found *.profraw files". This was the
+            # observed failure on the post-PR-#134 main run; the previous
+            # diagnostic confirmed profraw files did land in `target/`,
+            # but the standalone report step in a fresh shell looked
+            # elsewhere.
             #
-            # show-env exposes RUSTFLAGS (instrumentation), LLVM_PROFILE_FILE
-            # (where binaries write profraw), and CARGO_LLVM_COV_TARGET_DIR
-            # (the workspace target directory — cargo-llvm-cov stopped
-            # overriding CARGO_TARGET_DIR in 0.1.14, so the build lands in
-            # the regular `target/release/`).
-            - name: Run unit + integration tests under coverage instrumentation
+            # Note on cargo-llvm-cov version history:
+            # - 0.1.14 stopped overriding CARGO_TARGET_DIR — builds now
+            #   land in the regular `target/release/`.
+            # - 0.7.0 renamed `--export-prefix` to `--sh` (deprecated alias).
+            - name: Run tests + generate coverage report under instrumentation
               env:
                 TEST_REPO_URL: ${{ secrets.TEST_REPO_URL }}
               run: |
@@ -270,15 +273,15 @@ jobs:
                 echo "--- total profraw count ---"
                 find target -name '*.profraw' -type f 2>/dev/null | wc -l
 
+                # Generate the merged report from inside this same shell
+                # so `report` inherits the show-env env and looks for
+                # profraw in the directory where the tests just wrote it.
+                cargo llvm-cov report --lcov --output-path lcov.info
+                cargo llvm-cov report --summary-only
+
             - name: Cleanup credentials
               if: always()
               run: rm -f ~/.git-credentials
-
-            - name: Generate merged coverage report (lcov)
-              run: cargo llvm-cov report --lcov --output-path lcov.info
-
-            - name: Generate coverage summary
-              run: cargo llvm-cov report --summary-only
 
             - name: Upload coverage to Codecov
               uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6.0.0

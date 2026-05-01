@@ -63,17 +63,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   endpoint reproducibly returned HTTP 500 for this repo + OIDC
   combination — token-based auth is the working path until Codecov's
   OIDC handling matures.
-- **Coverage merging — unit + integration tests now share an
-  `LLVM_PROFILE_FILE`** — the `coverage` job in `ci_main.yml` previously
-  ran unit tests in one shell step and integration tests in another,
-  with `cargo llvm-cov`'s env vars scoped to whichever step invoked
-  them. The integration-test `.profraw` files landed somewhere the
-  final `cargo llvm-cov report` did not look, so the merged-coverage
-  feature claimed by PR #127 silently produced unit-test-only numbers.
-  Both test phases now run in a single shell with one
-  `source <(cargo llvm-cov show-env --sh)` setup, plus a diagnostic
-  step that prints the post-run profraw count so future regressions
-  are visible in the workflow log.
+- **Coverage merging — tests + report generation share one shell** —
+  the `coverage` job in `ci_main.yml` previously split its work
+  across multiple shell steps: unit tests in one, integration tests
+  in another, and `cargo llvm-cov report` in a third. Each step
+  re-entered a fresh shell where the env vars `cargo llvm-cov
+  show-env --sh` exports (most importantly `LLVM_PROFILE_FILE` and
+  `CARGO_LLVM_COV_TARGET_DIR`) were no longer set — so binaries
+  wrote profraw to one location and `report` looked in another.
+  Net effect: PR #127's "merged unit + integration coverage"
+  feature silently produced unit-test-only numbers (~77% lines)
+  despite the integration tests running fine. Now everything runs
+  in a single shell: `source show-env`, clean stale profraw, run
+  unit tests, build instrumented release binary, run integration
+  tests, list the resulting profraw for diagnostic visibility,
+  generate the lcov + summary reports — all sharing the same env.
+  The next `Upload coverage to Codecov` step (a separate shell)
+  only needs `lcov.info` from disk, which persists across steps.
 - **LFS error diagnostics** — three small observability improvements to make
   LFS resolution failures actionable from CI logs alone:
   1. `LfsClient::new` now logs a `WARN` if no credentials were provided
