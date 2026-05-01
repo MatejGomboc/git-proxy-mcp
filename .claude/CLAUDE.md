@@ -102,13 +102,13 @@ src/
 │   ├── progress.rs     # Progress notifications
 │   └── tools/          # MCP tool handlers
 │       ├── mod.rs              # Module exports
-│       ├── repo_clone.rs       # Tier 1: repo/clone
-│       ├── repo_push.rs        # Tier 1: repo/push
-│       ├── repo_clone_start.rs # Tier 2: repo/clone_start
-│       ├── repo_clone_chunk.rs # Tier 2: repo/clone_chunk + cancel + status
-│       ├── repo_pull.rs        # repo/pull
-│       ├── repo_diff.rs        # repo/diff
-│       ├── repo_refs.rs        # repo/refs
+│       ├── repo_clone.rs       # Tier 1: repo_clone
+│       ├── repo_push.rs        # Tier 1: repo_push
+│       ├── repo_clone_start.rs # Tier 2: repo_clone_start
+│       ├── repo_clone_chunk.rs # Tier 2: repo_clone_chunk + cancel + status
+│       ├── repo_pull.rs        # repo_pull
+│       ├── repo_diff.rs        # repo_diff
+│       ├── repo_refs.rs        # repo_refs
 │       └── helper_script.rs    # helper_script utility
 └── security/           # Security guards
     ├── mod.rs          # Module exports
@@ -119,6 +119,8 @@ tests/
 ├── mcp_integration.rs          # Rust MCP protocol tests
 ├── perf_tests.rs               # Performance benchmarks
 ├── streaming_tests.rs          # Streaming/chunked tests
+├── property_tests.rs           # Property-based tests (URL sanitisation, URL validation, LFS pointer detection/parsing)
+├── security_tests.rs           # Security guards, rate limiting, audit event safety
 └── integration/                # End-to-end Python tests (stdlib only)
     ├── test_mcp_tools.py       # Spawn server, exercise all 10 tools
     └── rebuild_fixture.py      # Rebuild private test fixture repo

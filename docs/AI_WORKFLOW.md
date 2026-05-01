@@ -42,7 +42,7 @@ When the MCP server initialises, it may provide a `gitIdentity` in the response.
 This identity should be used for all commits to clearly distinguish AI-assisted
 commits from human commits.
 
-**Initialize Response (with git identity):**
+**`initialize` response (with git identity):**
 
 ```json
 {
@@ -95,7 +95,8 @@ This ensures all commits made by the AI are properly attributed, making it easy 
   "commit": "abc123def456...",
   "branch": "main",
   "file_count": 47,
-  "archive_size": 1048576
+  "archive_size": 1048576,
+  "hint": "Use helper_script tool to get git_proxy_helper.py, then: python git_proxy_helper.py extract <result.json> <output_dir>"
 }
 ```
 
@@ -111,6 +112,12 @@ rm repo.tar.gz
 # Initialise git (so we can create commits later)
 cd /home/claude/repo
 git init
+
+# Configure the identity from the `initialize` response's `gitIdentity`
+# (if present) before any commit, so AI commits are clearly attributable.
+git config user.name "Claude AI"
+git config user.email "ai-assistant@example.com"
+
 git add .
 git commit -m "Initial clone from abc123def456"
 
@@ -161,8 +168,8 @@ cargo test
 # Format code
 cargo fmt
 
-# Check with clippy
-cargo clippy
+# Check with clippy (matches the project's CI command)
+cargo clippy --all-targets --all-features -- -D warnings
 
 # Commit
 git add .
@@ -206,7 +213,7 @@ BUNDLE_BASE64=$(base64 -w0 /tmp/changes.bundle)
   "commit": "def789abc...",
   "force": false,
   "remote_url": "https://github.com/user/my-rust-project",
-  "hint": "Bundle was successfully pushed to the remote."
+  "hint": "To create a bundle: use helper_script tool, then: python git_proxy_helper.py bundle <repo_dir> <since_commit>"
 }
 ```
 
@@ -250,7 +257,7 @@ If someone else pushed changes:
     "deletions": 3
   },
   "up_to_date": false,
-  "hint": "Apply the diff or extract files_archive into your local clone."
+  "hint": "Use helper_script tool to get git_proxy_helper.py, then: python git_proxy_helper.py extract <result.json> <output_dir>"
 }
 ```
 
@@ -347,6 +354,9 @@ Total: 1 MCP call for all changes
 
 ### 1. Use Shallow Clone for Large Repos
 
+For medium-sized repositories, combine `depth: 1` with `sparse` patterns
+to keep the single MCP response small:
+
 ```json
 {
   "name": "repo_clone",
@@ -357,6 +367,11 @@ Total: 1 MCP call for all changes
   }
 }
 ```
+
+For repositories that genuinely don't fit in a single response, switch
+to Tier 2 (`repo_clone_start` + `repo_clone_chunk`), which streams the
+archive in 1 MiB chunks and supports resume on interruption — see the
+"Tier 2: Chunked Streaming" section in `README.md` for the protocol.
 
 ### 2. Bundle Multiple Commits
 
@@ -378,7 +393,7 @@ Always verify locally before pushing:
 ```bash
 cargo test
 cargo clippy --all-targets --all-features -- -D warnings
-cargo fmt --check
+cargo fmt --all --check
 ```
 
 ### 4. Handle Merge Conflicts

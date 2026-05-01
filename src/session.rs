@@ -20,7 +20,7 @@ use crate::git2_ops::auth::sanitize_url_for_logging;
 /// A session tracking a cloned repository.
 #[derive(Debug, Clone)]
 pub struct RepoSession {
-    /// Repository URL (sanitized for display, original for operations).
+    /// Repository URL (sanitised for display, original for operations).
     url: String,
 
     /// Current branch name.
@@ -56,7 +56,7 @@ impl RepoSession {
         &self.url
     }
 
-    /// Get the repository URL sanitized for logging/display.
+    /// Get the repository URL sanitised for logging/display.
     #[must_use]
     pub fn sanitized_url(&self) -> String {
         sanitize_url_for_logging(&self.url)
@@ -116,7 +116,7 @@ impl SessionManager {
     /// Generate a session ID from URL and branch.
     #[must_use]
     pub fn session_id(url: &str, branch: &str) -> String {
-        // Use sanitized URL for the key to avoid storing credentials
+        // Use sanitised URL for the key to avoid storing credentials
         let sanitized = sanitize_url_for_logging(url);
         format!("{sanitized}@{branch}")
     }

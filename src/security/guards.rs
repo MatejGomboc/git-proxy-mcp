@@ -78,7 +78,10 @@ impl BranchGuard {
 
     /// Creates a branch guard with common default protections.
     ///
-    /// Protected by default: `main`, `master`, `develop`, `release/*`
+    /// Protected by default: `main`, `master`, `develop`. (Wildcard
+    /// patterns like `release/*` are supported by `is_protected` but are
+    /// not in the built-in default set — add them via the
+    /// `security.protected_branches` config option.)
     #[must_use]
     pub fn with_defaults() -> Self {
         Self::new(["main", "master", "develop"])

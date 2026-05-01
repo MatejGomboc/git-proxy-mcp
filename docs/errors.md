@@ -50,7 +50,13 @@ Default rate limits: 20 operations burst, 5 operations per second sustained.
 | Delete protected branch | `Cannot delete protected branch '{branch}'` |
 | Force push to protected branch | `Cannot force push to protected branch '{branch}'` |
 
-Default protected branches: `main`, `master`, `develop`.
+Effective default: `main`, `master`, `develop` are protected. The
+`security.protected_branches` field in config defaults to an empty list,
+but the server treats an empty list as "use the built-in safe set" and
+substitutes `BranchGuard::with_defaults()` — see
+`McpServer::new` in `src/mcp/server.rs`. Configuring any non-empty list
+overrides the fallback. The shipped `config/example-config.json`
+recommends `["main", "master"]`.
 
 ### Force Push Blocking
 
