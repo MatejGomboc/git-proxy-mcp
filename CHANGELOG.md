@@ -69,6 +69,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   current cargo-llvm-cov) and switches `--export-prefix` to its non-deprecated
   `--sh` alias.
 
+### Security
+
+- **`py/command-line-injection` (CodeQL alert #2, CWE-78/CWE-88)** — hardened
+  `_sanitise_binary_path` in `tests/integration/test_mcp_tools.py`. The
+  function previously relied on a character-class regex plus `os.path.normpath`
+  to satisfy CodeQL; the analyser still flagged the eventual `subprocess.Popen`
+  call as user-tainted (critical severity). It now (1) keeps the regex as a
+  first-pass reject, (2) canonicalises via `os.path.realpath`, (3) requires
+  the basename to be exactly `git-proxy-mcp`, and (4) requires the resolved
+  directory to equal `<repo>/target/release` (also resolved). An attacker who
+  controls the `GIT_PROXY_MCP_BINARY` env var cannot redirect the spawn to a
+  binary outside the repo's release output directory.
+
 ## [1.1.0] - 2026-03-14
 
 ### Added

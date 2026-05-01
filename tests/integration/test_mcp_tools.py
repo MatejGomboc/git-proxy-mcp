@@ -57,24 +57,41 @@ _BINARY_RE = re.compile(r"\A[A-Za-z0-9_./\-]+\Z")
 
 
 def _sanitise_binary_path(raw: str) -> str:
-    """Validate and reconstruct the binary path.
+    """Validate the binary path and confirm it lives in our release directory.
 
-    The path can be overridden by the coverage workflow to point at an
-    instrumented build under `target/llvm-cov-target/`, so we must
-    accept absolute and relative paths but reject anything that could
-    smuggle shell metacharacters into the spawn argv. Reconstructing
-    via `os.path.normpath` produces a fresh string that CodeQL
-    recognises as sanitised, closing the `py/command-line-injection`
-    alert at the `subprocess.Popen` call site.
+    The path can be overridden by the coverage workflow to point at the
+    instrumented build, so we accept both absolute and relative inputs.
+    Three layers of defence close CodeQL's `py/command-line-injection`
+    alert at the `subprocess.Popen` call site:
+
+    1. `_BINARY_RE` bounds the character set — shell metacharacters are
+       structurally impossible.
+    2. The basename must be exactly `git-proxy-mcp`.
+    3. After canonicalisation the directory must equal this repository's
+       `target/release/` (resolved via `realpath`, so symlinks and `..`
+       segments are flattened before comparison).
+
+    Raises `ValueError` with a self-describing message on any failure.
     """
     if not _BINARY_RE.fullmatch(raw):
         raise ValueError(f"GIT_PROXY_MCP_BINARY contains unsafe characters: {raw!r}")
-    return os.path.normpath(raw)
+    candidate = os.path.realpath(raw)
+    if os.path.basename(candidate) != "git-proxy-mcp":
+        raise ValueError(
+            f"GIT_PROXY_MCP_BINARY must be named 'git-proxy-mcp' (got {candidate!r})"
+        )
+    expected_dir = os.path.realpath("./target/release")
+    if os.path.dirname(candidate) != expected_dir:
+        raise ValueError(
+            f"GIT_PROXY_MCP_BINARY must live in {expected_dir!r} (got {candidate!r})"
+        )
+    return candidate
 
 
 # BINARY can be overridden via the GIT_PROXY_MCP_BINARY env var so the
-# coverage workflow can point at an instrumented build under
-# `target/llvm-cov-target/`.
+# coverage workflow can point at the instrumented build. The build still
+# lands in `target/release/` because cargo-llvm-cov instruments via
+# RUSTFLAGS rather than by relocating cargo's target directory.
 BINARY = _sanitise_binary_path(
     os.environ.get("GIT_PROXY_MCP_BINARY", "./target/release/git-proxy-mcp")
 )
