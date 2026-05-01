@@ -46,6 +46,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Config-drift audit** — comprehensive cross-reference of every config
+  option across `src/config/settings.rs` (canonical), `config/example-config.json`
+  (full reference), and the README configuration table. All 26
+  user-configurable options checked: defaults match exactly across all
+  three sources, no ghost entries, no type/unit mismatches. Two cosmetic
+  alignments applied:
+  1. **`Config` struct field order** rearranged to match the user-facing
+     order in `example-config.json` and the README (`git_identity`
+     first, then `security`, `logging`, ..., `submodules`). Field names
+     drive serde deserialisation, so order is purely cosmetic — but a
+     reader with the README open now sees the source laid out the same
+     way.
+  2. **Six terse field rustdocs brought up to README detail.** The most
+     material gap was `SecurityConfig.protected_branches`: its rustdoc
+     said only "List of protected branch names." with no mention of the
+     empty-list-fallback behaviour (`McpServer::new` substitutes
+     `BranchGuard::with_defaults()` → `main`/`master`/`develop` when the
+     config list is empty). PR #150 documented this in the README,
+     `docs/errors.md`, and `BranchGuard::with_defaults` rustdoc but
+     didn't update the field that triggers the behaviour, so
+     `cargo doc --document-private-items` (which CI publishes) showed
+     less detail on this field than every other user-facing source.
+     Same treatment applied to the five sibling fields (`allow_force_push`,
+     `repo_allowlist`, `repo_blocklist`, `level`, `audit_log_path`),
+     bringing them in line with the already-detailed rustdocs on
+     `TimeoutConfig`, `LimitsConfig`, `RateLimitConfig`, `SessionConfig`,
+     `LfsConfig`, `SubmoduleConfig`, and `ProxyConfig`.
 - **CI/CD audit sweep** — comprehensive pass across every workflow and
   helper script in `.github/`, fixing one real cache bug and a handful
   of hardening/hygiene issues:
