@@ -46,6 +46,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **CI/CD audit sweep** — comprehensive pass across every workflow and
+  helper script in `.github/`, fixing one real cache bug and a handful
+  of hardening/hygiene issues:
+  1. **Permissions tightened to least-privilege.** `ci_main.yml` had
+     `actions: write` at workflow level inherited by every job — only
+     `ci-success` actually uses it (cache-cleanup REST API), so the
+     scope was moved to that job alone. `release.yml` had `contents:
+     write` + `id-token: write` + `attestations: write` at workflow
+     level inherited by the read-only `validate` and `build` jobs;
+     now only the `release` job (which creates the GitHub release
+     and submits SLSA build provenance) carries elevated scope.
+  2. **Concurrency groups added** to `release.yml` (`group:
+     release-${{ github.ref }}`, `cancel-in-progress: false`) and
+     `cleanup_caches.yml` (`group: cleanup-caches`), so re-running
+     a tag job or kicking off two cache cleanups at once doesn't
+     race on the GitHub release page or the cache-delete API.
+  3. **PAT no longer inlined into shell.** The integration-coverage
+     credential setup in `ci_main.yml` now passes
+     `${{ secrets.TEST_REPO_PAT }}` via an `env:` block and reads
+     it as `${TEST_REPO_PAT}` in the script body, keeping the secret
+     value out of the rendered run-script source (GitHub's documented
+     best practice).
+  4. **`cleanup_caches.yml` `dry_run` default flipped to `true`** so
+     an accidental "Run workflow" click doesn't actually delete
+     caches; the input description now spells out the destructive
+     case ("uncheck to actually delete").
+  5. **`release.yml` `Cargo.toml` version extraction hardened** —
+     `grep '^version = ' | head -1 | sed` was replaced with awk that
+     explicitly tracks the `[package]` section and exits on first
+     match, so a stray `version = "..."` under another table
+     can't be picked up by accident.
+  6. **`gh release create` flag building** switched from shell
+     word-splitting on `$LATEST_FLAG` / `$PRERELEASE_FLAG` to a
+     `RELEASE_FLAGS=()` bash array — shellcheck-friendly and robust
+     if values ever contain spaces.
+  7. **`ci-success` bash style unified** between `ci_pr.yml` and
+     `ci_main.yml` (bare `||`/`&&` line continuations, no `\`),
+     and the unused `id: check-results` on `ci_main.yml`'s
+     ci-success step was removed.
+  8. **`cleanup-caches.js` size labels** changed from KB/MB/GB to
+     KiB/MiB/GiB to match the rest of the project's binary-unit
+     reporting after the PR #150 sweep, and `Math.pow(k, i)` was
+     modernised to `k ** i`.
+  9. **`check-toolchain-pin.sh` now resolves paths relative to the
+     script's own location** rather than relying on the caller's
+     CWD being the repo root. Also exports `LC_ALL=C` so `sort -u`
+     orders bytes consistently across runners. Verified locally
+     from both the repo root and `/tmp`.
+  10. **`ci_integration.yml` deleted** — it was a `workflow_dispatch`-
+      only duplicate of the integration testing already running in
+      `ci_main.yml`'s `coverage` job. The inline comment in
+      `ci_main.yml` already documented that the dedicated integration
+      job had been merged into coverage to avoid the
+      `rebuild_fixture.py` force-push race condition; the standalone
+      file was the last remnant.
 - **`reqwest` requirement bumped 0.12 → 0.13** (cargo-dependencies group).
   reqwest 0.13 split the TLS feature: the old `rustls-tls` umbrella (which
   0.12 expanded to `__rustls` + `webpki-roots`) no longer exists; callers
@@ -107,6 +162,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **CI Rust cache key keyed on a gitignored file.** Every Rust cache
+  step in `ci_pr.yml`, `ci_main.yml`, and `ci_integration.yml` keyed
+  on `hashFiles('**/Cargo.lock')`, but the project's `.gitignore`
+  excludes `Cargo.lock`. On a freshly-checked-out runner the lock
+  file doesn't exist yet at the time the cache action runs (the
+  action runs *before* `cargo build` regenerates it), so `hashFiles`
+  returned the hash-of-no-files sentinel — a fixed value that never
+  changed when dependencies did. Net effect: the cache key collapsed
+  to `rust-${OS}-${rustc-hash}-` and never invalidated when
+  `Cargo.toml` was edited (e.g. the recent reqwest 0.12 → 0.13
+  bump in PR #149). Correctness was preserved because cargo's own
+  fingerprint check detects mismatched deps and rebuilds, but the
+  cache became a write-heavy no-op rather than a speedup. Switched
+  all five cache-key lines to `hashFiles('Cargo.toml')` — checked
+  in, exists at action time, and changes exactly when dependencies
+  do.
 - **`fetch_bare` hardcoded the fallback branch to `main` despite docs
   promising "the remote's default branch".** When `repo_clone` /
   `repo_clone_start` was called without a `branch` argument,
