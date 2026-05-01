@@ -53,16 +53,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   check (`.github/scripts/check-toolchain-pin.sh`) fails the quick-checks job
   if the action pin and the `rust-toolchain.toml` channel disagree, so future
   toolchain bumps must update both together.
-- **Codecov uploads use OIDC instead of long-lived secret** — the
-  `Upload coverage to Codecov` step in both `ci_main.yml` and `ci_pr.yml`
-  now sets `use_oidc: true` and the coverage job grants `id-token: write`,
-  letting GitHub Actions mint a short-lived OIDC token that Codecov
-  verifies. Removes the dependency on a `CODECOV_TOKEN` repository
-  secret (which was never set, causing every upload to fall back to
-  tokenless mode and be rejected by Codecov with HTTP 400 — the badge
-  was stuck at "unknown" for that reason). Also flips
-  `fail_ci_if_error: false` → `true` so future upload failures fail
-  the job loudly instead of silently.
+- **Codecov upload — `fail_ci_if_error: true`** — both `ci_main.yml`
+  and `ci_pr.yml` now fail the job loudly when the Codecov upload
+  fails, instead of silently going green. The `CODECOV_TOKEN` repo
+  secret has been added (previously missing — every upload was being
+  rejected with HTTP 400 "Token required - not valid tokenless upload"
+  but `fail_ci_if_error: false` masked this, leaving the badge stuck
+  at "unknown"). OIDC was attempted first but the Codecov ingest
+  endpoint reproducibly returned HTTP 500 for this repo + OIDC
+  combination — token-based auth is the working path until Codecov's
+  OIDC handling matures.
 - **Coverage merging — unit + integration tests now share an
   `LLVM_PROFILE_FILE`** — the `coverage` job in `ci_main.yml` previously
   ran unit tests in one shell step and integration tests in another,

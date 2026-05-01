@@ -138,14 +138,6 @@ jobs:
         runs-on: ubuntu-latest
         timeout-minutes: 20
 
-        # `id-token: write` lets the codecov-action mint a short-lived OIDC
-        # token instead of relying on a long-lived CODECOV_TOKEN secret.
-        # `contents: read` is re-granted because job-level permissions
-        # entirely override the workflow-level block.
-        permissions:
-            contents: read
-            id-token: write
-
         steps:
             - name: Checkout repository
               uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -188,9 +180,10 @@ jobs:
               uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6.0.0
               with:
                 files: lcov.info
-                use_oidc: true
                 fail_ci_if_error: true
                 verbose: true
+              env:
+                CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
     ci-success:
         name: CI Success
