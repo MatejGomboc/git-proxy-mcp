@@ -5,9 +5,19 @@
 # annotation (e.g. " (latest stable)") is ignored — only the X.Y.Z token
 # is matched. Exits non-zero on mismatch.
 #
-# Run from the repository root.
+# Resolves paths relative to the repository root regardless of the
+# caller's CWD (so this works whether invoked from CI's `bash
+# .github/scripts/check-toolchain-pin.sh` or directly).
 
 set -euo pipefail
+
+# Stable LC_ALL so `sort -u` orders bytes consistently across runners.
+export LC_ALL=C
+
+# cd to the repo root (script lives at <root>/.github/scripts/...).
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+repo_root=$(cd "${script_dir}/../.." && pwd)
+cd "${repo_root}"
 
 toml_channel=$(awk -F'"' '/^[[:space:]]*channel[[:space:]]*=/ {print $2; exit}' rust-toolchain.toml)
 

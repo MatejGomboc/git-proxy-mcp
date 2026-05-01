@@ -63,7 +63,16 @@ jobs:
             - name: Verify Cargo.toml version matches tag
               shell: bash
               run: |
-                CARGO_VERSION=$(grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+                # Extract the version from the [package] section specifically.
+                # Plain `grep '^version'` would also match version pins under
+                # [dependencies] etc.; this awk reads only after [package]
+                # and stops on the first match, so it can't pick up the
+                # wrong key.
+                CARGO_VERSION=$(awk -F'"' '
+                    /^\[package\]/ { in_pkg = 1; next }
+                    /^\[/          { in_pkg = 0 }
+                    in_pkg && /^version[[:space:]]*=/ { print $2; exit }
+                ' Cargo.toml)
                 TAG_VERSION="${{ steps.version.outputs.version }}"
 
                 # For pre-release tags like v0.1.0-rc1, compare base version
@@ -246,20 +255,21 @@ jobs:
                 TAG="${{ needs.validate.outputs.tag }}"
                 VERSION="${{ needs.validate.outputs.version }}"
 
-                # Determine if this is a prerelease
-                PRERELEASE_FLAG=""
-                LATEST_FLAG="--latest"
+                # Build the flag list as an array so empty entries don't
+                # rely on shell word-splitting (shellcheck-friendly,
+                # robust if values ever contain spaces).
+                RELEASE_FLAGS=()
                 if [[ "$VERSION" == *-* ]]; then
-                    PRERELEASE_FLAG="--prerelease"
-                    LATEST_FLAG="--latest=false"
+                    RELEASE_FLAGS+=(--prerelease --latest=false)
+                else
+                    RELEASE_FLAGS+=(--latest)
                 fi
 
                 # Create the release with gh CLI (more reliable than third-party actions)
                 gh release create "$TAG" \
                     --title "$TAG" \
                     --notes-file release_notes.md \
-                    $LATEST_FLAG \
-                    $PRERELEASE_FLAG \
+                    "${RELEASE_FLAGS[@]}" \
                     artifacts/*.tar.gz \
                     artifacts/*.zip \
                     artifacts/SHA256SUMS.txt

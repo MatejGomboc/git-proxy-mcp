@@ -215,9 +215,15 @@ jobs:
                     rust-coverage-${{ runner.os }}-${{ steps.rust-version.outputs.version }}-
 
             - name: Configure git credentials for integration coverage
+              # Pass the PAT through an env var rather than ${{ secrets... }}
+              # interpolation directly in the shell body — the env-var form
+              # keeps the secret value out of the rendered script source
+              # and matches GitHub's documented best practice.
+              env:
+                TEST_REPO_PAT: ${{ secrets.TEST_REPO_PAT }}
               run: |
                 git config --global credential.helper store
-                echo "https://x-access-token:${{ secrets.TEST_REPO_PAT }}@github.com" \
+                echo "https://x-access-token:${TEST_REPO_PAT}@github.com" \
                     >> ~/.git-credentials
                 git config --global user.name "integration-test"
                 git config --global user.email "integration-test@ci.local"
@@ -313,7 +319,6 @@ jobs:
 
         steps:
             - name: Check if all jobs succeeded
-              id: check-results
               run: |
                 # Coverage runs unit tests AND integration tests against the
                 # instrumented binary. It may be skipped on forks that lack

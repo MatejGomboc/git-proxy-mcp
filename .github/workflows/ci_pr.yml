@@ -195,9 +195,11 @@ jobs:
         steps:
             - name: Check if all jobs succeeded
               run: |
-                if [[ "${{ needs.quick-checks.result }}" != "success" ]] || \
-                   [[ "${{ needs.build.result }}" != "success" ]] || \
-                   [[ "${{ needs.coverage.result }}" != "success" && \
+                # `||` and `&&` already accept newlines as continuation —
+                # no need for backslashes (matches ci_main.yml's style).
+                if [[ "${{ needs.quick-checks.result }}" != "success" ]] ||
+                   [[ "${{ needs.build.result }}" != "success" ]] ||
+                   [[ "${{ needs.coverage.result }}" != "success" &&
                       "${{ needs.coverage.result }}" != "skipped" ]]; then
                     echo "One or more jobs failed"
                     exit 1
