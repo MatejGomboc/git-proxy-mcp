@@ -53,43 +53,14 @@ def _sanitise_repo_url(raw: str) -> str:
     return urlunsplit(("https", parts.hostname, parts.path, "", ""))
 
 
-_BINARY_RE = re.compile(r"\A[A-Za-z0-9_./\-]+\Z")
-
-
-def _sanitise_binary_path(raw: str) -> str:
-    """Validate the binary path and confirm it lives in our release directory.
-
-    The path can be overridden by the coverage workflow to point at the
-    instrumented build, so we accept both absolute and relative inputs.
-    Three layers of defence close CodeQL's `py/command-line-injection`
-    alert at the `subprocess.Popen` call site:
-
-    1. `_BINARY_RE` bounds the character set — shell metacharacters are
-       structurally impossible.
-    2. The basename must be exactly `git-proxy-mcp`.
-    3. After canonicalisation the directory must equal this repository's
-       `target/release/` (resolved via `realpath`, so symlinks and `..`
-       segments are flattened before comparison).
-
-    Raises `ValueError` with a self-describing message on any failure.
-    """
-    if not _BINARY_RE.fullmatch(raw):
-        raise ValueError(f"GIT_PROXY_MCP_BINARY contains unsafe characters: {raw!r}")
-    candidate = os.path.realpath(raw)
-    if os.path.basename(candidate) != "git-proxy-mcp":
-        raise ValueError(
-            f"GIT_PROXY_MCP_BINARY must be named 'git-proxy-mcp' (got {candidate!r})"
-        )
-    expected_dir = os.path.realpath("./target/release")
-    if os.path.dirname(candidate) != expected_dir:
-        raise ValueError(
-            f"GIT_PROXY_MCP_BINARY must live in {expected_dir!r} (got {candidate!r})"
-        )
-    return candidate
-
-
-# Use a fixed binary path to avoid environment-controlled command execution.
-# Coverage/instrumentation builds still produce this binary in target/release.
+# Hard-coded binary path — never derived from environment input. This
+# keeps `subprocess.Popen` below free of any taint flow that CodeQL's
+# `py/command-line-injection` (CWE-78/88) can flag. The coverage
+# workflow used to override this via `GIT_PROXY_MCP_BINARY`, but the
+# instrumented build always lands at `./target/release/git-proxy-mcp`
+# anyway (cargo-llvm-cov stopped overriding `CARGO_TARGET_DIR` in
+# 0.1.14, so its instrumented release build uses the regular target
+# directory) — so the env var was vestigial.
 BINARY = os.path.realpath("./target/release/git-proxy-mcp")
 REPO_URL = _sanitise_repo_url(os.environ["TEST_REPO_URL"]) if os.environ.get("TEST_REPO_URL") else ""
 REQUEST_TIMEOUT_SECS = 60
