@@ -98,6 +98,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`fetch_bare` hardcoded the fallback branch to `main` despite docs
+  promising "the remote's default branch".** When `repo_clone` /
+  `repo_clone_start` was called without a `branch` argument,
+  `git2_ops::clone::fetch_bare` resolved the missing branch to a literal
+  `"main"` (`options.branch.as_deref().unwrap_or("main")`), so any repo
+  with a non-`main` default (e.g. `master`, `develop`, or a renamed
+  default) would return `RefNotFound("main")` instead of fetching. The
+  `[1.1.0]` CHANGELOG entry that described this as fixed was true at
+  the docs/schema level only — the `tools/list` description and the
+  `RepoCloneArgs.branch` rustdoc had been updated to "remote's default
+  branch", but the code had never been changed to match.
+  Now `fetch_bare` opens a single `connect_auth` to the remote, asks
+  `Remote::default_branch()` when the caller passed no branch, strips
+  the leading `refs/heads/`, and proceeds with the fetch over the same
+  connection. Caller-supplied branches still take precedence and skip
+  the probe. There is no longer a hard-coded `"main"` fallback —
+  malformed remotes (no `HEAD` symref) now surface a proper
+  `FetchFailed("could not determine remote's default branch: …")`
+  error instead of silently pretending the default is `main`.
+  No change to integration tests (they all pass `branch: "main"`
+  explicitly), and the existing in-repo unit test is unaffected since
+  it only checks `FetchOptions2` defaults.
 - **`helper_script` Python helper looked for the wrong `repo_pull` archive
   field name.** The embedded `git_proxy_helper.py` script's `extract` and
   `info` commands expected the `repo_pull` response to carry the archive

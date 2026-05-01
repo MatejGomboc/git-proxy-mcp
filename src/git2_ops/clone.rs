@@ -17,7 +17,7 @@
 //! - Only git objects (compressed, not plaintext) touch the disk
 //! - Temp directory is automatically cleaned on drop
 
-use git2::{FetchOptions, Oid, Repository};
+use git2::{Direction, FetchOptions, Oid, Repository};
 use tempfile::TempDir;
 use tracing::{debug, info};
 
@@ -92,14 +92,13 @@ pub struct FetchOptions2 {
 /// ```
 pub fn fetch_bare(url: &str, options: Option<FetchOptions2>) -> Result<FetchResult, Git2Error> {
     let options = options.unwrap_or_default();
-    let branch_name = options.branch.as_deref().unwrap_or("main");
 
     // Validate URL before doing anything
     validate_url(url)?;
 
     info!(
         url = %super::auth::sanitize_url_for_logging(url),
-        branch = branch_name,
+        branch = options.branch.as_deref().unwrap_or("(remote default)"),
         "starting bare fetch"
     );
 
@@ -108,56 +107,96 @@ pub fn fetch_bare(url: &str, options: Option<FetchOptions2>) -> Result<FetchResu
 
     debug!(path = %temp_dir.path().display(), "created temp directory");
 
-    // Initialize BARE repository — no working tree!
+    // Initialise BARE repository — no working tree!
     let repo = Repository::init_bare(temp_dir.path())
         .map_err(|e| Git2Error::InitFailed(format!("failed to init bare repo: {}", e.message())))?;
 
     debug!("initialised bare repository");
 
-    // Fetch the specific branch
-    let refspec = format!("refs/heads/{branch_name}:refs/heads/{branch_name}");
-
-    // Scope the remote to ensure it's dropped before we return the repo
-    {
+    // Resolve the branch name and fetch in a single connection. Scope the
+    // remote so it's dropped before we return the repo.
+    let branch_name = {
         let mut remote = repo
             .remote_anonymous(url)
             .map_err(|e| Git2Error::InitFailed(format!("failed to create remote: {e}")))?;
 
-        let callbacks = create_callbacks_with_progress(options.progress.as_ref());
-
-        let mut fetch_opts = FetchOptions::new();
-        fetch_opts.remote_callbacks(callbacks);
-
-        let mut proxy_opts = git2::ProxyOptions::new();
+        // Connect once so we can both query the default branch (when the
+        // caller didn't pass one) and reuse the same connection for fetch.
+        let connect_callbacks = create_callbacks_with_progress(options.progress.as_ref());
+        let mut connect_proxy = git2::ProxyOptions::new();
         if let Some(ref proxy_url) = options.proxy_url {
-            proxy_opts.url(proxy_url);
+            connect_proxy.url(proxy_url);
         } else {
-            proxy_opts.auto();
+            connect_proxy.auto();
         }
-        fetch_opts.proxy_options(proxy_opts);
+        remote
+            .connect_auth(
+                Direction::Fetch,
+                Some(connect_callbacks),
+                Some(connect_proxy),
+            )
+            .map_err(|e| Git2Error::FetchFailed(e.message().to_string()))?;
 
-        // Configure shallow clone if depth is specified
+        // Resolve branch: caller-supplied wins; otherwise ask the connected
+        // remote for its default. We never fall back to a hard-coded "main"
+        // because that masks misconfigured remotes.
+        let branch_name = if let Some(b) = options.branch.as_deref() {
+            b.to_string()
+        } else {
+            let default_buf = remote.default_branch().map_err(|e| {
+                Git2Error::FetchFailed(format!(
+                    "could not determine remote's default branch: {}",
+                    e.message()
+                ))
+            })?;
+            let default_str = std::str::from_utf8(&default_buf)
+                .map_err(|e| Git2Error::Git2(format!("invalid default branch encoding: {e}")))?;
+            let resolved = default_str
+                .strip_prefix("refs/heads/")
+                .unwrap_or(default_str)
+                .trim_end_matches(['\0', '\n', '\r'])
+                .to_string();
+            debug!(branch = %resolved, "resolved remote's default branch");
+            resolved
+        };
+
+        // Build fetch options (fresh callbacks since `connect_auth` consumed
+        // ours; git2 reuses the existing TCP connection for the actual fetch).
+        let fetch_callbacks = create_callbacks_with_progress(options.progress.as_ref());
+        let mut fetch_opts = FetchOptions::new();
+        fetch_opts.remote_callbacks(fetch_callbacks);
+
+        let mut fetch_proxy = git2::ProxyOptions::new();
+        if let Some(ref proxy_url) = options.proxy_url {
+            fetch_proxy.url(proxy_url);
+        } else {
+            fetch_proxy.auto();
+        }
+        fetch_opts.proxy_options(fetch_proxy);
+
         if let Some(depth) = options.depth {
-            // git2 depth() takes i32, 0 means full clone
-            // Cap at i32::MAX and convert safely
+            // git2 depth() takes i32, 0 means full clone. Cap at i32::MAX.
             #[allow(clippy::cast_possible_wrap)]
             let depth_i32 = depth.min(i32::MAX as u32) as i32;
             fetch_opts.depth(depth_i32);
             debug!(depth = depth, "shallow clone configured");
         }
 
+        let refspec = format!("refs/heads/{branch_name}:refs/heads/{branch_name}");
         debug!(refspec = %refspec, "fetching");
 
         remote
             .fetch(&[&refspec], Some(&mut fetch_opts), None)
             .map_err(|e| Git2Error::FetchFailed(e.message().to_string()))?;
-    }
+
+        branch_name
+    };
 
     // Get the head commit (remote is now dropped, scope reference too)
     let head_commit = {
         let reference = repo
             .find_reference(&format!("refs/heads/{branch_name}"))
-            .map_err(|_| Git2Error::RefNotFound(branch_name.to_string()))?;
+            .map_err(|_| Git2Error::RefNotFound(branch_name.clone()))?;
 
         reference
             .peel_to_commit()
@@ -167,14 +206,14 @@ pub fn fetch_bare(url: &str, options: Option<FetchOptions2>) -> Result<FetchResu
 
     info!(
         commit = %head_commit,
-        branch = branch_name,
+        branch = %branch_name,
         "fetch complete"
     );
 
     Ok(FetchResult {
         repo,
         head_commit,
-        branch: branch_name.to_string(),
+        branch: branch_name,
         _temp_dir: temp_dir,
     })
 }
