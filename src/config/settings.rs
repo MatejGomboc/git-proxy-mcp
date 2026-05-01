@@ -32,6 +32,14 @@ pub struct Config {
     #[serde(rename = "_note", default)]
     _note: Option<String>,
 
+    // Field order matches the user-facing layout in `config/example-config.json`
+    // and the README configuration table, so a reader who has the JSON file or
+    // the README open sees the struct laid out the same way. Serde keys on
+    // field NAMES (not positions), so reordering doesn't affect deserialisation.
+    /// Git identity settings for AI-assisted commits.
+    #[serde(default)]
+    pub git_identity: GitIdentityConfig,
+
     /// Security settings.
     #[serde(default)]
     pub security: SecurityConfig,
@@ -51,10 +59,6 @@ pub struct Config {
     /// Rate limiting settings.
     #[serde(default)]
     pub rate_limits: RateLimitConfig,
-
-    /// Git identity settings for AI-assisted commits.
-    #[serde(default)]
-    pub git_identity: GitIdentityConfig,
 
     /// Proxy settings for network connections.
     #[serde(default)]
