@@ -123,16 +123,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-- **`py/command-line-injection` (CodeQL alert #2, CWE-78/CWE-88)** — hardened
-  `_sanitise_binary_path` in `tests/integration/test_mcp_tools.py`. The
-  function previously relied on a character-class regex plus `os.path.normpath`
-  to satisfy CodeQL; the analyser still flagged the eventual `subprocess.Popen`
-  call as user-tainted (critical severity). It now (1) keeps the regex as a
-  first-pass reject, (2) canonicalises via `os.path.realpath`, (3) requires
-  the basename to be exactly `git-proxy-mcp`, and (4) requires the resolved
-  directory to equal `<repo>/target/release` (also resolved). An attacker who
-  controls the `GIT_PROXY_MCP_BINARY` env var cannot redirect the spawn to a
-  binary outside the repo's release output directory.
+- **`py/command-line-injection` (CodeQL alert #2, CWE-78/CWE-88)** —
+  closed at the source by removing the env-var input entirely.
+  `tests/integration/test_mcp_tools.py` previously took the binary
+  path from `GIT_PROXY_MCP_BINARY` and ran it through a three-layer
+  `_sanitise_binary_path` validator (regex + canonicalise + allowlist
+  to `<repo>/target/release`). CodeQL re-flagged the call site after
+  unrelated edits shifted line numbers; rather than maintain a sanitiser
+  for an input that never had a real use case, drop the env-var input
+  altogether. The binary path is now hard-coded as
+  `os.path.realpath("./target/release/git-proxy-mcp")`. The coverage
+  workflow's instrumented release build lands at the same path
+  (cargo-llvm-cov stopped overriding `CARGO_TARGET_DIR` in 0.1.14),
+  so the override the workflow used to pass via `GIT_PROXY_MCP_BINARY`
+  was vestigial — also removed from `ci_main.yml`. No taint flow from
+  `os.environ` to `subprocess.Popen` remains.
 
 ## [1.1.0] - 2026-03-14
 

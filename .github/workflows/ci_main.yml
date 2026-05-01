@@ -259,9 +259,14 @@ jobs:
                 cargo build --release
 
                 # Integration tests against the instrumented release binary.
+                # The binary path is hard-coded inside test_mcp_tools.py to
+                # avoid an env-var taint flow into `subprocess.Popen`
+                # (CodeQL py/command-line-injection). The instrumented
+                # release build always lands at `./target/release/git-proxy-mcp`
+                # because cargo-llvm-cov stopped overriding `CARGO_TARGET_DIR`
+                # in 0.1.14, so no override is actually needed.
                 python3 tests/integration/rebuild_fixture.py
-                GIT_PROXY_MCP_BINARY="$CARGO_LLVM_COV_TARGET_DIR/release/git-proxy-mcp" \
-                    python3 tests/integration/test_mcp_tools.py
+                python3 tests/integration/test_mcp_tools.py
 
                 # Diagnostic: confirm both unit-test and integration-test
                 # profraw files landed where `cargo llvm-cov report` will
