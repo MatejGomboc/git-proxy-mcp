@@ -23,7 +23,7 @@ Since this is a credential-handling project:
 - [ ] No credentials, tokens, or secrets are included in code, comments, or tests
 - [ ] No credentials appear in log messages or error messages
 - [ ] No credentials are exposed in MCP responses
-- [ ] If handling sensitive data, `secrecy` crate is used appropriately
+- [ ] Credentials are scoped to their operation, not cached or persisted (see `src/git2_ops/auth.rs`)
 - [ ] Error messages don't leak sensitive information
 
 ## Testing
