@@ -821,7 +821,12 @@ impl LfsClient {
 
 /// Derive LFS server URL from git repository URL.
 ///
-/// For GitHub/GitLab, the LFS URL is typically: `{repo_url}/info/lfs`
+/// The LFS endpoint is `<repo_url>/info/lfs` with the repo URL preserved
+/// verbatim — including any `.git` suffix. GitHub in particular requires
+/// the `.git` to remain (e.g. `https://github.com/o/r.git/info/lfs/...`);
+/// stripping it routes the request to the web frontend, which returns a
+/// 422 + HTML page instead of an LFS batch JSON response. This matches
+/// the canonical `git-lfs` client behaviour.
 fn derive_lfs_url(repo_url: &str) -> Result<String, Git2Error> {
     // Handle SSH URLs: git@github.com:owner/repo.git -> https://github.com/owner/repo.git
     let https_url = if repo_url.starts_with("git@") {
@@ -839,11 +844,8 @@ fn derive_lfs_url(repo_url: &str) -> Result<String, Git2Error> {
         )));
     };
 
-    // Remove .git suffix if present
-    let base = https_url.trim_end_matches(".git");
-
-    // LFS endpoint
-    Ok(format!("{base}/info/lfs"))
+    // LFS endpoint — preserve any `.git` suffix in https_url.
+    Ok(format!("{https_url}/info/lfs"))
 }
 
 #[cfg(test)]
@@ -908,20 +910,25 @@ mod tests {
 
     #[test]
     fn derive_lfs_url_https() {
+        // The `.git` suffix must be preserved — GitHub returns 422 + HTML
+        // if we strip it.
         let url = derive_lfs_url("https://github.com/owner/repo.git").unwrap();
-        assert_eq!(url, "https://github.com/owner/repo/info/lfs");
+        assert_eq!(url, "https://github.com/owner/repo.git/info/lfs");
     }
 
     #[test]
     fn derive_lfs_url_https_no_git_suffix() {
+        // Already lacks `.git` — passed through verbatim. The user is
+        // responsible for providing a URL their LFS server accepts.
         let url = derive_lfs_url("https://github.com/owner/repo").unwrap();
         assert_eq!(url, "https://github.com/owner/repo/info/lfs");
     }
 
     #[test]
     fn derive_lfs_url_ssh() {
+        // SSH `.git` is preserved through the SSH-to-HTTPS rewrite.
         let url = derive_lfs_url("git@github.com:owner/repo.git").unwrap();
-        assert_eq!(url, "https://github.com/owner/repo/info/lfs");
+        assert_eq!(url, "https://github.com/owner/repo.git/info/lfs");
     }
 
     #[test]
@@ -1130,7 +1137,7 @@ mod tests {
     #[test]
     fn derive_lfs_url_http() {
         let url = derive_lfs_url("http://example.com/owner/repo.git").unwrap();
-        assert_eq!(url, "http://example.com/owner/repo/info/lfs");
+        assert_eq!(url, "http://example.com/owner/repo.git/info/lfs");
     }
 
     #[test]
@@ -1142,7 +1149,7 @@ mod tests {
     #[test]
     fn derive_lfs_url_ssh_self_hosted() {
         let url = derive_lfs_url("git@gitlab.example.com:group/project.git").unwrap();
-        assert_eq!(url, "https://gitlab.example.com/group/project/info/lfs");
+        assert_eq!(url, "https://gitlab.example.com/group/project.git/info/lfs");
     }
 
     #[test]
@@ -1195,9 +1202,10 @@ mod tests {
     // pointing at it, and exercise the retry/error-mapping paths that are
     // otherwise only reached by talking to a real LFS endpoint.
     //
-    // The `lfs_url` is derived from the repo_url as `{repo_url_without_git}/info/lfs`,
-    // so we pass `repo_url = "{mock_server}/repo.git"` to make the derived
-    // batch endpoint `{mock_server}/repo/info/lfs/objects/batch`.
+    // The `lfs_url` is derived from the repo_url as `{repo_url}/info/lfs`
+    // (the `.git` suffix is preserved verbatim — see `derive_lfs_url` doc),
+    // so we pass `repo_url = "{mock_server}/repo.git"` and the derived batch
+    // endpoint is `{mock_server}/repo.git/info/lfs/objects/batch`.
     // ------------------------------------------------------------------
 
     /// Build a fast-retry config so transient failures don't stall the test.
@@ -1243,11 +1251,11 @@ mod tests {
         let mut server = mockito::Server::new();
         let oid = "abc123def4567890abc123def4567890abc123def4567890abc123def4567890";
         let payload = b"hello LFS world";
-        let download_path = format!("/repo/info/lfs/objects/{oid}");
+        let download_path = format!("/repo.git/info/lfs/objects/{oid}");
         let download_href = format!("{}{}", server.url(), download_path);
 
         let _batch_mock = server
-            .mock("POST", "/repo/info/lfs/objects/batch")
+            .mock("POST", "/repo.git/info/lfs/objects/batch")
             .with_status(200)
             .with_header("content-type", "application/vnd.git-lfs+json")
             .with_body(make_batch_response(
@@ -1277,18 +1285,18 @@ mod tests {
         let mut server = mockito::Server::new();
         let oid = "abc123def4567890abc123def4567890abc123def4567890abc123def4567890";
         let payload = b"recovered after retry";
-        let download_path = format!("/repo/info/lfs/objects/{oid}");
+        let download_path = format!("/repo.git/info/lfs/objects/{oid}");
         let download_href = format!("{}{}", server.url(), download_path);
 
         // First attempt: 503 Service Unavailable (transient)
         let _failing_mock = server
-            .mock("POST", "/repo/info/lfs/objects/batch")
+            .mock("POST", "/repo.git/info/lfs/objects/batch")
             .with_status(503)
             .expect(1)
             .create();
         // Second attempt: success
         let _success_mock = server
-            .mock("POST", "/repo/info/lfs/objects/batch")
+            .mock("POST", "/repo.git/info/lfs/objects/batch")
             .with_status(200)
             .with_header("content-type", "application/vnd.git-lfs+json")
             .with_body(make_batch_response(
@@ -1321,7 +1329,7 @@ mod tests {
 
         // 401 Unauthorized — not retryable.
         let _mock = server
-            .mock("POST", "/repo/info/lfs/objects/batch")
+            .mock("POST", "/repo.git/info/lfs/objects/batch")
             .with_status(401)
             .expect(1) // Must only be called once.
             .create();
@@ -1343,7 +1351,7 @@ mod tests {
 
         // All requests return 502 Bad Gateway (transient).
         let _mock = server
-            .mock("POST", "/repo/info/lfs/objects/batch")
+            .mock("POST", "/repo.git/info/lfs/objects/batch")
             .with_status(502)
             .expect(max_attempts as usize)
             .create();
@@ -1364,7 +1372,7 @@ mod tests {
 
         // No mock should be reached — the size check fails first.
         let _mock = server
-            .mock("POST", "/repo/info/lfs/objects/batch")
+            .mock("POST", "/repo.git/info/lfs/objects/batch")
             .with_status(200)
             .expect(0) // Must NOT be called.
             .create();
@@ -1408,7 +1416,7 @@ mod tests {
         );
 
         let _mock = server
-            .mock("POST", "/repo/info/lfs/objects/batch")
+            .mock("POST", "/repo.git/info/lfs/objects/batch")
             .with_status(200)
             .with_header("content-type", "application/vnd.git-lfs+json")
             .with_body(response_body)
@@ -1430,13 +1438,13 @@ mod tests {
         let mut server = mockito::Server::new();
         let oid = "abc123def4567890abc123def4567890abc123def4567890abc123def4567890";
         let payload = b"authenticated content";
-        let download_path = format!("/repo/info/lfs/objects/{oid}");
+        let download_path = format!("/repo.git/info/lfs/objects/{oid}");
         let download_href = format!("{}{}", server.url(), download_path);
 
         // Expect the Authorization header to be present (Basic base64(user:pass)).
         // base64(test-user:s3cret) = dGVzdC11c2VyOnMzY3JldA==
         let _batch_mock = server
-            .mock("POST", "/repo/info/lfs/objects/batch")
+            .mock("POST", "/repo.git/info/lfs/objects/batch")
             .match_header("authorization", "Basic dGVzdC11c2VyOnMzY3JldA==")
             .with_status(200)
             .with_header("content-type", "application/vnd.git-lfs+json")
