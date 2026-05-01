@@ -108,7 +108,7 @@ mkdir -p /home/claude/repo
 tar -xzf repo.tar.gz -C /home/claude/repo
 rm repo.tar.gz
 
-# Initialize git (so we can create commits later)
+# Initialise git (so we can create commits later)
 cd /home/claude/repo
 git init
 git add .
