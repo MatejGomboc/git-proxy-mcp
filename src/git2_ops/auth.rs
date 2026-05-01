@@ -300,9 +300,13 @@ pub fn get_credentials_for_url(url: &str) -> Option<(String, String)> {
     // Run `git credential fill`. Each failure mode is debug-traced so a
     // user investigating "no credentials" in LFS logs can tell whether
     // the cause was missing git, a stdin write error, an exit-non-zero
-    // helper, or a malformed response.
+    // helper, or a malformed response. `GIT_TERMINAL_PROMPT=0` forbids
+    // git from prompting on the terminal — an MCP server has no UI to
+    // surface a prompt to anyway, and an unattended prompt would just
+    // hang the subprocess until timeout.
     let mut child = match Command::new("git")
         .args(["credential", "fill"])
+        .env("GIT_TERMINAL_PROMPT", "0")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -310,10 +314,7 @@ pub fn get_credentials_for_url(url: &str) -> Option<(String, String)> {
     {
         Ok(child) => child,
         Err(e) => {
-            debug!(
-                error = %e,
-                "failed to spawn `git credential fill` (is `git` on PATH?)"
-            );
+            debug!(error = %e, "failed to spawn `git credential fill` (is `git` on PATH?)");
             return None;
         }
     };
@@ -334,22 +335,31 @@ pub fn get_credentials_for_url(url: &str) -> Option<(String, String)> {
     };
 
     if !output.status.success() {
-        debug!(
-            exit = ?output.status.code(),
-            "`git credential fill` exited non-zero (no credential helper configured?)"
-        );
+        debug!(exit = ?output.status.code(), "`git credential fill` exited non-zero (no credential helper configured?)");
         return None;
     }
 
-    let stdout = match String::from_utf8(output.stdout) {
+    parse_credential_fill_stdout(&output.stdout)
+}
+
+/// Parse the stdout of a successful `git credential fill` invocation
+/// into `(username, password)`.
+///
+/// Returns `None` if:
+/// - `stdout` is not valid UTF-8.
+/// - The output is missing `username=` or `password=` lines.
+///
+/// Extracted from `get_credentials_for_url` so the post-subprocess
+/// parsing logic is unit-testable without spawning a real `git` process.
+fn parse_credential_fill_stdout(stdout: &[u8]) -> Option<(String, String)> {
+    let stdout_str = match std::str::from_utf8(stdout) {
         Ok(s) => s,
         Err(e) => {
             debug!(error = %e, "`git credential fill` stdout was not valid UTF-8");
             return None;
         }
     };
-
-    let creds = parse_credential_output(&stdout);
+    let creds = parse_credential_output(stdout_str);
     if creds.is_none() {
         debug!("`git credential fill` returned without `username` and `password` fields");
     }
@@ -763,6 +773,61 @@ mod tests {
         assert!(!sanitized.contains("secret"));
         assert!(!sanitized.contains("user:"));
         assert!(sanitized.contains("***@github.com/owner/repo#section@anchor"));
+    }
+
+    #[test]
+    fn parse_credential_fill_stdout_returns_creds_on_well_formed_output() {
+        // Happy-path: the helper parses well-formed `git credential fill`
+        // stdout and returns the username/password.
+        let stdout = b"protocol=https\nhost=github.com\nusername=alice\npassword=tok\n";
+        let result = parse_credential_fill_stdout(stdout);
+        assert_eq!(result, Some(("alice".to_string(), "tok".to_string())));
+    }
+
+    #[test]
+    fn parse_credential_fill_stdout_returns_none_on_missing_fields() {
+        // No username/password lines — the helper returns None and
+        // (under debug-level tracing) emits a diagnostic.
+        let stdout = b"protocol=https\nhost=github.com\n";
+        let result = parse_credential_fill_stdout(stdout);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn parse_credential_fill_stdout_returns_none_on_invalid_utf8() {
+        // Helpers that emit binary garbage (or a wrong-encoding output)
+        // hit the UTF-8 error arm — the helper returns None rather than
+        // panicking.
+        let stdout = &[0xFFu8, 0xFE, 0xFD];
+        let result = parse_credential_fill_stdout(stdout);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn parse_credential_fill_stdout_returns_none_on_empty_input() {
+        let result = parse_credential_fill_stdout(b"");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn get_credentials_for_url_returns_none_for_unconfigured_host() {
+        // End-to-end test that exercises `get_credentials_for_url`'s
+        // subprocess success path: spawn `git`, write to stdin, wait for
+        // output, parse the result. We use a host under `.invalid` (an
+        // RFC 6761 reserved TLD that is guaranteed never to be configured
+        // anywhere) so any installed credential helper will return
+        // nothing, and `GIT_TERMINAL_PROMPT=0` (set inside the function)
+        // prevents any helper from prompting on a developer machine.
+        //
+        // The function must return `None` (no credentials available),
+        // having gone through the spawn / write / wait / parse pipeline.
+        // This pulls coverage of the credential-fill body up from zero
+        // — the function's existing rustdoc was not backed by any test.
+        let result = get_credentials_for_url("https://nonexistent-coverage-test.invalid/repo.git");
+        assert!(
+            result.is_none(),
+            "no credentials should be configured for an .invalid TLD host"
+        );
     }
 
     #[test]
