@@ -35,7 +35,7 @@ Since this is a credential-handling project:
 ## Code Quality
 
 - [ ] Code compiles without warnings (`cargo build`)
-- [ ] Clippy passes (`cargo clippy -- -D warnings`)
+- [ ] Clippy passes (`cargo clippy --all-targets --all-features -- -D warnings`)
 - [ ] Code is formatted (`cargo fmt`)
 - [ ] Documentation is updated if needed
 - [ ] CHANGELOG.md is updated for user-facing changes

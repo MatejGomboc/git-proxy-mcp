@@ -100,7 +100,7 @@ When submitting:
 - [ ] Code compiles without warnings (`cargo build`)
 - [ ] All tests pass (`cargo test`)
 - [ ] Code is formatted (`cargo fmt`)
-- [ ] Clippy passes (`cargo clippy -- -D warnings`)
+- [ ] Clippy passes (`cargo clippy --all-targets --all-features -- -D warnings`)
 - [ ] Documentation is updated if needed
 - [ ] CHANGELOG.md is updated for user-facing changes
 - [ ] Commit messages follow [conventional commits](#commit-messages)
@@ -140,7 +140,7 @@ cargo build
 cargo test
 
 # Run clippy
-cargo clippy -- -D warnings
+cargo clippy --all-targets --all-features -- -D warnings
 ```
 
 ---
@@ -150,7 +150,7 @@ cargo clippy -- -D warnings
 ### Rust Style
 
 - Follow `rustfmt` formatting (run `cargo fmt` before committing)
-- Follow `clippy` recommendations (run `cargo clippy -- -D warnings`)
+- Follow `clippy` recommendations (run `cargo clippy --all-targets --all-features -- -D warnings`)
 - Write idiomatic Rust code
 - Prefer safe Rust — `unsafe` code is forbidden (see `Cargo.toml` lints)
 
@@ -276,9 +276,12 @@ cargo install cargo-llvm-cov --locked
 # Run coverage with a summary report
 cargo llvm-cov --all-features --workspace --summary-only
 
-# Generate an HTML report (opens in browser)
+# Generate an HTML report — produces target/llvm-cov/html/index.html
+# Open that file in your browser:
+#   macOS:   open target/llvm-cov/html/index.html
+#   Linux:   xdg-open target/llvm-cov/html/index.html
+#   Windows: start target/llvm-cov/html/index.html
 cargo llvm-cov --all-features --workspace --html
-open target/llvm-cov/html/index.html
 
 # Generate lcov for CI (matches what CI uploads to Codecov)
 cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info

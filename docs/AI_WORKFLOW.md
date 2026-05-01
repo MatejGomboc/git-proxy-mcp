@@ -359,7 +359,7 @@ Always verify locally before pushing:
 
 ```bash
 cargo test
-cargo clippy -- -D warnings
+cargo clippy --all-targets --all-features -- -D warnings
 cargo fmt --check
 ```
 
