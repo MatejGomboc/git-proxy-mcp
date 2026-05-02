@@ -252,6 +252,39 @@ impl GitIdentity {
     }
 }
 
+/// Maximum length (in bytes) for a client-controlled string before we
+/// truncate it for logging. Anything beyond this is replaced with `…`.
+/// 200 bytes is enough to be useful for debugging and small enough
+/// that a hostile or buggy client can't flood the log file with a
+/// huge `clientInfo.name`.
+const MAX_CLIENT_STRING_LOG_LEN: usize = 200;
+
+/// Sanitises a client-controlled string for safe logging.
+///
+/// Two protections, both targeting buggy or hostile clients (the local
+/// stdio peer):
+///
+/// - Control characters (newlines, ANSI escape sequences, NULs, etc.)
+///   are escaped via `char::escape_debug`, so a value like
+///   `"foo\x1b[31mEVIL\x1b[0m"` renders as the literal characters
+///   rather than disrupting the operator's terminal log reader.
+/// - Length is capped at `MAX_CLIENT_STRING_LOG_LEN` bytes to prevent
+///   a 1-MiB name from flooding the log file. Truncation appends `…`
+///   so the operator can see the value was cut.
+fn sanitize_for_log(s: &str) -> String {
+    let mut escaped: String = s.chars().flat_map(char::escape_debug).collect();
+    if escaped.len() > MAX_CLIENT_STRING_LOG_LEN {
+        // Truncate at a char boundary so we don't slice mid-codepoint.
+        let mut cut = MAX_CLIENT_STRING_LOG_LEN;
+        while !escaped.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        escaped.truncate(cut);
+        escaped.push('…');
+    }
+    escaped
+}
+
 /// The MCP server.
 pub struct McpServer {
     /// Current server state.
@@ -513,8 +546,16 @@ impl McpServer {
     fn handle_notification(&mut self, notif: &JsonRpcNotification) {
         if notif.method == "notifications/initialized" && self.state == ServerState::Initialising {
             self.state = ServerState::Running;
+            return;
         }
-        // All other notifications (including unknown ones) are ignored per JSON-RPC spec
+        // All other notifications (including unknown ones) are ignored per
+        // JSON-RPC spec, but trace them at debug level so an operator
+        // diagnosing protocol mismatches can see which methods were sent.
+        tracing::debug!(
+            method = %notif.method,
+            state = ?self.state,
+            "ignoring notification (unknown method or wrong state)"
+        );
     }
 
     /// Handles the `initialize` request.
@@ -531,7 +572,7 @@ impl McpServer {
         }
 
         // Parse initialise params
-        let _params: InitializeParams = req
+        let params: InitializeParams = req
             .params
             .as_ref()
             .map(|p| serde_json::from_value(p.clone()))
@@ -546,9 +587,42 @@ impl McpServer {
                 JsonRpcError::invalid_params(req.id.clone(), "Missing initialize params")
             })?;
 
-        // Check protocol version
-        // We currently only support one version, so we always return our version
-        // The client will disconnect if it doesn't support our version
+        // Sanitise the client-controlled values we're about to log:
+        // escape control chars / ANSI escapes (so a buggy or hostile
+        // client can't disrupt log readers) and cap the length (so a
+        // 1-MiB name can't flood the log file).
+        let safe_proto = sanitize_for_log(&params.protocol_version);
+
+        // Log the connecting client's identity for diagnostic visibility.
+        // The MCP spec says client_info is optional, so handle the absent
+        // case gracefully. Single-line macro form so cargo-llvm-cov
+        // counts the call site as covered even when the test runner
+        // doesn't enable INFO-level logging (`tracing` doesn't evaluate
+        // macro args when the level is below threshold).
+        if let Some(client_info) = params.client_info.as_ref() {
+            let safe_name = sanitize_for_log(&client_info.name);
+            let safe_version =
+                sanitize_for_log(client_info.version.as_deref().unwrap_or("(unspecified)"));
+            tracing::info!(client_name = %safe_name, client_version = %safe_version, client_protocol_version = %safe_proto, "client connected");
+        } else {
+            tracing::info!(client_protocol_version = %safe_proto, "client connected (no clientInfo)");
+        }
+
+        // Protocol version: per the MCP spec, we MUST respond with a
+        // version we support. We currently only support one
+        // (`MCP_PROTOCOL_VERSION`), so we always return that. If the
+        // client requested a different version, log a warning so the
+        // operator can see the mismatch — the client may still proceed
+        // (the spec says it can reconcile by checking the response) or
+        // disconnect (if it strictly requires its requested version).
+        if params.protocol_version != MCP_PROTOCOL_VERSION {
+            tracing::warn!(
+                requested = %safe_proto,
+                supported = MCP_PROTOCOL_VERSION,
+                "client requested unsupported MCP protocol version; \
+                 responding with our supported version"
+            );
+        }
         let negotiated_version = MCP_PROTOCOL_VERSION.to_string();
 
         self.protocol_version = Some(negotiated_version.clone());
@@ -1211,7 +1285,12 @@ impl McpServer {
                         &sanitized_url,
                         &result.branch,
                         &result.commit,
-                        0, // file_count not known until all chunks retrieved
+                        // `RepoCloneStartResult` carries `file_count` as soon
+                        // as the archive is built (which is before any chunks
+                        // are retrieved) — log it here rather than the
+                        // hard-coded 0 the previous comment claimed was
+                        // unavoidable.
+                        result.file_count,
                         result.total_size,
                         duration,
                     ));
@@ -1325,11 +1404,10 @@ impl McpServer {
 
         // Check rate limiter
         if !self.rate_limiter.try_acquire() {
-            self.audit_logger
-                .log_silent(&AuditEvent::repo_clone_blocked(
-                    &sanitized_url,
-                    "rate limit exceeded",
-                ));
+            self.audit_logger.log_silent(&AuditEvent::repo_refs_blocked(
+                &sanitized_url,
+                "rate limit exceeded",
+            ));
             return ToolCallResult::error(
                 "Rate limit exceeded. Please wait before sending more requests.",
             );
@@ -1342,7 +1420,7 @@ impl McpServer {
             .reason()
         {
             self.audit_logger
-                .log_silent(&AuditEvent::repo_clone_blocked(&sanitized_url, reason));
+                .log_silent(&AuditEvent::repo_refs_blocked(&sanitized_url, reason));
             return ToolCallResult::error(reason.to_string());
         }
 
@@ -1395,11 +1473,10 @@ impl McpServer {
 
         // Check rate limiter
         if !self.rate_limiter.try_acquire() {
-            self.audit_logger
-                .log_silent(&AuditEvent::repo_clone_blocked(
-                    &sanitized_url,
-                    "rate limit exceeded",
-                ));
+            self.audit_logger.log_silent(&AuditEvent::repo_diff_blocked(
+                &sanitized_url,
+                "rate limit exceeded",
+            ));
             return ToolCallResult::error(
                 "Rate limit exceeded. Please wait before sending more requests.",
             );
@@ -1412,7 +1489,7 @@ impl McpServer {
             .reason()
         {
             self.audit_logger
-                .log_silent(&AuditEvent::repo_clone_blocked(&sanitized_url, reason));
+                .log_silent(&AuditEvent::repo_diff_blocked(&sanitized_url, reason));
             return ToolCallResult::error(reason.to_string());
         }
 
@@ -1465,11 +1542,10 @@ impl McpServer {
 
         // Check rate limiter
         if !self.rate_limiter.try_acquire() {
-            self.audit_logger
-                .log_silent(&AuditEvent::repo_clone_blocked(
-                    &sanitized_url,
-                    "rate limit exceeded",
-                ));
+            self.audit_logger.log_silent(&AuditEvent::repo_pull_blocked(
+                &sanitized_url,
+                "rate limit exceeded",
+            ));
             return ToolCallResult::error(
                 "Rate limit exceeded. Please wait before sending more requests.",
             );
@@ -1482,7 +1558,7 @@ impl McpServer {
             .reason()
         {
             self.audit_logger
-                .log_silent(&AuditEvent::repo_clone_blocked(&sanitized_url, reason));
+                .log_silent(&AuditEvent::repo_pull_blocked(&sanitized_url, reason));
             return ToolCallResult::error(reason.to_string());
         }
 
@@ -1705,6 +1781,104 @@ mod tests {
     }
 
     #[test]
+    fn sanitize_for_log_passes_clean_strings_unchanged() {
+        assert_eq!(sanitize_for_log("Claude AI"), "Claude AI");
+        assert_eq!(sanitize_for_log(""), "");
+        assert_eq!(sanitize_for_log("v1.2.3-rc.1"), "v1.2.3-rc.1");
+    }
+
+    #[test]
+    fn sanitize_for_log_escapes_control_characters() {
+        // ANSI escape sequence — raw ESC must not pass through, or it
+        // could repaint the operator's terminal (and fake "harmless"
+        // log lines around an injected message).
+        let evil = "foo\x1b[31mEVIL\x1b[0m";
+        let sanitised = sanitize_for_log(evil);
+        assert!(!sanitised.contains('\x1b'), "raw ESC must be escaped");
+        // `char::escape_debug` renders `\x1b` as `\u{1b}`.
+        assert!(sanitised.contains("\\u{1b}"));
+
+        // Newline — must be escaped so it doesn't fake a log-line break.
+        assert_eq!(sanitize_for_log("a\nb"), "a\\nb");
+
+        // Tab and CR.
+        assert_eq!(sanitize_for_log("a\tb\rc"), "a\\tb\\rc");
+
+        // NUL — `escape_debug` uses the short form `\0` for NUL.
+        assert_eq!(sanitize_for_log("a\0b"), "a\\0b");
+    }
+
+    #[test]
+    fn sanitize_for_log_caps_length_to_prevent_log_flood() {
+        // 1 KiB of `a` — must be truncated.
+        let huge = "a".repeat(1024);
+        let sanitised = sanitize_for_log(&huge);
+        assert!(sanitised.len() <= MAX_CLIENT_STRING_LOG_LEN + "…".len());
+        assert!(
+            sanitised.ends_with('…'),
+            "truncation marker must be appended"
+        );
+    }
+
+    #[test]
+    fn sanitize_for_log_truncates_at_char_boundary() {
+        // String with multibyte chars right around the truncation point.
+        // `é` is 2 bytes in UTF-8. If MAX_CLIENT_STRING_LOG_LEN landed
+        // mid-codepoint we'd panic on `escaped.truncate(cut)` — this
+        // test pins the boundary-search loop.
+        let s = "é".repeat(150); // 300 bytes
+        let sanitised = sanitize_for_log(&s);
+        assert!(sanitised.ends_with('…'));
+        // Verify we didn't break a codepoint — the prefix before the
+        // truncation marker must be valid UTF-8 (it is by construction
+        // since `escaped` is a String, but assert it's well-formed anyway).
+        let prefix = &sanitised[..sanitised.len() - "…".len()];
+        assert!(prefix.is_char_boundary(prefix.len()));
+    }
+
+    #[test]
+    fn handle_initialize_accepts_mismatched_protocol_version() {
+        // The spec says we MUST respond with a version we support. A
+        // client requesting an unsupported version still gets a
+        // successful response (with our version), accompanied by a
+        // warning log so the operator can see the mismatch. The state
+        // still advances to Initialising.
+        let mut server = create_test_server();
+        let req = make_request(
+            1,
+            "initialize",
+            Some(json!({
+                "protocolVersion": "2099-01-01",
+                "capabilities": {},
+                "clientInfo": {"name": "test", "version": "1"},
+            })),
+        );
+        let resp = server.handle_initialize(&req).unwrap();
+        // We always respond with our version, regardless of what the
+        // client requested.
+        assert_eq!(resp.result["protocolVersion"], MCP_PROTOCOL_VERSION);
+        assert_eq!(server.state(), ServerState::Initialising);
+    }
+
+    #[test]
+    fn handle_initialize_accepts_missing_client_info() {
+        // `clientInfo` is optional per the spec — initialize must succeed
+        // and log via the "no clientInfo" path.
+        let mut server = create_test_server();
+        let req = make_request(
+            1,
+            "initialize",
+            Some(json!({
+                "protocolVersion": MCP_PROTOCOL_VERSION,
+                "capabilities": {},
+            })),
+        );
+        let resp = server.handle_initialize(&req).unwrap();
+        assert_eq!(resp.result["protocolVersion"], MCP_PROTOCOL_VERSION);
+        assert_eq!(server.state(), ServerState::Initialising);
+    }
+
+    #[test]
     fn handle_initialize_includes_git_identity_when_set() {
         let security_config = SecurityConfig::default();
         let git_identity = GitIdentity {
@@ -1885,6 +2059,27 @@ mod tests {
     }
 
     #[test]
+    fn handle_notification_initialized_in_running_state_is_ignored() {
+        // Sending `notifications/initialized` again after the server is
+        // already in `Running` (e.g. a duplicate or out-of-order notif
+        // from a buggy client) must be a no-op state-wise. The method
+        // matches but the state guard fails, so the new debug! trace
+        // for "ignoring notification" fires and state stays `Running`.
+        // Pins the combinatorial case (right method, wrong state).
+        let mut server = create_test_server();
+        initialise_server(&mut server);
+        assert_eq!(server.state(), ServerState::Running);
+
+        let notif = JsonRpcNotification {
+            jsonrpc: "2.0".to_string(),
+            method: "notifications/initialized".to_string(),
+            params: None,
+        };
+        server.handle_notification(&notif);
+        assert_eq!(server.state(), ServerState::Running);
+    }
+
+    #[test]
     fn handle_notification_unknown_method_ignored() {
         let mut server = create_test_server();
         initialise_server(&mut server);
@@ -2010,6 +2205,119 @@ mod tests {
         let result = McpServer::call_helper_script_tool();
         assert!(!result.is_error);
         assert_eq!(result.content.len(), 1);
+    }
+
+    #[test]
+    fn call_repo_diff_tool_with_blocked_url_returns_error() {
+        let security_config = SecurityConfig {
+            repo_blocklist: Some(vec!["github.com/blocked/*".to_string()]),
+            ..Default::default()
+        };
+        let mut server = McpServer::new(
+            security_config,
+            GitIdentity::default(),
+            AuditLogger::disabled(),
+            ProxyConfig::default(),
+            &SessionConfig::default(),
+            LfsConfig::default(),
+            SubmoduleConfig::default(),
+        );
+        initialise_server(&mut server);
+        let result = server.call_repo_diff_tool(&json!({
+            "url": "https://github.com/blocked/repo.git",
+            "base_commit": "abc",
+            "head_commit": "def",
+        }));
+        assert!(result.is_error);
+    }
+
+    #[test]
+    fn call_repo_pull_tool_with_blocked_url_returns_error() {
+        let security_config = SecurityConfig {
+            repo_blocklist: Some(vec!["github.com/blocked/*".to_string()]),
+            ..Default::default()
+        };
+        let mut server = McpServer::new(
+            security_config,
+            GitIdentity::default(),
+            AuditLogger::disabled(),
+            ProxyConfig::default(),
+            &SessionConfig::default(),
+            LfsConfig::default(),
+            SubmoduleConfig::default(),
+        );
+        initialise_server(&mut server);
+        let result = server.call_repo_pull_tool(&json!({
+            "url": "https://github.com/blocked/repo.git",
+            "branch": "main",
+            "since_commit": "abc123",
+        }));
+        assert!(result.is_error);
+    }
+
+    #[test]
+    fn rate_limit_exhaustion_blocks_subsequent_calls() {
+        // Configure a tiny rate limit (max_burst=1, refill=0) so the
+        // first call exhausts the bucket and subsequent calls are
+        // rejected with the rate-limit error message. This exercises
+        // the rate-limit branch in tool dispatch (refs/diff/pull all
+        // share the same shape).
+        let security_config = SecurityConfig {
+            rate_limit_max_burst: 1,
+            rate_limit_refill_rate: 0.0,
+            ..Default::default()
+        };
+        let mut server = McpServer::new(
+            security_config,
+            GitIdentity::default(),
+            AuditLogger::disabled(),
+            ProxyConfig::default(),
+            &SessionConfig::default(),
+            LfsConfig::default(),
+            SubmoduleConfig::default(),
+        );
+        initialise_server(&mut server);
+        // First call: consumes the bucket's only token.
+        //
+        // The dispatch order in every `call_repo_*_tool` is: parse args
+        // → sanitise URL → `try_acquire()` → repo-filter check →
+        // execute. The token is consumed in `try_acquire()` BEFORE
+        // any actual network operation, so even when the underlying
+        // `handle_repo_refs` fails, the bucket has already been
+        // drained.
+        //
+        // We use `.invalid` (RFC 6761 reserved TLD — guaranteed never
+        // to resolve in DNS) so the failed network attempt completes
+        // in milliseconds rather than waiting for a TCP timeout. CI
+        // runners and developer machines all fail-fast here. (Same
+        // pattern as the auth.rs e2e test from PR #153.)
+        //
+        // We deliberately don't assert on the first call's outcome —
+        // it returns an error, but the test only cares that the token
+        // got consumed.
+        let _ = server.call_repo_refs_tool(&json!({
+            "url": "https://nonexistent-rate-limit-test.invalid/repo.git",
+        }));
+        // Second call: bucket empty, must be blocked.
+        let result = server.call_repo_diff_tool(&json!({
+            "url": "https://nonexistent-rate-limit-test.invalid/repo.git",
+            "base_commit": "a",
+            "head_commit": "b",
+        }));
+        assert!(result.is_error);
+        // `ToolContent::Text` is the only variant — irrefutable pattern.
+        let ToolContent::Text { text } = &result.content[0];
+        assert!(
+            text.contains("Rate limit"),
+            "expected rate-limit error, got: {text}"
+        );
+        // Third call (pull): same bucket, still blocked.
+        let result = server.call_repo_pull_tool(&json!({
+            "url": "https://nonexistent-rate-limit-test.invalid/repo.git",
+            "branch": "main",
+            "since_commit": "abc",
+        }));
+        assert!(result.is_error);
     }
 
     #[test]

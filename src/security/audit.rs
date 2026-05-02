@@ -10,7 +10,8 @@
 //!
 //! - `timestamp` — ISO 8601 timestamp (always present)
 //! - `event_type` — `command_executed`, `command_blocked`, `rate_limit_exceeded`,
-//!   `server_started`, `server_stopped`, `repo_clone`, or `repo_push`
+//!   `server_started`, `server_stopped`, `repo_clone`, `repo_push`, `repo_refs`,
+//!   `repo_diff`, or `repo_pull`
 //! - `outcome` — `success`, `failed`, or `blocked` (always present)
 //! - `command` — the git subcommand (for `command_*` events)
 //! - `args` — command arguments, sanitised (for `command_*` events)
@@ -20,11 +21,14 @@
 //! - `exit_code` — process exit code (for executed git commands)
 //! - `shutdown_reason` — `client_disconnected`, `sig_int`, or `sig_term`
 //!   (for `server_stopped` events)
-//! - `url` — repository URL, sanitised (for Tier 1 / `repo_*` events)
-//! - `branch` — branch name (for Tier 1 / `repo_*` events)
-//! - `commit` — commit SHA (for Tier 1 / `repo_*` events)
-//! - `file_count` — number of files in archive (for `repo_clone` success)
-//! - `archive_size` — archive size in bytes (for `repo_clone` success)
+//! - `url` — repository URL, sanitised (for `repo_*` events)
+//! - `branch` — branch name (for `repo_clone` / `repo_push` events)
+//! - `commit` — commit SHA (for `repo_clone` / `repo_push` events)
+//! - `file_count` — number of files in archive. Populated for both
+//!   Tier 1 `repo_clone` and Tier 2 `repo_clone_start` success events
+//!   (both share `event_type: "repo_clone"`, since `repo_clone_start`
+//!   uses the same `repo_clone_success` constructor).
+//! - `archive_size` — archive size in bytes. Same scope as `file_count`.
 
 use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Write};
@@ -72,6 +76,15 @@ pub enum AuditEventType {
 
     /// Tier 1 `repo_push` operation.
     RepoPush,
+
+    /// `repo_refs` operation (list remote branches/tags).
+    RepoRefs,
+
+    /// `repo_diff` operation (diff between two commits).
+    RepoDiff,
+
+    /// `repo_pull` operation (incremental sync since a known commit).
+    RepoPull,
 }
 
 /// Reason for server shutdown.
@@ -325,6 +338,33 @@ impl AuditEvent {
     #[must_use]
     pub fn repo_push_blocked(url: impl Into<String>, reason: impl Into<String>) -> Self {
         let mut event = Self::new(AuditEventType::RepoPush, AuditOutcome::Blocked);
+        event.url = Some(url.into());
+        event.reason = Some(reason.into());
+        event
+    }
+
+    /// Creates an event for a blocked `repo_refs` operation.
+    #[must_use]
+    pub fn repo_refs_blocked(url: impl Into<String>, reason: impl Into<String>) -> Self {
+        let mut event = Self::new(AuditEventType::RepoRefs, AuditOutcome::Blocked);
+        event.url = Some(url.into());
+        event.reason = Some(reason.into());
+        event
+    }
+
+    /// Creates an event for a blocked `repo_diff` operation.
+    #[must_use]
+    pub fn repo_diff_blocked(url: impl Into<String>, reason: impl Into<String>) -> Self {
+        let mut event = Self::new(AuditEventType::RepoDiff, AuditOutcome::Blocked);
+        event.url = Some(url.into());
+        event.reason = Some(reason.into());
+        event
+    }
+
+    /// Creates an event for a blocked `repo_pull` operation.
+    #[must_use]
+    pub fn repo_pull_blocked(url: impl Into<String>, reason: impl Into<String>) -> Self {
+        let mut event = Self::new(AuditEventType::RepoPull, AuditOutcome::Blocked);
         event.url = Some(url.into());
         event.reason = Some(reason.into());
         event
@@ -774,6 +814,68 @@ mod tests {
             event.reason,
             Some("force push to protected branch".to_string())
         );
+    }
+
+    #[test]
+    fn audit_event_repo_refs_blocked() {
+        let event = AuditEvent::repo_refs_blocked(
+            "https://github.com/owner/repo.git",
+            "rate limit exceeded",
+        );
+
+        assert_eq!(event.event_type, AuditEventType::RepoRefs);
+        assert_eq!(event.outcome, AuditOutcome::Blocked);
+        assert_eq!(
+            event.url,
+            Some("https://github.com/owner/repo.git".to_string())
+        );
+        assert_eq!(event.reason, Some("rate limit exceeded".to_string()));
+    }
+
+    #[test]
+    fn audit_event_repo_diff_blocked() {
+        let event = AuditEvent::repo_diff_blocked(
+            "https://github.com/owner/repo.git",
+            "repository not in allowlist",
+        );
+
+        assert_eq!(event.event_type, AuditEventType::RepoDiff);
+        assert_eq!(event.outcome, AuditOutcome::Blocked);
+        assert_eq!(
+            event.reason,
+            Some("repository not in allowlist".to_string())
+        );
+    }
+
+    #[test]
+    fn audit_event_repo_pull_blocked() {
+        let event = AuditEvent::repo_pull_blocked(
+            "https://github.com/owner/repo.git",
+            "rate limit exceeded",
+        );
+
+        assert_eq!(event.event_type, AuditEventType::RepoPull);
+        assert_eq!(event.outcome, AuditOutcome::Blocked);
+        assert_eq!(event.reason, Some("rate limit exceeded".to_string()));
+    }
+
+    #[test]
+    fn audit_event_repo_refs_diff_pull_serialise_with_correct_event_type() {
+        // Regression: previously, blocked refs/diff/pull operations were
+        // logged with event_type=`repo_clone`, making audit-log filtering
+        // by operation type impossible.
+        let refs = AuditEvent::repo_refs_blocked("u", "r");
+        let diff = AuditEvent::repo_diff_blocked("u", "r");
+        let pull = AuditEvent::repo_pull_blocked("u", "r");
+        assert!(serde_json::to_string(&refs)
+            .unwrap()
+            .contains("\"event_type\":\"repo_refs\""));
+        assert!(serde_json::to_string(&diff)
+            .unwrap()
+            .contains("\"event_type\":\"repo_diff\""));
+        assert!(serde_json::to_string(&pull)
+            .unwrap()
+            .contains("\"event_type\":\"repo_pull\""));
     }
 
     #[test]

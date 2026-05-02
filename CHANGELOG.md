@@ -46,6 +46,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **MCP server observability for the `initialize` handshake and
+  ignored notifications.** Three previously-silent paths are now
+  traced:
+  1. **Connecting client identity is logged at INFO** —
+     `client_name`, `client_version`, and the requested
+     `client_protocol_version` from `clientInfo` (or a shorter "no
+     clientInfo" line when the field is absent, which the spec
+     allows). The handler had been parsing these fields into
+     `_params` only to discard them.
+  2. **Mismatched protocol version is logged at WARN** with both
+     `requested` and `supported` versions. Previously the handler
+     silently substituted our supported version with no trace,
+     making client-version drift impossible to diagnose from server
+     logs. Behaviour unchanged — we still accept and respond with
+     our version per spec, just with visibility now.
+  3. **Ignored notifications are traced at DEBUG** with method name
+     and current server state. Useful when the client thinks it sent
+     something we should have acted on (typically a state-machine
+     misalignment, e.g. sending a notification before `initialize`).
+  Two new tests cover the previously-uncovered initialize paths
+  (`handle_initialize_accepts_mismatched_protocol_version` and
+  `handle_initialize_accepts_missing_client_info`).
 - **`get_credentials_for_url` now traces each subprocess failure mode
   at debug level.** Previously, every error path
   (`spawn` fail, stdin write fail, wait fail, non-zero exit, non-UTF-8
@@ -200,6 +222,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Audit log misidentified blocked `repo_refs` / `repo_diff` /
+  `repo_pull` operations as `repo_clone`.** `call_repo_refs_tool`,
+  `call_repo_diff_tool`, and `call_repo_pull_tool` were all calling
+  `AuditEvent::repo_clone_blocked(...)` for their rate-limit and
+  filter-block events — so an operator searching the audit log for
+  blocked refs / diff / pull operations would find nothing (they all
+  showed as `event_type: "repo_clone"`). Added three new
+  `AuditEventType` variants (`RepoRefs`, `RepoDiff`, `RepoPull`)
+  and matching `repo_*_blocked` constructors, then updated the three
+  tool functions to use them. Three new audit-module tests cover
+  each constructor; one regression test pins that all three serialise
+  with their proper `event_type` field.
+- **Tier 2 `repo_clone_start` audit log always recorded
+  `file_count: 0`.** `call_repo_clone_start_tool` passed `0` to
+  `AuditEvent::repo_clone_success` with a comment claiming the count
+  was "not known until all chunks retrieved". That hasn't been true
+  since `RepoCloneStartResult` gained the `file_count` field — the
+  archive (and hence the file count) is fully built before the first
+  chunk goes out the door. Now passes `result.file_count`. Tier 1
+  (`repo_clone`) was logging the real count all along, so the bug
+  only affected Tier 2 audit entries.
+- **JSON-RPC `parse_message` discarded request `id` on
+  `InvalidRequest` errors when the rest of the request was malformed.**
+  Per JSON-RPC 2.0 spec, when the `id` field is well-typed but other
+  fields (jsonrpc version, method) are malformed, the error response
+  SHOULD echo the `id` so the client can correlate the failure to its
+  outstanding request. Three uncovered cases were dropping the ID:
+  missing `jsonrpc` field, wrong `jsonrpc` version, and `jsonrpc`
+  field of wrong type. Added a small `extract_request_id` helper that
+  pre-walks the JSON object and returns `Some(RequestId)` only for
+  spec-valid shapes (integer or string); `null`, arrays, objects, and
+  non-integer numbers correctly map to `None`. Eight new tests cover
+  ID-preservation across each discard case plus ID-drop for each
+  invalid shape.
 - **`sanitize_url_for_logging` mangled URLs with `@` outside the
   authority component.** The function found the FIRST `@` anywhere in
   the URL and treated everything between `://` and that `@` as
