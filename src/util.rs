@@ -96,15 +96,44 @@ mod tests {
 
     #[test]
     fn truncates_at_char_boundary_for_multibyte_input() {
-        // String with multibyte chars right around the truncation
-        // point. `é` is 2 bytes in UTF-8. If `MAX_LOG_STRING_LEN`
-        // landed mid-codepoint we'd panic on `truncate` — this test
-        // pins the boundary-search loop.
+        // 2-byte chars: `é` is 2 bytes in UTF-8, and 200 (= `MAX_LOG_STRING_LEN`)
+        // is divisible by 2, so byte 200 lands cleanly on a char boundary
+        // and the boundary-search loop body doesn't actually fire here.
+        // This test is the no-panic invariant; the loop-body coverage
+        // test below uses a 3-byte char that forces the back-up.
         let s = "é".repeat(150); // 300 bytes
         let sanitised = sanitize_for_log(&s);
         assert!(sanitised.ends_with('…'));
         let prefix = &sanitised[..sanitised.len() - "…".len()];
         assert!(prefix.is_char_boundary(prefix.len()));
+    }
+
+    #[test]
+    fn boundary_search_loop_backs_up_when_cut_lands_mid_codepoint() {
+        // Coverage gap fix: the boundary-search `while` loop body
+        // (`cut -= 1`) only fires when the initial cut at byte
+        // `MAX_LOG_STRING_LEN` is NOT on a char boundary. The "a" and
+        // "é" tests don't exercise this — both line up cleanly on byte
+        // 200. We need a codepoint whose byte-width doesn't divide 200.
+        //
+        // `€` (Euro sign) is 3 bytes in UTF-8. With `"€".repeat(70)`
+        // = 210 bytes, byte 200 falls mid-codepoint:
+        //   - 66 × 3 = 198 (start of the 67th `€`)
+        //   - bytes 199, 200 are continuation bytes of that char
+        //   - 67 × 3 = 201 (start of the 68th `€`)
+        // The loop must back up: cut=200 → not boundary → cut=199 →
+        // not boundary → cut=198 → boundary → truncate at 198.
+        // Without the back-up, `String::truncate(200)` would panic
+        // with "byte index 200 is not a char boundary".
+        let s = "€".repeat(70); // 210 bytes
+        let sanitised = sanitize_for_log(&s);
+        assert!(sanitised.ends_with('…'));
+        // The truncated prefix must be 198 bytes (66 full `€` chars).
+        let prefix_len = sanitised.len() - "…".len();
+        assert_eq!(prefix_len, 198, "expected back-up to byte 198");
+        // And it must be valid UTF-8 (we'd have panicked otherwise,
+        // but assert explicitly for documentation).
+        assert!(sanitised[..prefix_len].is_char_boundary(prefix_len));
     }
 
     #[test]
