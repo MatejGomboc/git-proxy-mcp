@@ -24,8 +24,11 @@
 //! - `url` — repository URL, sanitised (for `repo_*` events)
 //! - `branch` — branch name (for `repo_clone` / `repo_push` events)
 //! - `commit` — commit SHA (for `repo_clone` / `repo_push` events)
-//! - `file_count` — number of files in archive (for `repo_clone` success)
-//! - `archive_size` — archive size in bytes (for `repo_clone` success)
+//! - `file_count` — number of files in archive. Populated for both
+//!   Tier 1 `repo_clone` and Tier 2 `repo_clone_start` success events
+//!   (both share `event_type: "repo_clone"`, since `repo_clone_start`
+//!   uses the same `repo_clone_success` constructor).
+//! - `archive_size` — archive size in bytes. Same scope as `file_count`.
 
 use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Write};

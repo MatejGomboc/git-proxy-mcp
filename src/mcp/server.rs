@@ -252,6 +252,39 @@ impl GitIdentity {
     }
 }
 
+/// Maximum length (in bytes) for a client-controlled string before we
+/// truncate it for logging. Anything beyond this is replaced with `…`.
+/// 200 bytes is enough to be useful for debugging and small enough
+/// that a hostile or buggy client can't flood the log file with a
+/// huge `clientInfo.name`.
+const MAX_CLIENT_STRING_LOG_LEN: usize = 200;
+
+/// Sanitises a client-controlled string for safe logging.
+///
+/// Two protections, both targeting buggy or hostile clients (the local
+/// stdio peer):
+///
+/// - Control characters (newlines, ANSI escape sequences, NULs, etc.)
+///   are escaped via `char::escape_debug`, so a value like
+///   `"foo\x1b[31mEVIL\x1b[0m"` renders as the literal characters
+///   rather than disrupting the operator's terminal log reader.
+/// - Length is capped at `MAX_CLIENT_STRING_LOG_LEN` bytes to prevent
+///   a 1-MiB name from flooding the log file. Truncation appends `…`
+///   so the operator can see the value was cut.
+fn sanitize_for_log(s: &str) -> String {
+    let mut escaped: String = s.chars().flat_map(char::escape_debug).collect();
+    if escaped.len() > MAX_CLIENT_STRING_LOG_LEN {
+        // Truncate at a char boundary so we don't slice mid-codepoint.
+        let mut cut = MAX_CLIENT_STRING_LOG_LEN;
+        while !escaped.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        escaped.truncate(cut);
+        escaped.push('…');
+    }
+    escaped
+}
+
 /// The MCP server.
 pub struct McpServer {
     /// Current server state.
@@ -554,6 +587,12 @@ impl McpServer {
                 JsonRpcError::invalid_params(req.id.clone(), "Missing initialize params")
             })?;
 
+        // Sanitise the client-controlled values we're about to log:
+        // escape control chars / ANSI escapes (so a buggy or hostile
+        // client can't disrupt log readers) and cap the length (so a
+        // 1-MiB name can't flood the log file).
+        let safe_proto = sanitize_for_log(&params.protocol_version);
+
         // Log the connecting client's identity for diagnostic visibility.
         // The MCP spec says client_info is optional, so handle the absent
         // case gracefully. Single-line macro form so cargo-llvm-cov
@@ -561,10 +600,12 @@ impl McpServer {
         // doesn't enable INFO-level logging (`tracing` doesn't evaluate
         // macro args when the level is below threshold).
         if let Some(client_info) = params.client_info.as_ref() {
-            let client_version = client_info.version.as_deref().unwrap_or("(unspecified)");
-            tracing::info!(client_name = %client_info.name, client_version = client_version, client_protocol_version = %params.protocol_version, "client connected");
+            let safe_name = sanitize_for_log(&client_info.name);
+            let safe_version =
+                sanitize_for_log(client_info.version.as_deref().unwrap_or("(unspecified)"));
+            tracing::info!(client_name = %safe_name, client_version = %safe_version, client_protocol_version = %safe_proto, "client connected");
         } else {
-            tracing::info!(client_protocol_version = %params.protocol_version, "client connected (no clientInfo)");
+            tracing::info!(client_protocol_version = %safe_proto, "client connected (no clientInfo)");
         }
 
         // Protocol version: per the MCP spec, we MUST respond with a
@@ -576,7 +617,7 @@ impl McpServer {
         // disconnect (if it strictly requires its requested version).
         if params.protocol_version != MCP_PROTOCOL_VERSION {
             tracing::warn!(
-                requested = %params.protocol_version,
+                requested = %safe_proto,
                 supported = MCP_PROTOCOL_VERSION,
                 "client requested unsupported MCP protocol version; \
                  responding with our supported version"
@@ -1740,6 +1781,62 @@ mod tests {
     }
 
     #[test]
+    fn sanitize_for_log_passes_clean_strings_unchanged() {
+        assert_eq!(sanitize_for_log("Claude AI"), "Claude AI");
+        assert_eq!(sanitize_for_log(""), "");
+        assert_eq!(sanitize_for_log("v1.2.3-rc.1"), "v1.2.3-rc.1");
+    }
+
+    #[test]
+    fn sanitize_for_log_escapes_control_characters() {
+        // ANSI escape sequence — raw ESC must not pass through, or it
+        // could repaint the operator's terminal (and fake "harmless"
+        // log lines around an injected message).
+        let evil = "foo\x1b[31mEVIL\x1b[0m";
+        let sanitised = sanitize_for_log(evil);
+        assert!(!sanitised.contains('\x1b'), "raw ESC must be escaped");
+        // `char::escape_debug` renders `\x1b` as `\u{1b}`.
+        assert!(sanitised.contains("\\u{1b}"));
+
+        // Newline — must be escaped so it doesn't fake a log-line break.
+        assert_eq!(sanitize_for_log("a\nb"), "a\\nb");
+
+        // Tab and CR.
+        assert_eq!(sanitize_for_log("a\tb\rc"), "a\\tb\\rc");
+
+        // NUL — `escape_debug` uses the short form `\0` for NUL.
+        assert_eq!(sanitize_for_log("a\0b"), "a\\0b");
+    }
+
+    #[test]
+    fn sanitize_for_log_caps_length_to_prevent_log_flood() {
+        // 1 KiB of `a` — must be truncated.
+        let huge = "a".repeat(1024);
+        let sanitised = sanitize_for_log(&huge);
+        assert!(sanitised.len() <= MAX_CLIENT_STRING_LOG_LEN + "…".len());
+        assert!(
+            sanitised.ends_with('…'),
+            "truncation marker must be appended"
+        );
+    }
+
+    #[test]
+    fn sanitize_for_log_truncates_at_char_boundary() {
+        // String with multibyte chars right around the truncation point.
+        // `é` is 2 bytes in UTF-8. If MAX_CLIENT_STRING_LOG_LEN landed
+        // mid-codepoint we'd panic on `escaped.truncate(cut)` — this
+        // test pins the boundary-search loop.
+        let s = "é".repeat(150); // 300 bytes
+        let sanitised = sanitize_for_log(&s);
+        assert!(sanitised.ends_with('…'));
+        // Verify we didn't break a codepoint — the prefix before the
+        // truncation marker must be valid UTF-8 (it is by construction
+        // since `escaped` is a String, but assert it's well-formed anyway).
+        let prefix = &sanitised[..sanitised.len() - "…".len()];
+        assert!(prefix.is_char_boundary(prefix.len()));
+    }
+
+    #[test]
     fn handle_initialize_accepts_mismatched_protocol_version() {
         // The spec says we MUST respond with a version we support. A
         // client requesting an unsupported version still gets a
@@ -1962,6 +2059,27 @@ mod tests {
     }
 
     #[test]
+    fn handle_notification_initialized_in_running_state_is_ignored() {
+        // Sending `notifications/initialized` again after the server is
+        // already in `Running` (e.g. a duplicate or out-of-order notif
+        // from a buggy client) must be a no-op state-wise. The method
+        // matches but the state guard fails, so the new debug! trace
+        // for "ignoring notification" fires and state stays `Running`.
+        // Pins the combinatorial case (right method, wrong state).
+        let mut server = create_test_server();
+        initialise_server(&mut server);
+        assert_eq!(server.state(), ServerState::Running);
+
+        let notif = JsonRpcNotification {
+            jsonrpc: "2.0".to_string(),
+            method: "notifications/initialized".to_string(),
+            params: None,
+        };
+        server.handle_notification(&notif);
+        assert_eq!(server.state(), ServerState::Running);
+    }
+
+    #[test]
     fn handle_notification_unknown_method_ignored() {
         let mut server = create_test_server();
         initialise_server(&mut server);
@@ -2159,8 +2277,24 @@ mod tests {
             SubmoduleConfig::default(),
         );
         initialise_server(&mut server);
-        // First call: not blocked by rate limit, but `repo_refs` itself
-        // will fail (no real network). The point is to consume the token.
+        // First call: consumes the bucket's only token.
+        //
+        // The dispatch order in every `call_repo_*_tool` is: parse args
+        // → sanitise URL → `try_acquire()` → repo-filter check →
+        // execute. The token is consumed in `try_acquire()` BEFORE
+        // any actual network operation, so even when the underlying
+        // `handle_repo_refs` fails, the bucket has already been
+        // drained.
+        //
+        // We use `.invalid` (RFC 6761 reserved TLD — guaranteed never
+        // to resolve in DNS) so the failed network attempt completes
+        // in milliseconds rather than waiting for a TCP timeout. CI
+        // runners and developer machines all fail-fast here. (Same
+        // pattern as the auth.rs e2e test from PR #153.)
+        //
+        // We deliberately don't assert on the first call's outcome —
+        // it returns an error, but the test only cares that the token
+        // got consumed.
         let _ = server.call_repo_refs_tool(&json!({
             "url": "https://nonexistent-rate-limit-test.invalid/repo.git",
         }));
