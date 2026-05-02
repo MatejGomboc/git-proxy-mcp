@@ -9,6 +9,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **11 new `git2_ops::push::tests` regressions** taking `push.rs` line
+  coverage from 34.75 % to 93.04 % (+58.29 pts). The file was the
+  worst-covered in scope; only `push_options_default_no_force` and
+  the existing `unbundle_sanitises_git_stderr_in_error` reached more
+  than the type definitions. New tests:
+    - `push_options_force_flag_round_trips`,
+      `push_result_fields_are_accessible` — exercise the public
+      types' Clone derives and field shapes.
+    - `push_bundle_rejects_invalid_url`,
+      `push_bundle_rejects_ext_url` — confirm `validate_url` rejects
+      `file://` and `ext::` early, before any temp-dir or bundle
+      work happens.
+    - `push_bundle_fails_with_malformed_bundle_data` — covers the
+      validate → temp-dir → init-bare → write → unbundle-fails
+      chain on gibberish bundle bytes.
+    - `push_bundle_returns_ref_not_found_when_branch_missing_after_unbundle`
+      — produces a real bundle on `main` via `git bundle create`,
+      asks `push_bundle` to push `feature/missing`, expects
+      `RefNotFound("feature/missing")`.
+    - `push_bundle_fails_when_remote_unreachable_after_successful_unbundle`
+      — full happy path through unbundle + ref resolution + the
+      push call itself, with the push failing on `127.0.0.1:1`
+      (TCP RST'd immediately, no slow timeout).
+    - `push_bundle_force_path_takes_force_refspec` — same as above
+      with `force=true`, exercising the `+refs/heads/...` refspec
+      branch in `push_to_remote` that the non-force test doesn't
+      reach.
+    - `push_bundle_uses_proxy_when_configured` — confirms that
+      passing a proxy URL through doesn't break the call path
+      (full proxy traffic verification needs a real proxy and is
+      out of scope for unit tests).
+    - `unbundle_succeeds_with_valid_bundle` — covers the success
+      arms of `unbundle` by producing a real bundle, unbundling
+      into a fresh bare repo, and asserting `refs/heads/main`
+      now resolves to the seeded commit.
+    - `unbundle_returns_bundle_failed_when_bundle_path_missing` —
+      a distinct "git ran but exited non-zero" trigger from the
+      existing malformed-bundle test, hitting the same sanitisation
+      path with a path-not-found stderr.
 - **Three new `LfsConfig` HTTP-timeout fields** added with
   `#[serde(default)]`, so existing configs continue to parse unchanged:
     1. `request_timeout_secs` (default 300) — caps the LFS Batch API
