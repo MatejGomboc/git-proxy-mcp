@@ -9,11 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **`LfsConfig.request_timeout_secs` and `LfsConfig.connect_timeout_secs`**
-  added with `#[serde(default)]`, so existing configs continue to parse
-  unchanged. Defaults: 300 s request timeout, 30 s connect timeout.
-  Documented in `config/example-config.json` and the README config table.
-- **13 new `git2_ops::lfs::tests` regressions** covering the LFS audit
+- **Three new `LfsConfig` HTTP-timeout fields** added with
+  `#[serde(default)]`, so existing configs continue to parse unchanged:
+    1. `request_timeout_secs` (default 300) — caps the LFS Batch API
+       POST. Set as the `Client::builder().timeout` default.
+    2. `connect_timeout_secs` (default 30) — caps TCP+TLS handshake.
+    3. `download_timeout_secs` (default 600) — per-object download GET,
+       typically larger than `request_timeout_secs` because object
+       downloads can be much slower than the Batch API call. Applied
+       via `RequestBuilder::timeout`, overriding the Client default
+       for the GET only.
+  Documented in `config/example-config.json` and the README config
+  table.
+- **10 new `git2_ops::lfs::tests` regressions** covering the LFS audit
   (PR #159) fixes — every fix lands with the test that would have caught
   it: `is_lfs_pointer_does_not_match_hypothetical_future_v10`,
   `is_lfs_pointer_accepts_crlf_line_ending`,
@@ -24,9 +32,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `fetch_content_rejects_oversize_actual_response`,
   `fetch_content_sanitises_server_error_body_in_log`,
   `fetch_content_sanitises_lfs_error_message`,
-  `fetch_batch_propagates_invalid_auth_header`,
-  `fetch_batch_returns_failed_downloads_count`,
-  `fetch_batch_does_not_overflow_cumulative_bytes`,
   `user_agent_contains_crate_version`.
 - **Integration coverage merging** — the `coverage` job in `ci_main.yml` now
   builds an instrumented release binary (via `cargo llvm-cov show-env`) and
@@ -71,19 +76,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   duplication meant any future retry-logic change had to be made in two
   places. The unified path always reads in 64 KiB chunks (so the new
   actual-size cap applies regardless of whether progress is enabled), and
-  emits progress only when a `ProgressSender` is configured. The Batch
-  API request-header construction was extracted into the same kind of
-  helper (`build_request_headers`) so `fetch_content` and `fetch_batch`
-  no longer have copy-pasted Authorization-header code that can drift.
-- **`LfsBatchResult` now exposes `skipped_with_error` and `failed_downloads`
-  counts.** Previously `fetch_batch` swallowed download errors and the
-  no-`actions.download` cases by just `warn!`-ing and dropping them, so
-  the caller had no way to distinguish "size limit hit" (already exposed
-  as `skipped_too_large`) from "server returned an error per object" or
-  "download attempt failed after retries". The new fields make these
-  visible without needing to scrape logs. The struct gains two `usize`
-  fields; existing call-sites that destructure `LfsBatchResult` need to
-  be updated (in this repo only the test code referenced them).
+  emits progress only when a `ProgressSender` is configured. The retry
+  loop was further split into `download_chunked` (request + retry) and
+  `read_response_body` (chunked read + cap + progress) so the cap-and-cap
+  logic lives in one place.
 - **LFS user-agent now derived from `CARGO_PKG_VERSION`.** The previous
   `"git-proxy-mcp/0.1"` was hardcoded and had drifted from the actual
   crate version (now 1.1.0) over the v1 development cycle. The new const
@@ -322,25 +318,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and a non-empty path component, and that the HTTP(S) form has a
   non-empty host. Same bug class as the auth.rs empty-host SSH fix
   in PR #153.
-- **`fetch_batch` silently dropped the `Authorization` header when
-  `HeaderValue::from_str` failed on the encoded credentials.** The
-  original `if let Ok(val) = ...` would let the request proceed
-  unauthenticated and surface as a confusing `401 Unauthorized`
-  instead of the actual encoding error. Inconsistent with
-  `fetch_content`, which had always propagated the same error
-  through `?`. Both paths now share `build_request_headers`, which
-  uses `?` consistently — a credential string with control bytes
-  surfaces as `"invalid auth header: ..."` rather than as a phantom
-  401.
-- **`fetch_batch` could overflow `cumulative_bytes` and silently let
-  oversized objects through.** A malicious LFS server claiming
-  `obj.size = u64::MAX` would have wrapped `cumulative_bytes + obj.size`,
-  making the `> max_total_size` check spuriously pass for that object
-  and then leaving `cumulative_bytes` near zero again — effectively
-  resetting the cap for every subsequent object in the same batch.
-  Now uses `checked_add` and treats overflow as "would exceed the
-  limit" (skip the object), so the cap is robust against any claimed
-  object size.
 - **`StreamingSession::get_chunk` could corrupt resume tracking on
   disk-read failure.** Two coupled bugs: (1) `retrieved_chunks[index]`
   was set to `true` BEFORE the storage read, so a failed read on
@@ -770,6 +747,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   behaviour. Existing `*_no_git_suffix` tests still pass (those URLs never
   had a suffix to begin with); the four tests that asserted the stripped
   form have been updated to expect the correct preserved form.
+
+### Removed
+
+- **`LfsClient::fetch_batch` and the `LfsBatchResult` struct deleted.**
+  Both were `pub` but had zero callers outside `lfs.rs`'s own tests
+  (the only LFS consumer, `streaming/tar.rs`, calls `fetch_content` per
+  blob). Per the dead-code cleanup pattern from PR #155 (which removed
+  `parse_bundle_info` for the same reason), keeping a half-finished
+  `pub` API around just means its bugs need fixing without ever being
+  exercised in production. The `~140 LOC` of batch logic plus three
+  associated tests are gone; the in-tree consumer is unaffected. If
+  batch fetching is wired in later, the function can be revived from
+  history with the audit-era hardening already applied.
+- **`LfsConfig.max_total_size` removed.** Was only consumed by
+  `fetch_batch`; with that gone, the field had no effect. Configs
+  that previously set it must drop the key (LFS config still uses
+  `deny_unknown_fields`). The per-object cap (`max_object_size`)
+  remains and is now enforced both pre-flight against `pointer.size`
+  and in-flight against the actual response body. If a per-operation
+  total cap is needed, it should be tracked in the consumer
+  (`streaming/tar.rs`) across `fetch_content` calls — a feature, not
+  a regression of an unused field.
 
 ### Security
 
