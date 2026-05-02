@@ -1330,11 +1330,10 @@ impl McpServer {
 
         // Check rate limiter
         if !self.rate_limiter.try_acquire() {
-            self.audit_logger
-                .log_silent(&AuditEvent::repo_clone_blocked(
-                    &sanitized_url,
-                    "rate limit exceeded",
-                ));
+            self.audit_logger.log_silent(&AuditEvent::repo_refs_blocked(
+                &sanitized_url,
+                "rate limit exceeded",
+            ));
             return ToolCallResult::error(
                 "Rate limit exceeded. Please wait before sending more requests.",
             );
@@ -1347,7 +1346,7 @@ impl McpServer {
             .reason()
         {
             self.audit_logger
-                .log_silent(&AuditEvent::repo_clone_blocked(&sanitized_url, reason));
+                .log_silent(&AuditEvent::repo_refs_blocked(&sanitized_url, reason));
             return ToolCallResult::error(reason.to_string());
         }
 
@@ -1400,11 +1399,10 @@ impl McpServer {
 
         // Check rate limiter
         if !self.rate_limiter.try_acquire() {
-            self.audit_logger
-                .log_silent(&AuditEvent::repo_clone_blocked(
-                    &sanitized_url,
-                    "rate limit exceeded",
-                ));
+            self.audit_logger.log_silent(&AuditEvent::repo_diff_blocked(
+                &sanitized_url,
+                "rate limit exceeded",
+            ));
             return ToolCallResult::error(
                 "Rate limit exceeded. Please wait before sending more requests.",
             );
@@ -1417,7 +1415,7 @@ impl McpServer {
             .reason()
         {
             self.audit_logger
-                .log_silent(&AuditEvent::repo_clone_blocked(&sanitized_url, reason));
+                .log_silent(&AuditEvent::repo_diff_blocked(&sanitized_url, reason));
             return ToolCallResult::error(reason.to_string());
         }
 
@@ -1470,11 +1468,10 @@ impl McpServer {
 
         // Check rate limiter
         if !self.rate_limiter.try_acquire() {
-            self.audit_logger
-                .log_silent(&AuditEvent::repo_clone_blocked(
-                    &sanitized_url,
-                    "rate limit exceeded",
-                ));
+            self.audit_logger.log_silent(&AuditEvent::repo_pull_blocked(
+                &sanitized_url,
+                "rate limit exceeded",
+            ));
             return ToolCallResult::error(
                 "Rate limit exceeded. Please wait before sending more requests.",
             );
@@ -1487,7 +1484,7 @@ impl McpServer {
             .reason()
         {
             self.audit_logger
-                .log_silent(&AuditEvent::repo_clone_blocked(&sanitized_url, reason));
+                .log_silent(&AuditEvent::repo_pull_blocked(&sanitized_url, reason));
             return ToolCallResult::error(reason.to_string());
         }
 
