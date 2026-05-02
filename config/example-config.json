@@ -44,7 +44,9 @@
         "retry_max_backoff_ms": 30000,
         "retry_backoff_multiplier": 2.0,
         "max_object_size": null,
-        "max_total_size": null
+        "request_timeout_secs": 300,
+        "connect_timeout_secs": 30,
+        "download_timeout_secs": 600
     },
     "submodules": {
         "max_concurrent": 4,

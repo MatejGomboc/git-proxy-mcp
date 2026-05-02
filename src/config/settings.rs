@@ -393,6 +393,30 @@ const fn default_lfs_retry_backoff_multiplier() -> f64 {
     2.0
 }
 
+/// Default LFS HTTP request timeout (seconds).
+///
+/// Caps total time for any single LFS HTTP request (Batch API call or
+/// object download). Without this, a hung server can stall the entire
+/// MCP operation indefinitely.
+const fn default_lfs_request_timeout_secs() -> u64 {
+    300
+}
+
+/// Default LFS HTTP connect timeout (seconds).
+const fn default_lfs_connect_timeout_secs() -> u64 {
+    30
+}
+
+/// Default LFS HTTP per-object download timeout (seconds).
+///
+/// Object downloads can take much longer than the Batch API call
+/// (multi-GiB blobs, slow CDNs), so they get their own (typically
+/// larger) cap. Applied via `RequestBuilder::timeout` per request,
+/// which overrides the `Client::builder().timeout` default.
+const fn default_lfs_download_timeout_secs() -> u64 {
+    600
+}
+
 /// Git LFS configuration.
 ///
 /// Controls retry behaviour, size limits, and download settings
@@ -438,14 +462,36 @@ pub struct LfsConfig {
     #[serde(default)]
     pub max_object_size: Option<u64>,
 
-    /// Maximum total size in bytes for all LFS objects in a single operation.
+    /// HTTP request timeout in seconds (per LFS request).
     ///
-    /// Once this limit is reached, remaining LFS objects are skipped.
-    /// Set to `null` for unlimited.
+    /// Caps total time for any single LFS HTTP request (Batch API call
+    /// or object download). Without this, a hung LFS server can stall
+    /// the entire MCP operation indefinitely.
     ///
-    /// Default: unlimited.
-    #[serde(default)]
-    pub max_total_size: Option<u64>,
+    /// Default: 300 (5 minutes).
+    #[serde(default = "default_lfs_request_timeout_secs")]
+    pub request_timeout_secs: u64,
+
+    /// HTTP connect timeout in seconds.
+    ///
+    /// Caps the time spent establishing a TCP+TLS connection to the LFS
+    /// server, before the request itself is sent.
+    ///
+    /// Default: 30.
+    #[serde(default = "default_lfs_connect_timeout_secs")]
+    pub connect_timeout_secs: u64,
+
+    /// HTTP per-object download timeout in seconds.
+    ///
+    /// Object downloads can take much longer than the Batch API call
+    /// (multi-GiB blobs, slow CDNs), so they get their own (typically
+    /// larger) cap. Applied via `RequestBuilder::timeout` for the
+    /// individual GET, which overrides the `Client::builder().timeout`
+    /// default used for the Batch API POST.
+    ///
+    /// Default: 600 (10 minutes).
+    #[serde(default = "default_lfs_download_timeout_secs")]
+    pub download_timeout_secs: u64,
 }
 
 impl Default for LfsConfig {
@@ -456,7 +502,9 @@ impl Default for LfsConfig {
             retry_max_backoff_ms: default_lfs_retry_max_backoff_ms(),
             retry_backoff_multiplier: default_lfs_retry_backoff_multiplier(),
             max_object_size: None,
-            max_total_size: None,
+            request_timeout_secs: default_lfs_request_timeout_secs(),
+            connect_timeout_secs: default_lfs_connect_timeout_secs(),
+            download_timeout_secs: default_lfs_download_timeout_secs(),
         }
     }
 }
@@ -898,7 +946,9 @@ mod tests {
         assert_eq!(config.retry_max_backoff_ms, 30_000);
         assert!((config.retry_backoff_multiplier - 2.0).abs() < f64::EPSILON);
         assert!(config.max_object_size.is_none());
-        assert!(config.max_total_size.is_none());
+        assert_eq!(config.request_timeout_secs, 300);
+        assert_eq!(config.connect_timeout_secs, 30);
+        assert_eq!(config.download_timeout_secs, 600);
     }
 
     #[test]
@@ -909,8 +959,7 @@ mod tests {
                 "retry_initial_backoff_ms": 1000,
                 "retry_max_backoff_ms": 60000,
                 "retry_backoff_multiplier": 3.0,
-                "max_object_size": 104857600,
-                "max_total_size": 524288000
+                "max_object_size": 104857600
             }
         }"#;
 
@@ -920,7 +969,6 @@ mod tests {
         assert_eq!(config.lfs.retry_max_backoff_ms, 60_000);
         assert!((config.lfs.retry_backoff_multiplier - 3.0).abs() < f64::EPSILON);
         assert_eq!(config.lfs.max_object_size, Some(104_857_600));
-        assert_eq!(config.lfs.max_total_size, Some(524_288_000));
     }
 
     #[test]
@@ -938,7 +986,6 @@ mod tests {
         assert_eq!(config.lfs.retry_max_backoff_ms, 30_000);
         assert!((config.lfs.retry_backoff_multiplier - 2.0).abs() < f64::EPSILON);
         assert!(config.lfs.max_object_size.is_none());
-        assert!(config.lfs.max_total_size.is_none());
     }
 
     #[test]

@@ -477,7 +477,9 @@ For a fully-populated example showing every section and option, see [`config/exa
 | `lfs` | `retry_max_backoff_ms` | Maximum retry backoff in ms (default: 30000) |
 | `lfs` | `retry_backoff_multiplier` | Exponential backoff multiplier (default: 2.0) |
 | `lfs` | `max_object_size` | Max single LFS object size in bytes (default: null — unlimited; oversized objects are kept as pointer files) |
-| `lfs` | `max_total_size` | Max total LFS size per operation (default: null — unlimited) |
+| `lfs` | `request_timeout_secs` | HTTP request timeout for the Batch API POST in seconds (default: 300) |
+| `lfs` | `connect_timeout_secs` | HTTP connect timeout in seconds (default: 30) |
+| `lfs` | `download_timeout_secs` | HTTP per-object download timeout in seconds — typically larger than `request_timeout_secs` for multi-GiB blobs (default: 600) |
 | `submodules` | `max_concurrent` | Parallel submodule fetches (default: 4) |
 | `submodules` | `max_failures` | Max submodule failures before stopping (default: 3) |
 | `submodules` | `include_patterns` | Glob patterns to include (default: null — all submodules allowed) |
