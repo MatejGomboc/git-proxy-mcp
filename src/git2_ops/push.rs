@@ -227,6 +227,38 @@ fn push_to_remote(
 mod tests {
     use super::*;
 
+    /// Returns `true` if the `git` CLI is on PATH and usable.
+    ///
+    /// Several tests need `git bundle create` (to produce a real
+    /// bundle) or rely on `unbundle`, which itself shells out to
+    /// `git fetch`. CI installs git in every job, so on the project's
+    /// own runners this always returns `true`. The helper exists so
+    /// that running `cargo test` in a sandbox without git produces
+    /// a graceful skip rather than a panic deep inside the helper.
+    fn git_is_available() -> bool {
+        std::process::Command::new("git")
+            .arg("--version")
+            .output()
+            .is_ok_and(|o| o.status.success())
+    }
+
+    /// Skips the current test (with an `eprintln!` trace) if `git`
+    /// isn't on PATH. Macro form so the early-return happens in the
+    /// caller, not inside the helper. Uses the test's thread name
+    /// (which Cargo sets to the full test path) for the trace.
+    macro_rules! require_git {
+        () => {
+            if !git_is_available() {
+                let name = std::thread::current()
+                    .name()
+                    .unwrap_or("<unnamed>")
+                    .to_string();
+                eprintln!("skipping {name}: git CLI not on PATH");
+                return;
+            }
+        };
+    }
+
     #[test]
     fn push_options_default_no_force() {
         let opts = PushOptions2 {
@@ -341,6 +373,7 @@ mod tests {
 
     #[test]
     fn push_bundle_fails_with_malformed_bundle_data() {
+        require_git!();
         // URL passes validate_url, temp + init succeed, write succeeds —
         // but the bundle bytes aren't a real git bundle, so unbundle's
         // `git fetch` invocation fails with BundleFailed. Exercises
@@ -364,6 +397,7 @@ mod tests {
 
     #[test]
     fn push_bundle_returns_ref_not_found_when_branch_missing_after_unbundle() {
+        require_git!();
         // Bundle has branch "main", but caller asks for "feature/missing".
         // Unbundle succeeds, find_reference fails — covers lines 114-116
         // (the `?` on find_reference returning RefNotFound).
@@ -388,6 +422,7 @@ mod tests {
 
     #[test]
     fn push_bundle_fails_when_remote_unreachable_after_successful_unbundle() {
+        require_git!();
         // Full happy path through unbundle + ref resolution + push call —
         // the actual push fails because 127.0.0.1:1 RSTs immediately.
         // Covers the body of push_bundle (lines 86-128) AND the body of
@@ -414,6 +449,7 @@ mod tests {
 
     #[test]
     fn push_bundle_force_path_takes_force_refspec() {
+        require_git!();
         // Same as the unreachable test, but with force=true. Covers the
         // `if force { ... } else { ... }` branch in push_to_remote
         // (line 211) which the non-force test above doesn't reach.
@@ -433,12 +469,24 @@ mod tests {
     }
 
     #[test]
-    fn push_bundle_uses_proxy_when_configured() {
-        // proxy_url is forwarded into push_to_remote's ProxyOptions.
-        // We can't easily verify the proxy is consulted (no real
-        // proxy in the test), but we CAN confirm that passing one
-        // doesn't break the call path — it still hits push and fails
-        // on the unreachable proxy address.
+    fn push_bundle_passes_proxy_through_to_push_to_remote() {
+        require_git!();
+        // The proxy_url argument is forwarded into push_to_remote's
+        // `git2::ProxyOptions::url()` call, exercising the
+        // `if let Some(url) = proxy_url` branch (line 203).
+        //
+        // We don't try to verify that libgit2 actually CONNECTs through
+        // the proxy at the network level — libgit2 chooses between
+        // direct and proxy transports based on the remote URL scheme
+        // (HTTP vs HTTPS), and a fake-proxy harness needs the full
+        // proxy protocol (CONNECT for HTTPS, full-URL GET for HTTP)
+        // plus the smart-HTTP framing on top. That's a much larger
+        // test fixture for one branch.
+        //
+        // What this test DOES assert: passing a proxy URL doesn't
+        // panic, doesn't break the call path, and produces a graceful
+        // PushFailed (not a different error variant) when the upstream
+        // is unreachable.
         let (_keep_alive, bundle_bytes) = make_bundle_for_branch("main");
         let opts = PushOptions2 {
             branch: "main".to_string(),
@@ -450,8 +498,6 @@ mod tests {
             opts,
             Some("http://127.0.0.1:1"),
         );
-        // Whatever the underlying error, push_bundle must still
-        // surface as PushFailed (not panic, not BundleFailed).
         assert!(
             matches!(result, Err(Git2Error::PushFailed(_))),
             "got: {result:?}"
@@ -460,6 +506,7 @@ mod tests {
 
     #[test]
     fn unbundle_succeeds_with_valid_bundle() {
+        require_git!();
         // Happy path for unbundle: produce a real bundle, unbundle it
         // into a fresh bare repo, confirm the branch ref now exists.
         // Covers lines 154-157, 174-175 (the success arms).
@@ -482,6 +529,7 @@ mod tests {
 
     #[test]
     fn unbundle_returns_bundle_failed_when_bundle_path_missing() {
+        require_git!();
         // Unbundle's `git fetch --no-tags <bundle_path>` errors out
         // when the bundle file doesn't exist. Tests the "git ran but
         // exited non-zero" path with a path-not-found stderr — same
@@ -502,6 +550,7 @@ mod tests {
 
     #[test]
     fn unbundle_sanitises_git_stderr_in_error() {
+        require_git!();
         // Set up a bare repo + write a malformed bundle. The header is
         // valid (passes `validate_bundle`'s magic check) but the
         // declared ref points to an OID with no pack data behind it,
