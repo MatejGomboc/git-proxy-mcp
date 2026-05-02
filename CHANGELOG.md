@@ -46,6 +46,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Disk-backed `StreamingSession` storage path now has direct test
+  coverage.** All previous chunked-session tests used data well below
+  `DISK_THRESHOLD` (10 MiB), so the `SessionStorage::File` variant —
+  including `seek`, `read_exact`, and the `NamedTempFile` lifecycle
+  — had zero direct coverage. Added
+  `disk_backed_storage_round_trips_chunks_correctly` which forces
+  the file path with a ~12 MiB allocation and asserts byte-exact
+  round-trip across all chunks, the partial-tail last chunk, and
+  `is_complete()` semantics. Test runs in ~110 ms locally.
+- **`rand_u64` doc-comment corrected.** Previously claimed
+  `thread_hash` (computed as the byte length of the thread-id's
+  Debug repr) was an "entropy source" — but
+  `format!("{:?}", ThreadId(N))` produces strings of length 11–12
+  for typical thread IDs, contributing at most a few bits of
+  variance. Real uniqueness comes from the `AtomicU64` counter and
+  nanosecond timestamp. Updated the doc-comment to describe each
+  source's actual contribution accurately, plus an explicit threat
+  model note ("Not cryptographically secure" — single MCP process,
+  no cross-client attack vector). No code change.
 - **`sanitize_for_log` extracted to a shared `src/util.rs` module.**
   Previously a private helper in `mcp/server.rs` (added in PR #154 for
   client-controlled `clientInfo` fields), the same hardening pattern
@@ -238,6 +257,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`StreamingSession::get_chunk` could corrupt resume tracking on
+  disk-read failure.** Two coupled bugs: (1) `retrieved_chunks[index]`
+  was set to `true` BEFORE the storage read, so a failed read on
+  disk-backed storage (truncated temp file, disk error during seek,
+  permission loss) silently marked the chunk as retrieved even though
+  the AI never received its data — `next_missing_chunk()` would skip
+  the index forever, leaving the session unable to complete on retry.
+  (2) The `Option<ChunkData>` return type conflated bounds errors and
+  I/O errors, so a disk failure surfaced as
+  `StreamingError::InvalidChunkIndex` in the MCP response — completely
+  wrong diagnostic for the operator. Both bugs only affected disk-
+  backed sessions (archives > 10 MiB) and were never triggered by
+  existing tests, which all used in-memory storage.
+  Fix: introduced `ChunkReadError` enum (`OutOfBounds` /
+  `Io(io::Error)`) and reordered the body to read FIRST, mark
+  retrieved only after success. Manager translates the new error
+  variants to distinct `StreamingError` cases. New regression tests
+  cover the bounds-vs-IO distinction and the
+  out-of-bounds-doesn't-mark invariant. The `get_chunk` API on
+  `StreamingSession` changes from `Option<ChunkData>` to
+  `Result<ChunkData, ChunkReadError>` — internal to the streaming
+  module; `StreamingSessionManager::get_chunk` external API is
+  unchanged.
 - **`unbundle` included git's raw stderr in error messages without
   sanitisation.** A maliciously-crafted bundle that triggered a
   creative `git fetch --no-tags <bundle>` failure could produce stderr

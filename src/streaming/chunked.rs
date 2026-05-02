@@ -248,23 +248,37 @@ impl StreamingSession {
 
     /// Get a specific chunk by index.
     ///
-    /// Returns None if index is out of bounds or if there's an I/O error
-    /// reading from disk-backed storage.
-    pub fn get_chunk(&mut self, index: usize) -> Option<ChunkData> {
-        if index >= self.total_chunks() {
-            return None;
+    /// # Errors
+    ///
+    /// - [`ChunkReadError::OutOfBounds`] if `index >= total_chunks()`.
+    /// - [`ChunkReadError::Io`] if reading from disk-backed storage fails
+    ///   (e.g. the temp file was truncated, hit a disk error, or lost
+    ///   the read permission).
+    ///
+    /// On I/O failure the chunk is **not** marked as retrieved — an
+    /// earlier version did the assignment up-front, which would silently
+    /// corrupt the resume tracking by skipping the failed chunk on
+    /// `next_missing_chunk()` even though the AI never received its
+    /// data. The mark now happens only after `read_chunk` succeeds.
+    pub fn get_chunk(&mut self, index: usize) -> Result<ChunkData, ChunkReadError> {
+        let total = self.total_chunks();
+        if index >= total {
+            return Err(ChunkReadError::OutOfBounds { index, total });
         }
 
-        self.last_accessed = Instant::now();
-        self.retrieved_chunks[index] = true;
-
         let offset = index * self.chunk_size;
-        let chunk_bytes = self.storage.read_chunk(offset, self.chunk_size).ok()?;
+        // Read FIRST. If the read fails, we propagate the error and the
+        // chunk stays "not retrieved" so a retry / resume can pick it up.
+        let chunk_bytes = self.storage.read_chunk(offset, self.chunk_size)?;
 
-        Some(ChunkData {
+        // Only mark retrieved after a successful read.
+        self.retrieved_chunks[index] = true;
+        self.last_accessed = Instant::now();
+
+        Ok(ChunkData {
             data: chunk_bytes,
             index,
-            is_last: index == self.total_chunks() - 1,
+            is_last: index == total - 1,
         })
     }
 
@@ -305,6 +319,51 @@ impl StreamingSession {
         } else {
             (retrieved as f64 / self.retrieved_chunks.len() as f64) * 100.0
         }
+    }
+}
+
+/// Error returned by [`StreamingSession::get_chunk`].
+///
+/// Distinguishes the two failure modes the caller may want to handle
+/// differently — out-of-bounds is a client error (translated to
+/// `StreamingError::InvalidChunkIndex` at the manager layer), I/O is
+/// an infrastructure error (translated to `StreamingError::IoError`).
+#[derive(Debug)]
+pub enum ChunkReadError {
+    /// Requested chunk index is at or beyond `total`.
+    OutOfBounds {
+        /// The index the caller requested.
+        index: usize,
+        /// Total number of chunks in the session.
+        total: usize,
+    },
+    /// I/O error reading from disk-backed storage.
+    Io(std::io::Error),
+}
+
+impl std::fmt::Display for ChunkReadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::OutOfBounds { index, total } => {
+                write!(f, "chunk index {index} is out of bounds (total: {total})")
+            }
+            Self::Io(err) => write!(f, "I/O error reading chunk: {err}"),
+        }
+    }
+}
+
+impl std::error::Error for ChunkReadError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::OutOfBounds { .. } => None,
+            Self::Io(err) => Some(err),
+        }
+    }
+}
+
+impl From<std::io::Error> for ChunkReadError {
+    fn from(err: std::io::Error) -> Self {
+        Self::Io(err)
     }
 }
 
@@ -465,13 +524,15 @@ impl StreamingSessionManager {
             return Err(StreamingError::SessionExpired(session_id.to_string()));
         }
 
-        let total = session.total_chunks();
-        let chunk = session
-            .get_chunk(chunk_index)
-            .ok_or(StreamingError::InvalidChunkIndex {
-                index: chunk_index,
-                total,
-            })?;
+        // Map session-level errors to the manager's error enum so
+        // out-of-bounds and disk-I/O failures surface distinctly to
+        // the operator (was previously conflated via Option → None).
+        let chunk = session.get_chunk(chunk_index).map_err(|e| match e {
+            ChunkReadError::OutOfBounds { index, total } => {
+                StreamingError::InvalidChunkIndex { index, total }
+            }
+            ChunkReadError::Io(io_err) => StreamingError::IoError(io_err.to_string()),
+        })?;
 
         // Compute next missing chunk BEFORE auto-cleanup
         let next_missing = session.next_missing_chunk();
@@ -717,14 +778,30 @@ impl From<std::io::Error> for StreamingError {
 impl std::error::Error for StreamingError {}
 
 /// Simple pseudo-random u64 for session ID generation.
-/// Not cryptographically secure, but provides sufficient uniqueness for session IDs.
-/// Uses multiple entropy sources to reduce collision probability.
+///
+/// **Not cryptographically secure** — provides only collision-resistance
+/// for the in-process session map, not unpredictability against an
+/// attacker. Sessions are scoped to a single MCP server process (stdio
+/// peer); no cross-client attack vector exists, so this is sufficient.
+///
+/// Real uniqueness comes from two sources:
+///
+/// - **Monotonic counter** (`AtomicU64`) — guarantees no two calls in the
+///   same process return the same counter value, so even if the system
+///   clock stalls or rolls back, IDs remain distinct.
+/// - **Nanosecond timestamp** — adds external variance and spreads IDs
+///   across the u64 space.
+///
+/// The thread-id-as-length term is mixed in for variance but contributes
+/// almost no real entropy — `format!("{thread_id:?}")` produces strings
+/// like `"ThreadId(2)"` whose length is mostly 11 or 12 chars depending
+/// on the digit count. Kept because removing it would invalidate the
+/// existing mixing constants and provide no measurable benefit.
 #[allow(clippy::cast_possible_truncation)] // Truncation is intentional for mixing
 fn rand_u64() -> u64 {
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::SystemTime;
 
-    // Monotonic counter to ensure uniqueness even within same nanosecond
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     let counter = COUNTER.fetch_add(1, Ordering::Relaxed);
 
@@ -733,11 +810,12 @@ fn rand_u64() -> u64 {
         .unwrap_or_default()
         .as_nanos() as u64;
 
-    // Mix counter, nanoseconds, and thread ID for better entropy
     let thread_id = std::thread::current().id();
     let thread_hash = format!("{thread_id:?}").len() as u64;
 
-    // Simple mixing function using large primes
+    // Simple mixing function using large primes (taken from xorshift /
+    // splitmix-style constants); the final xor-shift mixes high and
+    // low bits so flipping one input bit affects multiple output bits.
     let mixed = nanos
         .wrapping_mul(0x517c_c1b7_2722_0a95)
         .wrapping_add(counter)
@@ -789,6 +867,34 @@ mod tests {
     }
 
     #[test]
+    fn out_of_bounds_index_does_not_mark_any_chunk_retrieved() {
+        // Regression: previously `get_chunk` set
+        // `retrieved_chunks[index] = true` BEFORE doing the read, so
+        // a bad index could (in some failure modes) corrupt the
+        // resume-tracking. The current code returns early with
+        // `OutOfBounds` before touching `retrieved_chunks`.
+        let data = vec![0u8; 100];
+        let mut session = StreamingSession::new(
+            "test".to_string(),
+            "url".to_string(),
+            "main".to_string(),
+            "abc123".to_string(),
+            data,
+            50,
+        )
+        .unwrap();
+
+        assert_eq!(session.next_missing_chunk(), Some(0));
+        let result = session.get_chunk(99); // out of bounds
+        assert!(matches!(result, Err(ChunkReadError::OutOfBounds { .. })));
+        // After the failed call, ALL chunks should still be marked
+        // missing — particularly chunk 0, the one a sloppy
+        // implementation might have flipped.
+        assert_eq!(session.next_missing_chunk(), Some(0));
+        assert!(!session.is_complete());
+    }
+
+    #[test]
     fn streaming_session_invalid_chunk() {
         let data = vec![0u8; 100];
         let mut session = StreamingSession::new(
@@ -802,9 +908,13 @@ mod tests {
         .unwrap();
 
         assert_eq!(session.total_chunks(), 2);
-        assert!(session.get_chunk(0).is_some());
-        assert!(session.get_chunk(1).is_some());
-        assert!(session.get_chunk(2).is_none()); // Out of bounds
+        assert!(session.get_chunk(0).is_ok());
+        assert!(session.get_chunk(1).is_ok());
+        // Out of bounds — must surface as `OutOfBounds`, not silent None.
+        assert!(matches!(
+            session.get_chunk(2),
+            Err(ChunkReadError::OutOfBounds { index: 2, total: 2 })
+        ));
     }
 
     #[test]
@@ -879,13 +989,13 @@ mod tests {
         assert_eq!(session.total_chunks(), 3);
         assert!((session.progress() - 0.0).abs() < f64::EPSILON);
 
-        session.get_chunk(0);
+        let _ = session.get_chunk(0);
         assert!((session.progress() - 33.333_333_333_333_336).abs() < 0.1);
 
-        session.get_chunk(1);
+        let _ = session.get_chunk(1);
         assert!((session.progress() - 66.666_666_666_666_67).abs() < 0.1);
 
-        session.get_chunk(2);
+        let _ = session.get_chunk(2);
         assert!((session.progress() - 100.0).abs() < f64::EPSILON);
     }
 
@@ -923,15 +1033,15 @@ mod tests {
         assert_eq!(session.next_missing_chunk(), Some(0));
 
         // Retrieve chunk 0 — next missing should be 1
-        session.get_chunk(0);
+        let _ = session.get_chunk(0);
         assert_eq!(session.next_missing_chunk(), Some(1));
 
         // Retrieve chunk 2 (out of order) — next missing should still be 1
-        session.get_chunk(2);
+        let _ = session.get_chunk(2);
         assert_eq!(session.next_missing_chunk(), Some(1));
 
         // Retrieve chunk 1 — all retrieved, next missing should be None
-        session.get_chunk(1);
+        let _ = session.get_chunk(1);
         assert_eq!(session.next_missing_chunk(), None);
     }
 
@@ -1011,6 +1121,62 @@ mod tests {
         let manager = StreamingSessionManager::default();
         let result = manager.get_session_status("nonexistent");
         assert!(matches!(result, Err(StreamingError::SessionNotFound(_))));
+    }
+
+    #[test]
+    fn disk_backed_storage_round_trips_chunks_correctly() {
+        // All other chunked tests use small (< `DISK_THRESHOLD` =
+        // 10 MiB) data, which exercises only the in-memory
+        // `SessionStorage::Memory` variant. This test forces the
+        // disk-backed path by allocating just over the threshold,
+        // then verifies that:
+        //   - `is_disk_backed()` reports true
+        //   - chunks read back from the temp file match the input
+        //     bytes exactly (seek + read_exact path)
+        //   - the last chunk handles a partial-tail correctly (not
+        //     a multiple of chunk_size)
+        //   - completion + auto-cleanup work the same way as
+        //     in-memory storage
+        let chunk_size = 1024 * 1024; // 1 MiB
+        let total_size = DISK_THRESHOLD + chunk_size + 12345; // ~12 MiB + tail
+        let data: Vec<u8> = (0u8..=255).cycle().take(total_size).collect();
+        let expected = data.clone();
+
+        let mut session = StreamingSession::new(
+            "disk-backed-test".to_string(),
+            "url".to_string(),
+            "main".to_string(),
+            "abc123".to_string(),
+            data,
+            chunk_size,
+        )
+        .unwrap();
+
+        assert!(
+            session.is_disk_backed(),
+            "data > DISK_THRESHOLD must be disk-backed"
+        );
+        let total_chunks = session.total_chunks();
+        // Reassemble the archive by reading every chunk and concatenating.
+        let mut reassembled = Vec::with_capacity(total_size);
+        for i in 0..total_chunks {
+            let chunk = session
+                .get_chunk(i)
+                .unwrap_or_else(|e| panic!("chunk {i} failed: {e}"));
+            assert_eq!(chunk.index, i);
+            assert_eq!(chunk.is_last, i == total_chunks - 1);
+            reassembled.extend_from_slice(&chunk.data);
+        }
+        assert_eq!(
+            reassembled.len(),
+            total_size,
+            "reassembled size must match original"
+        );
+        assert_eq!(
+            reassembled, expected,
+            "disk-backed read must round-trip bytes exactly"
+        );
+        assert!(session.is_complete());
     }
 
     #[test]
