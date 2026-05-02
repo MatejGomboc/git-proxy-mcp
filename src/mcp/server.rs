@@ -1211,7 +1211,12 @@ impl McpServer {
                         &sanitized_url,
                         &result.branch,
                         &result.commit,
-                        0, // file_count not known until all chunks retrieved
+                        // `RepoCloneStartResult` carries `file_count` as soon
+                        // as the archive is built (which is before any chunks
+                        // are retrieved) — log it here rather than the
+                        // hard-coded 0 the previous comment claimed was
+                        // unavoidable.
+                        result.file_count,
                         result.total_size,
                         duration,
                     ));
