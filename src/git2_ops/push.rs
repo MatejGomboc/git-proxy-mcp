@@ -99,7 +99,7 @@ pub fn push_bundle(
 
     debug!(path = %temp_dir.path().display(), "created temp directory");
 
-    // Initialize bare repo.
+    // Initialise bare repo.
     // Defensive `?` against system errors — `init_bare` only fails
     // when the path is invalid, but we just got it from a fresh
     // `TempDir`. Not externally triggerable; OK path is exercised.

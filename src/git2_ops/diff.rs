@@ -98,7 +98,7 @@ pub fn generate_diff(
 
     debug!(path = %temp_dir.path().display(), "created temp directory");
 
-    // Initialize bare repository
+    // Initialise bare repository
     let repo = Repository::init_bare(temp_dir.path())
         .map_err(|e| Git2Error::InitFailed(format!("failed to init bare repo: {}", e.message())))?;
 
