@@ -1583,4 +1583,416 @@ mod tests {
         assert!(USER_AGENT.starts_with("git-proxy-mcp/"));
         assert!(USER_AGENT.contains(env!("CARGO_PKG_VERSION")));
     }
+
+    // ------------------------------------------------------------------
+    // Coverage gaps flagged by Codecov on PR #159
+    //
+    // Each of these targets a specific line range in lfs.rs that the
+    // earlier audit tests didn't reach. Previously they only ran against
+    // a real LFS endpoint or never at all.
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn parse_lfs_pointer_skips_blank_lines() {
+        // Line 113: the `if line.is_empty() { continue; }` branch in
+        // parse_lfs_pointer was never exercised because all the existing
+        // valid-pointer tests had no blank lines. Real-world pointer
+        // files often have a trailing blank line after the last field.
+        let pointer = b"version https://git-lfs.github.com/spec/v1\n\
+                        \n\
+                        oid sha256:abc123def4567890\n\
+                        \n\
+                        size 42\n\
+                        \n";
+        let parsed = parse_lfs_pointer(pointer).unwrap();
+        assert_eq!(parsed.oid, "abc123def4567890");
+        assert_eq!(parsed.size, 42);
+    }
+
+    #[test]
+    fn lfs_client_constructs_with_proxy_and_no_proxy() {
+        // Lines 273-280: the proxy-URL branch of LfsClient::new was
+        // never exercised — every other test passed `None` for proxy.
+        // We can't trivially exercise the actual proxy traffic without
+        // a real HTTP proxy, but we CAN exercise the builder path and
+        // confirm it doesn't error.
+        let config = LfsConfig::default();
+        let client = LfsClient::new(
+            "https://github.com/owner/repo.git",
+            None,
+            Some("http://proxy.internal:3128"),
+            Some("localhost,127.0.0.1,*.example.internal"),
+            &config,
+            None,
+        );
+        assert!(client.is_ok(), "proxy URL with no_proxy must build cleanly");
+    }
+
+    #[test]
+    fn lfs_client_constructs_with_proxy_only() {
+        // Same line range — also exercise the no_proxy=None branch.
+        let config = LfsConfig::default();
+        let client = LfsClient::new(
+            "https://github.com/owner/repo.git",
+            None,
+            Some("socks5://proxy.internal:1080"),
+            None,
+            &config,
+            None,
+        );
+        assert!(
+            client.is_ok(),
+            "proxy URL without no_proxy must build cleanly"
+        );
+    }
+
+    #[test]
+    fn lfs_client_rejects_invalid_proxy_url() {
+        // Line 274: the .map_err(|e| ...) on Proxy::all() — exercises
+        // the error path when the proxy URL itself is malformed.
+        let config = LfsConfig::default();
+        let client = LfsClient::new(
+            "https://github.com/owner/repo.git",
+            None,
+            // "not a url" lacks a scheme — reqwest::Proxy::all rejects it.
+            Some("not a url"),
+            None,
+            &config,
+            None,
+        );
+        let Err(err) = client else {
+            panic!("malformed proxy URL must be rejected");
+        };
+        let msg = format!("{err}");
+        assert!(msg.contains("invalid proxy URL"), "got: {msg}");
+    }
+
+    #[test]
+    fn fetch_content_retries_download_get_on_transient_5xx_then_succeeds() {
+        // Lines 372-388 / 405-407: the download-GET retry loop. The
+        // existing `fetch_content_retries_on_transient_5xx_then_succeeds`
+        // test only flexes the Batch API POST retry — the actual blob
+        // download had no retry-loop coverage.
+        let mut server = mockito::Server::new();
+        let oid = "abc123def4567890abc123def4567890abc123def4567890abc123def4567890";
+        let payload = b"blob content after download retry";
+        let download_path = format!("/repo.git/info/lfs/objects/{oid}");
+        let download_href = format!("{}{}", server.url(), download_path);
+
+        // Batch API: succeeds first try.
+        let _batch_mock = server
+            .mock("POST", "/repo.git/info/lfs/objects/batch")
+            .with_status(200)
+            .with_header("content-type", "application/vnd.git-lfs+json")
+            .with_body(make_batch_response(
+                oid,
+                payload.len() as u64,
+                &download_href,
+            ))
+            .create();
+
+        // Download GET: 503 first, then 200. mockito serves mocks in
+        // creation order when multiple match, so order matters here.
+        let _download_fail = server
+            .mock("GET", download_path.as_str())
+            .with_status(503)
+            .expect(1)
+            .create();
+        let _download_ok = server
+            .mock("GET", download_path.as_str())
+            .with_status(200)
+            .with_body(payload)
+            .expect(1)
+            .create();
+
+        let repo_url = format!("{}/repo.git", server.url());
+        let config = fast_retry_config(5);
+        let client = LfsClient::new(&repo_url, None, None, None, &config, None).unwrap();
+
+        let pointer = make_pointer(oid, payload.len() as u64);
+        let content = client.fetch_content(&pointer).unwrap();
+        assert_eq!(content, payload);
+    }
+
+    #[test]
+    fn fetch_content_emits_progress_when_sender_configured() {
+        // Lines 476-479: the progress-sender callback inside
+        // read_response_body. Without a sender, the `if let Some(...)`
+        // branch is skipped entirely, leaving those lines uncovered.
+        let mut server = mockito::Server::new();
+        let oid = "abc123def4567890abc123def4567890abc123def4567890abc123def4567890";
+        // Use a payload >= LFS_DOWNLOAD_CHUNK_SIZE so the read loop
+        // makes multiple iterations and the progress callback fires
+        // more than once. 96 KiB = 1.5 chunks.
+        let payload = vec![b'P'; 96 * 1024];
+        let download_path = format!("/repo.git/info/lfs/objects/{oid}");
+        let download_href = format!("{}{}", server.url(), download_path);
+
+        let _batch_mock = server
+            .mock("POST", "/repo.git/info/lfs/objects/batch")
+            .with_status(200)
+            .with_header("content-type", "application/vnd.git-lfs+json")
+            .with_body(make_batch_response(
+                oid,
+                payload.len() as u64,
+                &download_href,
+            ))
+            .create();
+        let _download_mock = server
+            .mock("GET", download_path.as_str())
+            .with_status(200)
+            .with_body(&payload)
+            .create();
+
+        let repo_url = format!("{}/repo.git", server.url());
+        let config = fast_retry_config(3);
+        let (sender, receiver) =
+            crate::mcp::progress::ProgressSender::new("test-token".to_string());
+        let client = LfsClient::new(&repo_url, None, None, None, &config, Some(sender)).unwrap();
+
+        let pointer = make_pointer(oid, payload.len() as u64);
+        let content = client.fetch_content(&pointer).unwrap();
+        assert_eq!(content.len(), payload.len());
+
+        // Drain the channel; we expect at least one LfsDownload progress
+        // update to have been emitted. (The exact count depends on the
+        // 100-ms rate-limit in ProgressSender; one is the floor.)
+        let mut lfs_updates = 0;
+        while let Ok(update) = receiver.try_recv() {
+            if matches!(
+                update,
+                crate::mcp::progress::ProgressUpdate::LfsDownload { .. }
+            ) {
+                lfs_updates += 1;
+            }
+        }
+        assert!(
+            lfs_updates >= 1,
+            "expected at least one LfsDownload progress update, got 0"
+        );
+    }
+
+    #[test]
+    fn fetch_content_passes_through_server_supplied_download_headers() {
+        // Lines 675-680: the loop that copies server-supplied download
+        // headers into the GET request. Existing tests use `header: {}`
+        // in the Batch API response, so this loop body never executed.
+        // Real-world LFS endpoints (S3-signed URLs, Azure SAS, etc.)
+        // include auth headers here that the client must forward.
+        let mut server = mockito::Server::new();
+        let oid = "abc123def4567890abc123def4567890abc123def4567890abc123def4567890";
+        let payload = b"signed-url payload";
+        let download_path = format!("/repo.git/info/lfs/objects/{oid}");
+        let download_href = format!("{}{}", server.url(), download_path);
+
+        // Batch response with a custom download header. The mock GET
+        // below requires that header to be present on the request; if
+        // the loop body didn't execute, the GET would fail to match
+        // and the download would 501.
+        let body = format!(
+            r#"{{
+                "objects": [
+                    {{
+                        "oid": "{oid}",
+                        "size": {size},
+                        "actions": {{
+                            "download": {{
+                                "href": "{download_href}",
+                                "header": {{
+                                    "x-amz-signature": "deadbeef"
+                                }}
+                            }}
+                        }}
+                    }}
+                ]
+            }}"#,
+            size = payload.len(),
+        );
+
+        let _batch_mock = server
+            .mock("POST", "/repo.git/info/lfs/objects/batch")
+            .with_status(200)
+            .with_header("content-type", "application/vnd.git-lfs+json")
+            .with_body(body)
+            .create();
+        let _download_mock = server
+            .mock("GET", download_path.as_str())
+            .match_header("x-amz-signature", "deadbeef")
+            .with_status(200)
+            .with_body(payload)
+            .create();
+
+        let repo_url = format!("{}/repo.git", server.url());
+        let config = fast_retry_config(3);
+        let client = LfsClient::new(&repo_url, None, None, None, &config, None).unwrap();
+
+        let pointer = make_pointer(oid, payload.len() as u64);
+        let content = client.fetch_content(&pointer).unwrap();
+        assert_eq!(content, payload);
+    }
+
+    #[test]
+    fn fetch_content_does_not_retry_download_get_on_4xx() {
+        // Lines 388-392: the non-retryable status return inside
+        // download_chunked. The Batch API succeeds; the download GET
+        // returns 404 (not in the transient-status set), so it must
+        // surface the error without retrying.
+        let mut server = mockito::Server::new();
+        let oid = "abc123def4567890abc123def4567890abc123def4567890abc123def4567890";
+        let download_path = format!("/repo.git/info/lfs/objects/{oid}");
+        let download_href = format!("{}{}", server.url(), download_path);
+
+        let _batch_mock = server
+            .mock("POST", "/repo.git/info/lfs/objects/batch")
+            .with_status(200)
+            .with_header("content-type", "application/vnd.git-lfs+json")
+            .with_body(make_batch_response(oid, 100, &download_href))
+            .create();
+
+        // 404 is non-retryable; mockito will fail the test if we hit
+        // the GET more than once.
+        let _download_mock = server
+            .mock("GET", download_path.as_str())
+            .with_status(404)
+            .expect(1)
+            .create();
+
+        let repo_url = format!("{}/repo.git", server.url());
+        let config = fast_retry_config(5);
+        let client = LfsClient::new(&repo_url, None, None, None, &config, None).unwrap();
+
+        let pointer = make_pointer(oid, 100);
+        let result = client.fetch_content(&pointer);
+        assert!(result.is_err(), "404 download must surface as an error");
+        let msg = format!("{}", result.unwrap_err());
+        assert!(msg.contains("404") || msg.contains("status"), "got: {msg}");
+    }
+
+    #[test]
+    fn fetch_content_returns_connect_error_when_download_host_unreachable() {
+        // Lines 308-310 / 394-410: `is_transient_error` and the
+        // connection-error retry/return paths in download_chunked.
+        // Point the download URL at a port nothing is listening on,
+        // so reqwest produces a connect-error (which `is_transient_error`
+        // returns true for, exercising the retry loop) and eventually
+        // fails after exhausting attempts (the `return Err(...)` at
+        // the bottom of the Err arm).
+        let mut server = mockito::Server::new();
+        let oid = "abc123def4567890abc123def4567890abc123def4567890abc123def4567890";
+        // Port 1 is the system's TCPMUX port — almost never listening,
+        // and the OS rejects with TCP RST immediately rather than
+        // timing out. Avoids slow tests.
+        let download_href = "http://127.0.0.1:1/unreachable";
+
+        let _batch_mock = server
+            .mock("POST", "/repo.git/info/lfs/objects/batch")
+            .with_status(200)
+            .with_header("content-type", "application/vnd.git-lfs+json")
+            .with_body(make_batch_response(oid, 10, download_href))
+            .create();
+
+        let repo_url = format!("{}/repo.git", server.url());
+        // Use a tight per-connect cap so the test stays fast even on
+        // platforms where 127.0.0.1:1 doesn't RST immediately.
+        let config = LfsConfig {
+            retry_max_attempts: 2,
+            retry_initial_backoff_ms: 1,
+            retry_max_backoff_ms: 2,
+            retry_backoff_multiplier: 2.0,
+            max_object_size: None,
+            request_timeout_secs: 5,
+            connect_timeout_secs: 1,
+            download_timeout_secs: 5,
+        };
+        let client = LfsClient::new(&repo_url, None, None, None, &config, None).unwrap();
+
+        let pointer = make_pointer(oid, 10);
+        let result = client.fetch_content(&pointer);
+        assert!(
+            result.is_err(),
+            "unreachable download URL must surface as an error"
+        );
+        let msg = format!("{}", result.unwrap_err());
+        // Either "LFS download failed" (connect-error path) or a
+        // generic transport error — both prove the request reached
+        // the network and failed gracefully rather than panicking.
+        assert!(!msg.is_empty(), "error message must not be empty");
+    }
+
+    #[test]
+    fn fetch_content_returns_connect_error_when_lfs_host_unreachable() {
+        // Lines 550-566: the connection-error retry/return paths in
+        // post_with_retry. Same trick as the download test above, but
+        // pointed at the Batch API URL itself.
+        let repo_url = "http://127.0.0.1:1/repo.git";
+        let config = LfsConfig {
+            retry_max_attempts: 2,
+            retry_initial_backoff_ms: 1,
+            retry_max_backoff_ms: 2,
+            retry_backoff_multiplier: 2.0,
+            max_object_size: None,
+            request_timeout_secs: 5,
+            connect_timeout_secs: 1,
+            download_timeout_secs: 5,
+        };
+        let client = LfsClient::new(repo_url, None, None, None, &config, None).unwrap();
+
+        let pointer = make_pointer("dead", 10);
+        let result = client.fetch_content(&pointer);
+        assert!(
+            result.is_err(),
+            "unreachable Batch API URL must surface as an error"
+        );
+        let msg = format!("{}", result.unwrap_err());
+        // Should reference the batch-request failure, not download.
+        assert!(
+            msg.contains("LFS batch request failed") || msg.contains("batch"),
+            "got: {msg}"
+        );
+    }
+
+    #[test]
+    fn fetch_content_warns_but_returns_when_actual_size_under_declared() {
+        // Lines 689-695: the size-mismatch `warn!`. When the actual
+        // download is smaller than `pointer.size`, we don't error —
+        // we just log and return what we got. Without this test, that
+        // branch is unreached (existing tests all have actual_len ==
+        // pointer.size).
+        //
+        // The over-declared-size path is the safer of the two
+        // mismatches: a too-small download just means truncation by
+        // the server, not a security boundary failure. The actual
+        // *over-size* path is the one with the security cap, which
+        // `fetch_content_rejects_oversize_actual_response` covers.
+        let mut server = mockito::Server::new();
+        let oid = "abc123def4567890abc123def4567890abc123def4567890abc123def4567890";
+        // Pointer claims 100 bytes; server actually sends 50.
+        let actual_payload = vec![b'S'; 50];
+        let claimed_size = 100u64;
+        let download_path = format!("/repo.git/info/lfs/objects/{oid}");
+        let download_href = format!("{}{}", server.url(), download_path);
+
+        let _batch_mock = server
+            .mock("POST", "/repo.git/info/lfs/objects/batch")
+            .with_status(200)
+            .with_header("content-type", "application/vnd.git-lfs+json")
+            .with_body(make_batch_response(oid, claimed_size, &download_href))
+            .create();
+        let _download_mock = server
+            .mock("GET", download_path.as_str())
+            .with_status(200)
+            .with_body(&actual_payload)
+            .create();
+
+        let repo_url = format!("{}/repo.git", server.url());
+        let config = fast_retry_config(3);
+        let client = LfsClient::new(&repo_url, None, None, None, &config, None).unwrap();
+
+        let pointer = make_pointer(oid, claimed_size);
+        let content = client.fetch_content(&pointer).unwrap();
+        // Returned content is what the server actually sent, not the
+        // claimed size.
+        assert_eq!(content.len(), actual_payload.len());
+        assert_eq!(content, actual_payload);
+    }
 }

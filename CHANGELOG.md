@@ -21,18 +21,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
        for the GET only.
   Documented in `config/example-config.json` and the README config
   table.
-- **10 new `git2_ops::lfs::tests` regressions** covering the LFS audit
+- **21 new `git2_ops::lfs::tests` regressions** covering the LFS audit
   (PR #159) fixes — every fix lands with the test that would have caught
-  it: `is_lfs_pointer_does_not_match_hypothetical_future_v10`,
-  `is_lfs_pointer_accepts_crlf_line_ending`,
-  `derive_lfs_url_rejects_ssh_with_empty_host`,
-  `derive_lfs_url_rejects_ssh_without_colon`,
-  `derive_lfs_url_rejects_ssh_with_empty_path`,
-  `derive_lfs_url_rejects_https_with_empty_host`,
-  `fetch_content_rejects_oversize_actual_response`,
-  `fetch_content_sanitises_server_error_body_in_log`,
-  `fetch_content_sanitises_lfs_error_message`,
-  `user_agent_contains_crate_version`.
+  it, plus a Codecov-driven follow-up batch that pushed `lfs.rs` line
+  coverage from 91.87 % to 98.42 %:
+    - Fix-coverage tests:
+      `is_lfs_pointer_does_not_match_hypothetical_future_v10`,
+      `is_lfs_pointer_accepts_crlf_line_ending`,
+      `derive_lfs_url_rejects_ssh_with_empty_host`,
+      `derive_lfs_url_rejects_ssh_without_colon`,
+      `derive_lfs_url_rejects_ssh_with_empty_path`,
+      `derive_lfs_url_rejects_https_with_empty_host`,
+      `fetch_content_rejects_oversize_actual_response`,
+      `fetch_content_sanitises_server_error_body_in_log`,
+      `fetch_content_sanitises_lfs_error_message`,
+      `user_agent_contains_crate_version`.
+    - Codecov-gap tests:
+      `parse_lfs_pointer_skips_blank_lines`,
+      `lfs_client_constructs_with_proxy_and_no_proxy`,
+      `lfs_client_constructs_with_proxy_only`,
+      `lfs_client_rejects_invalid_proxy_url`,
+      `fetch_content_retries_download_get_on_transient_5xx_then_succeeds`
+      (covers the *download* GET retry loop, distinct from the
+      Batch-API POST retry the existing test exercises),
+      `fetch_content_emits_progress_when_sender_configured`
+      (exercises the chunked-read progress callback),
+      `fetch_content_passes_through_server_supplied_download_headers`
+      (exercises the per-object header forwarding loop),
+      `fetch_content_warns_but_returns_when_actual_size_under_declared`,
+      `fetch_content_does_not_retry_download_get_on_4xx`,
+      `fetch_content_returns_connect_error_when_download_host_unreachable`
+      (exercises `is_transient_error` + the retry-then-give-up path
+      via 127.0.0.1:1 unreachable port),
+      `fetch_content_returns_connect_error_when_lfs_host_unreachable`
+      (same connection-error path applied to the Batch-API POST).
 - **Integration coverage merging** — the `coverage` job in `ci_main.yml` now
   builds an instrumented release binary (via `cargo llvm-cov show-env`) and
   runs the Python integration tests against it. The resulting coverage data
