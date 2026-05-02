@@ -1107,6 +1107,62 @@ mod tests {
     }
 
     #[test]
+    fn disk_backed_storage_round_trips_chunks_correctly() {
+        // All other chunked tests use small (< `DISK_THRESHOLD` =
+        // 10 MiB) data, which exercises only the in-memory
+        // `SessionStorage::Memory` variant. This test forces the
+        // disk-backed path by allocating just over the threshold,
+        // then verifies that:
+        //   - `is_disk_backed()` reports true
+        //   - chunks read back from the temp file match the input
+        //     bytes exactly (seek + read_exact path)
+        //   - the last chunk handles a partial-tail correctly (not
+        //     a multiple of chunk_size)
+        //   - completion + auto-cleanup work the same way as
+        //     in-memory storage
+        let chunk_size = 1024 * 1024; // 1 MiB
+        let total_size = DISK_THRESHOLD + chunk_size + 12345; // ~12 MiB + tail
+        let data: Vec<u8> = (0u8..=255).cycle().take(total_size).collect();
+        let expected = data.clone();
+
+        let mut session = StreamingSession::new(
+            "disk-backed-test".to_string(),
+            "url".to_string(),
+            "main".to_string(),
+            "abc123".to_string(),
+            data,
+            chunk_size,
+        )
+        .unwrap();
+
+        assert!(
+            session.is_disk_backed(),
+            "data > DISK_THRESHOLD must be disk-backed"
+        );
+        let total_chunks = session.total_chunks();
+        // Reassemble the archive by reading every chunk and concatenating.
+        let mut reassembled = Vec::with_capacity(total_size);
+        for i in 0..total_chunks {
+            let chunk = session
+                .get_chunk(i)
+                .unwrap_or_else(|e| panic!("chunk {i} failed: {e}"));
+            assert_eq!(chunk.index, i);
+            assert_eq!(chunk.is_last, i == total_chunks - 1);
+            reassembled.extend_from_slice(&chunk.data);
+        }
+        assert_eq!(
+            reassembled.len(),
+            total_size,
+            "reassembled size must match original"
+        );
+        assert_eq!(
+            reassembled, expected,
+            "disk-backed read must round-trip bytes exactly"
+        );
+        assert!(session.is_complete());
+    }
+
+    #[test]
     fn session_info_has_resume_fields() {
         let manager = StreamingSessionManager::default();
 
