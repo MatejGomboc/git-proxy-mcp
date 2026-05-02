@@ -91,12 +91,18 @@ pub fn push_bundle(
         "starting push from bundle"
     );
 
-    // Create temp directory
+    // Create temp directory.
+    // Defensive `?` against system errors — the failure arm is not
+    // unit-testable without env-var manipulation that breaks parallel
+    // test isolation. The OK path is exercised by every push test.
     let temp_dir = TempDir::new().map_err(Git2Error::TempDirFailed)?;
 
     debug!(path = %temp_dir.path().display(), "created temp directory");
 
-    // Initialize bare repo
+    // Initialize bare repo.
+    // Defensive `?` against system errors — `init_bare` only fails
+    // when the path is invalid, but we just got it from a fresh
+    // `TempDir`. Not externally triggerable; OK path is exercised.
     let repo = Repository::init_bare(temp_dir.path())
         .map_err(|e| Git2Error::InitFailed(format!("failed to init bare repo: {e}")))?;
 
@@ -115,6 +121,10 @@ pub fn push_bundle(
         .find_reference(&format!("refs/heads/{}", options.branch))
         .map_err(|_| Git2Error::RefNotFound(options.branch.clone()))?;
 
+    // Defensive `?` against corrupted refs — `peel_to_commit` only
+    // fails when the ref points to a non-peelable object (e.g. a
+    // raw tree), which `git bundle create` never produces. Not
+    // externally triggerable; OK path is exercised.
     let commit_id = reference
         .peel_to_commit()
         .map_err(|e| Git2Error::RefNotFound(format!("failed to peel to commit: {e}")))?
