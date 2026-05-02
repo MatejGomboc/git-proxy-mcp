@@ -778,14 +778,30 @@ impl From<std::io::Error> for StreamingError {
 impl std::error::Error for StreamingError {}
 
 /// Simple pseudo-random u64 for session ID generation.
-/// Not cryptographically secure, but provides sufficient uniqueness for session IDs.
-/// Uses multiple entropy sources to reduce collision probability.
+///
+/// **Not cryptographically secure** — provides only collision-resistance
+/// for the in-process session map, not unpredictability against an
+/// attacker. Sessions are scoped to a single MCP server process (stdio
+/// peer); no cross-client attack vector exists, so this is sufficient.
+///
+/// Real uniqueness comes from two sources:
+///
+/// - **Monotonic counter** (`AtomicU64`) — guarantees no two calls in the
+///   same process return the same counter value, so even if the system
+///   clock stalls or rolls back, IDs remain distinct.
+/// - **Nanosecond timestamp** — adds external variance and spreads IDs
+///   across the u64 space.
+///
+/// The thread-id-as-length term is mixed in for variance but contributes
+/// almost no real entropy — `format!("{thread_id:?}")` produces strings
+/// like `"ThreadId(2)"` whose length is mostly 11 or 12 chars depending
+/// on the digit count. Kept because removing it would invalidate the
+/// existing mixing constants and provide no measurable benefit.
 #[allow(clippy::cast_possible_truncation)] // Truncation is intentional for mixing
 fn rand_u64() -> u64 {
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::SystemTime;
 
-    // Monotonic counter to ensure uniqueness even within same nanosecond
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     let counter = COUNTER.fetch_add(1, Ordering::Relaxed);
 
@@ -794,11 +810,12 @@ fn rand_u64() -> u64 {
         .unwrap_or_default()
         .as_nanos() as u64;
 
-    // Mix counter, nanoseconds, and thread ID for better entropy
     let thread_id = std::thread::current().id();
     let thread_hash = format!("{thread_id:?}").len() as u64;
 
-    // Simple mixing function using large primes
+    // Simple mixing function using large primes (taken from xorshift /
+    // splitmix-style constants); the final xor-shift mixes high and
+    // low bits so flipping one input bit affects multiple output bits.
     let mixed = nanos
         .wrapping_mul(0x517c_c1b7_2722_0a95)
         .wrapping_add(counter)
