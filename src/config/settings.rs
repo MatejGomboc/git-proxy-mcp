@@ -393,6 +393,20 @@ const fn default_lfs_retry_backoff_multiplier() -> f64 {
     2.0
 }
 
+/// Default LFS HTTP request timeout (seconds).
+///
+/// Caps total time for any single LFS HTTP request (Batch API call or
+/// object download). Without this, a hung server can stall the entire
+/// MCP operation indefinitely.
+const fn default_lfs_request_timeout_secs() -> u64 {
+    300
+}
+
+/// Default LFS HTTP connect timeout (seconds).
+const fn default_lfs_connect_timeout_secs() -> u64 {
+    30
+}
+
 /// Git LFS configuration.
 ///
 /// Controls retry behaviour, size limits, and download settings
@@ -446,6 +460,25 @@ pub struct LfsConfig {
     /// Default: unlimited.
     #[serde(default)]
     pub max_total_size: Option<u64>,
+
+    /// HTTP request timeout in seconds (per LFS request).
+    ///
+    /// Caps total time for any single LFS HTTP request (Batch API call
+    /// or object download). Without this, a hung LFS server can stall
+    /// the entire MCP operation indefinitely.
+    ///
+    /// Default: 300 (5 minutes).
+    #[serde(default = "default_lfs_request_timeout_secs")]
+    pub request_timeout_secs: u64,
+
+    /// HTTP connect timeout in seconds.
+    ///
+    /// Caps the time spent establishing a TCP+TLS connection to the LFS
+    /// server, before the request itself is sent.
+    ///
+    /// Default: 30.
+    #[serde(default = "default_lfs_connect_timeout_secs")]
+    pub connect_timeout_secs: u64,
 }
 
 impl Default for LfsConfig {
@@ -457,6 +490,8 @@ impl Default for LfsConfig {
             retry_backoff_multiplier: default_lfs_retry_backoff_multiplier(),
             max_object_size: None,
             max_total_size: None,
+            request_timeout_secs: default_lfs_request_timeout_secs(),
+            connect_timeout_secs: default_lfs_connect_timeout_secs(),
         }
     }
 }
@@ -899,6 +934,8 @@ mod tests {
         assert!((config.retry_backoff_multiplier - 2.0).abs() < f64::EPSILON);
         assert!(config.max_object_size.is_none());
         assert!(config.max_total_size.is_none());
+        assert_eq!(config.request_timeout_secs, 300);
+        assert_eq!(config.connect_timeout_secs, 30);
     }
 
     #[test]
