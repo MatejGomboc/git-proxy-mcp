@@ -46,6 +46,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`sanitize_for_log` extracted to a shared `src/util.rs` module.**
+  Previously a private helper in `mcp/server.rs` (added in PR #154 for
+  client-controlled `clientInfo` fields), the same hardening pattern
+  is now needed in `git2_ops/push.rs::unbundle` for git's stderr.
+  Rather than duplicate, exported via `pub mod util` with `pub fn
+  sanitize_for_log`. New module is small: one helper, one constant,
+  7 tests. No behaviour change.
+- **Removed dead `parse_bundle_info` + `BundleInfo` + `BundleRef`
+  from `streaming/bundle.rs`.** The function was exported and tested
+  but had no production callers — only its own 3 tests (2 unit + 1
+  integration). It also had subtle issues (header truncated at 512
+  bytes, ref-line detection trusts bundle content) that would have
+  needed addressing if it were ever wired up. 95 lines removed; no
+  production behaviour change. Bundle handling for `repo_push`
+  continues to work through `decode_bundle` + `validate_bundle` +
+  git's own unbundle parsing — all kept.
 - **MCP server observability for the `initialize` handshake and
   ignored notifications.** Three previously-silent paths are now
   traced:
@@ -222,6 +238,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`unbundle` included git's raw stderr in error messages without
+  sanitisation.** A maliciously-crafted bundle that triggered a
+  creative `git fetch --no-tags <bundle>` failure could produce stderr
+  with ANSI escape sequences, embedded newlines, or megabytes of
+  output — all of which then flowed into both `tracing::warn!` log
+  lines (operator's terminal) and the MCP response (returned to the
+  AI client). Without sanitisation, a single error from
+  `unbundle` could repaint the operator's terminal log reader, fake
+  log-line boundaries (e.g. "fatal: early EOF\nerror: index-pack
+  died\n" creates two log lines from one error), or flood the log
+  file. Now passes git's stderr through `crate::util::sanitize_for_log`
+  before formatting — same protection profile as PR #154's
+  client-controlled JSON sanitisation.
 - **Audit log misidentified blocked `repo_refs` / `repo_diff` /
   `repo_pull` operations as `repo_clone`.** `call_repo_refs_tool`,
   `call_repo_diff_tool`, and `call_repo_pull_tool` were all calling
