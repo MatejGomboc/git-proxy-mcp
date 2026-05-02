@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`LfsConfig.request_timeout_secs` and `LfsConfig.connect_timeout_secs`**
+  added with `#[serde(default)]`, so existing configs continue to parse
+  unchanged. Defaults: 300 s request timeout, 30 s connect timeout.
+  Documented in `config/example-config.json` and the README config table.
+- **13 new `git2_ops::lfs::tests` regressions** covering the LFS audit
+  (PR #159) fixes — every fix lands with the test that would have caught
+  it: `is_lfs_pointer_does_not_match_hypothetical_future_v10`,
+  `is_lfs_pointer_accepts_crlf_line_ending`,
+  `derive_lfs_url_rejects_ssh_with_empty_host`,
+  `derive_lfs_url_rejects_ssh_without_colon`,
+  `derive_lfs_url_rejects_ssh_with_empty_path`,
+  `derive_lfs_url_rejects_https_with_empty_host`,
+  `fetch_content_rejects_oversize_actual_response`,
+  `fetch_content_sanitises_server_error_body_in_log`,
+  `fetch_content_sanitises_lfs_error_message`,
+  `fetch_batch_propagates_invalid_auth_header`,
+  `fetch_batch_returns_failed_downloads_count`,
+  `fetch_batch_does_not_overflow_cumulative_bytes`,
+  `user_agent_contains_crate_version`.
 - **Integration coverage merging** — the `coverage` job in `ci_main.yml` now
   builds an instrumented release binary (via `cargo llvm-cov show-env`) and
   runs the Python integration tests against it. The resulting coverage data
@@ -46,6 +65,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`download_with_retry` and `download_with_progress` collapsed into a
+  single `download_chunked` helper.** The two had drifted on observability
+  (the progress variant was missing `url` in its `warn!` calls) and the
+  duplication meant any future retry-logic change had to be made in two
+  places. The unified path always reads in 64 KiB chunks (so the new
+  actual-size cap applies regardless of whether progress is enabled), and
+  emits progress only when a `ProgressSender` is configured. The Batch
+  API request-header construction was extracted into the same kind of
+  helper (`build_request_headers`) so `fetch_content` and `fetch_batch`
+  no longer have copy-pasted Authorization-header code that can drift.
+- **`LfsBatchResult` now exposes `skipped_with_error` and `failed_downloads`
+  counts.** Previously `fetch_batch` swallowed download errors and the
+  no-`actions.download` cases by just `warn!`-ing and dropping them, so
+  the caller had no way to distinguish "size limit hit" (already exposed
+  as `skipped_too_large`) from "server returned an error per object" or
+  "download attempt failed after retries". The new fields make these
+  visible without needing to scrape logs. The struct gains two `usize`
+  fields; existing call-sites that destructure `LfsBatchResult` need to
+  be updated (in this repo only the test code referenced them).
+- **LFS user-agent now derived from `CARGO_PKG_VERSION`.** The previous
+  `"git-proxy-mcp/0.1"` was hardcoded and had drifted from the actual
+  crate version (now 1.1.0) over the v1 development cycle. The new const
+  `USER_AGENT = concat!("git-proxy-mcp/", env!("CARGO_PKG_VERSION"))`
+  stays in lockstep with `Cargo.toml` automatically. A regression test
+  (`user_agent_contains_crate_version`) enforces the contract.
 - **Disk-backed `StreamingSession` storage path now has direct test
   coverage.** All previous chunked-session tests used data well below
   `DISK_THRESHOLD` (10 MiB), so the `SessionStorage::File` variant —
@@ -257,6 +301,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`is_lfs_pointer` would have misclassified a hypothetical future
+  `spec/v10` (or `v11`, `v100`, …) as a v1 pointer.** The previous
+  check was `starts_with("version https://git-lfs.github.com/spec/v1")`,
+  and `v1` is a prefix of `v10` — so a future spec bump of git-lfs
+  would silently get treated as the current format. Now matches the
+  whole first line via `text.lines().next() == Some(LFS_POINTER_VERSION_LINE)`,
+  which also handles CRLF cleanly (regression-tested for both
+  `is_lfs_pointer_does_not_match_hypothetical_future_v10` and
+  `is_lfs_pointer_accepts_crlf_line_ending`). No known production
+  trigger today, since v1 is still the only spec — but the same
+  bug class hit `auth.rs` in PR #153 (empty-host SSH URLs).
+- **`derive_lfs_url` accepted malformed SSH and HTTP(S) URLs and
+  silently produced useless requests.** `git@:repo.git` rewrote to
+  `https:///repo.git` (no host); `git@host` (no `:`) rewrote to
+  `https://host` (no path); `https:///x` was passed through verbatim.
+  Each produced a request that would have failed at the LFS server
+  with a confusing error and leaked the malformed URL into operator
+  logs. Now validates that the SSH form has both a non-empty host
+  and a non-empty path component, and that the HTTP(S) form has a
+  non-empty host. Same bug class as the auth.rs empty-host SSH fix
+  in PR #153.
+- **`fetch_batch` silently dropped the `Authorization` header when
+  `HeaderValue::from_str` failed on the encoded credentials.** The
+  original `if let Ok(val) = ...` would let the request proceed
+  unauthenticated and surface as a confusing `401 Unauthorized`
+  instead of the actual encoding error. Inconsistent with
+  `fetch_content`, which had always propagated the same error
+  through `?`. Both paths now share `build_request_headers`, which
+  uses `?` consistently — a credential string with control bytes
+  surfaces as `"invalid auth header: ..."` rather than as a phantom
+  401.
+- **`fetch_batch` could overflow `cumulative_bytes` and silently let
+  oversized objects through.** A malicious LFS server claiming
+  `obj.size = u64::MAX` would have wrapped `cumulative_bytes + obj.size`,
+  making the `> max_total_size` check spuriously pass for that object
+  and then leaving `cumulative_bytes` near zero again — effectively
+  resetting the cap for every subsequent object in the same batch.
+  Now uses `checked_add` and treats overflow as "would exceed the
+  limit" (skip the object), so the cap is robust against any claimed
+  object size.
 - **`StreamingSession::get_chunk` could corrupt resume tracking on
   disk-read failure.** Two coupled bugs: (1) `retrieved_chunks[index]`
   was set to `true` BEFORE the storage read, so a failed read on
@@ -689,6 +773,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **LFS download size now bounded against the *actual* response body,
+  not just the pre-flight pointer size.** The previous
+  `pointer.size > max_object_size` check was necessary but not sufficient:
+  the LFS server controls how many bytes it actually returns, and the
+  old `read_to_end` accepted whatever came back. A malicious or buggy
+  server could claim `size: 100` in the Batch API response and then
+  return megabytes (or gigabytes) of data, making us allocate and hold
+  arbitrary memory. The download path now reads in fixed 64 KiB chunks
+  and bails as soon as the cumulative byte count exceeds
+  `max_object_size` (configured per-deployment), capping memory growth
+  at one chunk past the limit. Regression-tested by
+  `fetch_content_rejects_oversize_actual_response`.
+- **LFS pre-allocation capped at 16 MiB regardless of declared
+  `pointer.size`.** A hostile pointer claiming `pointer.size = u64::MAX`
+  would otherwise have crashed the process via `Vec::with_capacity(usize)`
+  OOM before we'd even started reading. The `INITIAL_DOWNLOAD_CAPACITY_CAP`
+  const lets the buffer grow on demand beyond 16 MiB, but the actual-byte
+  cap above stops growth from running away.
+- **HTTP timeouts now configured for the LFS client.** The
+  `reqwest::blocking::Client::builder()` had no `.timeout()` or
+  `.connect_timeout()`, so a hung LFS server (slowloris, half-open TCP,
+  TLS handshake stalled) could pin the entire MCP operation
+  indefinitely. New `lfs.request_timeout_secs` (default 300) and
+  `lfs.connect_timeout_secs` (default 30) cap both, configurable per
+  deployment in `config.json`.
+- **LFS server-supplied strings now sanitised before logging or
+  returning in error messages.** Three server-controlled strings flow
+  through `crate::util::sanitize_for_log` (extracted to shared use in
+  PR #155 for git stderr): the non-retryable Batch API response body,
+  the per-object `error.message` field in the Batch API JSON, and any
+  text surfaced via the chunked-download error path. Without this,
+  a hostile or buggy LFS server could inject ANSI escape sequences
+  (repaint the operator's terminal) or fake newlines (forge log-line
+  boundaries) — same bug class fixed for `unbundle` git-stderr in
+  PR #155 and `clientInfo` JSON-RPC fields in PR #154.
 - **`py/command-line-injection` (CodeQL alert #2, CWE-78/CWE-88)** —
   closed at the source by removing the env-var input entirely.
   `tests/integration/test_mcp_tools.py` previously took the binary
