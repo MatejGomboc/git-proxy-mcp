@@ -363,11 +363,32 @@ impl IncomingMessage {
     }
 }
 
+/// Extracts a `RequestId` from a raw JSON object's `id` field, if present
+/// and well-typed.
+///
+/// Per JSON-RPC 2.0 / MCP, the `id` field must be a string or integer;
+/// `null`, arrays, objects, and floats are not valid request IDs and
+/// `None` is returned for them. This is used by `parse_message` to
+/// preserve the ID across `Invalid Request` errors when the rest of
+/// the request is malformed but the ID is still legible.
+fn extract_request_id(obj: &serde_json::Map<String, Value>) -> Option<RequestId> {
+    match obj.get("id")? {
+        Value::Number(n) => n.as_i64().map(RequestId::Number),
+        Value::String(s) => Some(RequestId::String(s.clone())),
+        // `null`, arrays, objects, and non-integer numbers are not
+        // valid IDs — drop them rather than guess.
+        _ => None,
+    }
+}
+
 /// Parses a JSON string into an incoming message.
 ///
 /// # Errors
 ///
 /// Returns a `JsonRpcError` if the JSON is malformed or not a valid message.
+/// When the `id` field is present and well-typed in the input, it is
+/// preserved on the returned error so the client can correlate the
+/// failure to its outstanding request.
 pub fn parse_message(json: &str) -> Result<IncomingMessage, JsonRpcError> {
     // First, try to parse as generic JSON to check structure
     let value: Value = serde_json::from_str(json).map_err(|_| JsonRpcError::parse_error())?;
@@ -375,21 +396,25 @@ pub fn parse_message(json: &str) -> Result<IncomingMessage, JsonRpcError> {
     // Check if it's an object
     let obj = value.as_object().ok_or_else(JsonRpcError::parse_error)?;
 
+    // Pre-extract the ID so we can echo it back on `Invalid Request`
+    // errors even when other fields (jsonrpc, method) are malformed.
+    let extracted_id = extract_request_id(obj);
+
     // Check for jsonrpc field
     let jsonrpc = obj
         .get("jsonrpc")
         .and_then(Value::as_str)
-        .ok_or_else(|| JsonRpcError::invalid_request(None))?;
+        .ok_or_else(|| JsonRpcError::invalid_request(extracted_id.clone()))?;
 
     if jsonrpc != "2.0" {
-        return Err(JsonRpcError::invalid_request(None));
+        return Err(JsonRpcError::invalid_request(extracted_id));
     }
 
     // Check if this is a request (has id) or notification (no id)
     if obj.contains_key("id") {
         // This is a request
-        let request: JsonRpcRequest =
-            serde_json::from_value(value).map_err(|_| JsonRpcError::invalid_request(None))?;
+        let request: JsonRpcRequest = serde_json::from_value(value)
+            .map_err(|_| JsonRpcError::invalid_request(extracted_id.clone()))?;
 
         if request.validate().is_some() {
             return Err(JsonRpcError::invalid_request(Some(request.id)));
@@ -726,6 +751,95 @@ mod tests {
         let err = JsonRpcErrorData::from_code(ErrorCode::ParseError);
         let json = serde_json::to_string(&err).unwrap();
         assert!(!json.contains("\"data\""));
+    }
+
+    #[test]
+    fn parse_message_preserves_id_on_missing_jsonrpc_field() {
+        // Regression: the error must echo the request `id` so the client
+        // can correlate the failure to its outstanding request. Previously
+        // we returned `id: None` here, which broke client-side promise
+        // resolution under strict JSON-RPC clients.
+        let json = r#"{"id": 42, "method": "test"}"#;
+        let err = parse_message(json).unwrap_err();
+        assert_eq!(err.error.code, ErrorCode::InvalidRequest.code());
+        assert_eq!(err.id, Some(RequestId::Number(42)));
+    }
+
+    #[test]
+    fn parse_message_preserves_id_on_wrong_jsonrpc_version() {
+        let json = r#"{"jsonrpc": "1.0", "id": "abc-123", "method": "test"}"#;
+        let err = parse_message(json).unwrap_err();
+        assert_eq!(err.error.code, ErrorCode::InvalidRequest.code());
+        assert_eq!(err.id, Some(RequestId::String("abc-123".to_string())));
+    }
+
+    #[test]
+    fn parse_message_preserves_id_on_jsonrpc_not_string() {
+        let json = r#"{"jsonrpc": 2.0, "id": 7, "method": "test"}"#;
+        let err = parse_message(json).unwrap_err();
+        assert_eq!(err.error.code, ErrorCode::InvalidRequest.code());
+        assert_eq!(err.id, Some(RequestId::Number(7)));
+    }
+
+    #[test]
+    fn parse_message_drops_id_when_id_is_null() {
+        // `null` is not a valid request ID (per JSON-RPC spec) — drop it
+        // rather than return `RequestId::Number(0)` or similar.
+        let json = r#"{"jsonrpc": "2.0", "id": null, "method": "x"}"#;
+        let err = parse_message(json).unwrap_err();
+        assert_eq!(err.error.code, ErrorCode::InvalidRequest.code());
+        assert!(err.id.is_none());
+    }
+
+    #[test]
+    fn parse_message_drops_id_when_id_is_array() {
+        // Arrays are not valid request IDs.
+        let json = r#"{"jsonrpc": "1.0", "id": [1, 2, 3], "method": "test"}"#;
+        let err = parse_message(json).unwrap_err();
+        assert_eq!(err.error.code, ErrorCode::InvalidRequest.code());
+        assert!(err.id.is_none());
+    }
+
+    #[test]
+    fn parse_message_drops_id_when_id_is_object() {
+        let json = r#"{"jsonrpc": "1.0", "id": {"x": 1}, "method": "test"}"#;
+        let err = parse_message(json).unwrap_err();
+        assert_eq!(err.error.code, ErrorCode::InvalidRequest.code());
+        assert!(err.id.is_none());
+    }
+
+    #[test]
+    fn parse_message_drops_id_when_id_is_float() {
+        // JSON-RPC IDs must be integers — non-integer numbers don't fit
+        // the `RequestId::Number(i64)` variant.
+        let json = r#"{"jsonrpc": "1.0", "id": 3.14, "method": "test"}"#;
+        let err = parse_message(json).unwrap_err();
+        assert_eq!(err.error.code, ErrorCode::InvalidRequest.code());
+        assert!(err.id.is_none());
+    }
+
+    #[test]
+    fn extract_request_id_handles_all_supported_shapes() {
+        let mut obj = serde_json::Map::new();
+
+        // Number
+        obj.insert("id".to_string(), serde_json::json!(123));
+        assert_eq!(extract_request_id(&obj), Some(RequestId::Number(123)));
+
+        // String
+        obj.insert("id".to_string(), serde_json::json!("hello"));
+        assert_eq!(
+            extract_request_id(&obj),
+            Some(RequestId::String("hello".to_string()))
+        );
+
+        // Null → None
+        obj.insert("id".to_string(), Value::Null);
+        assert_eq!(extract_request_id(&obj), None);
+
+        // Missing → None
+        obj.remove("id");
+        assert_eq!(extract_request_id(&obj), None);
     }
 
     #[test]
