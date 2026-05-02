@@ -54,6 +54,7 @@
 //! - [`security`] — Security guards and audit logging
 //! - [`session`] — Session management for tracking cloned repositories
 //! - [`streaming`] — In-memory tar/bundle streaming
+//! - [`util`] — Cross-cutting helpers (e.g. log-safe string sanitisation)
 
 pub mod config;
 pub mod error;
@@ -62,3 +63,4 @@ pub mod mcp;
 pub mod security;
 pub mod session;
 pub mod streaming;
+pub mod util;
