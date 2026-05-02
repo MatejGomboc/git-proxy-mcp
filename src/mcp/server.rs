@@ -55,6 +55,7 @@ use crate::security::{
     ShutdownReason,
 };
 use crate::streaming::chunked::StreamingSessionManager;
+use crate::util::sanitize_for_log;
 
 /// Server state in the MCP lifecycle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -250,39 +251,6 @@ impl GitIdentity {
     pub const fn is_partial(&self) -> bool {
         self.name.is_some() || self.email.is_some()
     }
-}
-
-/// Maximum length (in bytes) for a client-controlled string before we
-/// truncate it for logging. Anything beyond this is replaced with `…`.
-/// 200 bytes is enough to be useful for debugging and small enough
-/// that a hostile or buggy client can't flood the log file with a
-/// huge `clientInfo.name`.
-const MAX_CLIENT_STRING_LOG_LEN: usize = 200;
-
-/// Sanitises a client-controlled string for safe logging.
-///
-/// Two protections, both targeting buggy or hostile clients (the local
-/// stdio peer):
-///
-/// - Control characters (newlines, ANSI escape sequences, NULs, etc.)
-///   are escaped via `char::escape_debug`, so a value like
-///   `"foo\x1b[31mEVIL\x1b[0m"` renders as the literal characters
-///   rather than disrupting the operator's terminal log reader.
-/// - Length is capped at `MAX_CLIENT_STRING_LOG_LEN` bytes to prevent
-///   a 1-MiB name from flooding the log file. Truncation appends `…`
-///   so the operator can see the value was cut.
-fn sanitize_for_log(s: &str) -> String {
-    let mut escaped: String = s.chars().flat_map(char::escape_debug).collect();
-    if escaped.len() > MAX_CLIENT_STRING_LOG_LEN {
-        // Truncate at a char boundary so we don't slice mid-codepoint.
-        let mut cut = MAX_CLIENT_STRING_LOG_LEN;
-        while !escaped.is_char_boundary(cut) {
-            cut -= 1;
-        }
-        escaped.truncate(cut);
-        escaped.push('…');
-    }
-    escaped
 }
 
 /// The MCP server.
@@ -1778,62 +1746,6 @@ mod tests {
         let req = make_request(1, "initialize", Some(json!("not an object")));
         let err = server.handle_initialize(&req).unwrap_err();
         assert_eq!(err.error.code, ErrorCode::InvalidParams.code());
-    }
-
-    #[test]
-    fn sanitize_for_log_passes_clean_strings_unchanged() {
-        assert_eq!(sanitize_for_log("Claude AI"), "Claude AI");
-        assert_eq!(sanitize_for_log(""), "");
-        assert_eq!(sanitize_for_log("v1.2.3-rc.1"), "v1.2.3-rc.1");
-    }
-
-    #[test]
-    fn sanitize_for_log_escapes_control_characters() {
-        // ANSI escape sequence — raw ESC must not pass through, or it
-        // could repaint the operator's terminal (and fake "harmless"
-        // log lines around an injected message).
-        let evil = "foo\x1b[31mEVIL\x1b[0m";
-        let sanitised = sanitize_for_log(evil);
-        assert!(!sanitised.contains('\x1b'), "raw ESC must be escaped");
-        // `char::escape_debug` renders `\x1b` as `\u{1b}`.
-        assert!(sanitised.contains("\\u{1b}"));
-
-        // Newline — must be escaped so it doesn't fake a log-line break.
-        assert_eq!(sanitize_for_log("a\nb"), "a\\nb");
-
-        // Tab and CR.
-        assert_eq!(sanitize_for_log("a\tb\rc"), "a\\tb\\rc");
-
-        // NUL — `escape_debug` uses the short form `\0` for NUL.
-        assert_eq!(sanitize_for_log("a\0b"), "a\\0b");
-    }
-
-    #[test]
-    fn sanitize_for_log_caps_length_to_prevent_log_flood() {
-        // 1 KiB of `a` — must be truncated.
-        let huge = "a".repeat(1024);
-        let sanitised = sanitize_for_log(&huge);
-        assert!(sanitised.len() <= MAX_CLIENT_STRING_LOG_LEN + "…".len());
-        assert!(
-            sanitised.ends_with('…'),
-            "truncation marker must be appended"
-        );
-    }
-
-    #[test]
-    fn sanitize_for_log_truncates_at_char_boundary() {
-        // String with multibyte chars right around the truncation point.
-        // `é` is 2 bytes in UTF-8. If MAX_CLIENT_STRING_LOG_LEN landed
-        // mid-codepoint we'd panic on `escaped.truncate(cut)` — this
-        // test pins the boundary-search loop.
-        let s = "é".repeat(150); // 300 bytes
-        let sanitised = sanitize_for_log(&s);
-        assert!(sanitised.ends_with('…'));
-        // Verify we didn't break a codepoint — the prefix before the
-        // truncation marker must be valid UTF-8 (it is by construction
-        // since `escaped` is a String, but assert it's well-formed anyway).
-        let prefix = &sanitised[..sanitised.len() - "…".len()];
-        assert!(prefix.is_char_boundary(prefix.len()));
     }
 
     #[test]

@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use git_proxy_mcp::git2_ops::auth::{sanitize_url_for_logging, validate_url};
 use git_proxy_mcp::session::{SessionError, SessionManager};
-use git_proxy_mcp::streaming::bundle::{decode_bundle, parse_bundle_info, validate_bundle};
+use git_proxy_mcp::streaming::bundle::{decode_bundle, validate_bundle};
 use git_proxy_mcp::streaming::tar::encode_base64;
 
 // ============================================================================
@@ -127,16 +127,6 @@ fn test_validate_bundle_v3_format() {
 fn test_validate_bundle_invalid() {
     let not_a_bundle = b"this is not a git bundle";
     assert!(validate_bundle(not_a_bundle).is_err());
-}
-
-#[test]
-fn test_parse_bundle_info_v2() {
-    // Bundle format: "# v2 bundle\n<40-char-oid> <refname>\n\n"
-    let bundle_data = b"# v2 bundle\nabcd1234abcd1234abcd1234abcd1234abcd1234 refs/heads/main\n\n";
-    let info = parse_bundle_info(bundle_data).unwrap();
-    assert_eq!(info.version, 2);
-    assert_eq!(info.refs.len(), 1);
-    assert_eq!(info.refs[0].name, "refs/heads/main");
 }
 
 // ============================================================================

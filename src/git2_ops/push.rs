@@ -24,6 +24,7 @@ use tracing::{debug, info, warn};
 
 use super::auth::{create_callbacks, validate_url};
 use super::error::Git2Error;
+use crate::util::sanitize_for_log;
 
 /// Result of a successful push operation.
 #[derive(Debug, Clone)]
@@ -155,9 +156,18 @@ fn unbundle(repo: &Repository, bundle_path: &Path) -> Result<(), Git2Error> {
         .map_err(|e| Git2Error::BundleFailed(format!("failed to run git fetch: {e}")))?;
 
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
+        // git's stderr can include ANSI escapes, newlines, and arbitrary
+        // bytes from a maliciously-crafted bundle. Sanitise before
+        // including in our error message — the error flows into both
+        // tracing logs (operator's terminal) and the MCP response
+        // (returned to the client / AI). Without this, a bundle that
+        // triggers a creative git error could repaint terminal log
+        // readers, fake log-line boundaries, or flood the message
+        // with megabytes of output.
+        let stderr_raw = String::from_utf8_lossy(&output.stderr);
+        let stderr_safe = sanitize_for_log(&stderr_raw);
         return Err(Git2Error::BundleFailed(format!(
-            "git fetch from bundle failed: {stderr}"
+            "git fetch from bundle failed: {stderr_safe}"
         )));
     }
 
@@ -226,6 +236,50 @@ mod tests {
         assert!(!opts.force);
     }
 
-    // Integration tests would go here but require network access
-    // See tests/git2_integration.rs for full integration tests
+    #[test]
+    fn unbundle_sanitises_git_stderr_in_error() {
+        // Set up a bare repo + write a malformed bundle. The header is
+        // valid (passes `validate_bundle`'s magic check) but the
+        // declared ref points to an OID with no pack data behind it,
+        // so `git fetch --no-tags <bundle>` fails with multi-line
+        // stderr ("fatal: early EOF\nerror: index-pack died" or
+        // similar). The newlines are exactly the kind of byte that,
+        // unsanitised, would fake a log-line boundary. Verify the
+        // returned error has them escaped.
+        let temp = TempDir::new().unwrap();
+        let repo = Repository::init_bare(temp.path()).unwrap();
+
+        let bundle_path = temp.path().join("bad.bundle");
+        std::fs::write(
+            &bundle_path,
+            b"# v2 git bundle\n\
+              0000000000000000000000000000000000000000 refs/heads/main\n\
+              \n",
+        )
+        .unwrap();
+
+        let err = unbundle(&repo, &bundle_path)
+            .expect_err("git fetch on a bundle with declared refs but no pack data must fail");
+        let msg = err.to_string();
+
+        // `Git2Error::BundleFailed`'s `Display` adds the prefix
+        // "bundle processing failed: ", and our `unbundle` adds
+        // "git fetch from bundle failed: " inside it.
+        assert!(
+            msg.contains("git fetch from bundle failed:"),
+            "expected our inner prefix, got: {msg:?}"
+        );
+        // The defining property: any newlines git emitted in stderr
+        // were escaped (rendered as `\\n`), so this single error
+        // message can't span multiple log lines.
+        assert!(
+            !msg.contains('\n'),
+            "raw newlines from git stderr must be escaped, got: {msg:?}"
+        );
+        // And no raw ESC either.
+        assert!(
+            !msg.contains('\x1b'),
+            "raw ESC bytes from git stderr must be escaped, got: {msg:?}"
+        );
+    }
 }
