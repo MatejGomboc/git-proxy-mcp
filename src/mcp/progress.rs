@@ -260,7 +260,7 @@ impl ProgressSender {
     #[must_use]
     pub fn new(token: String) -> (Self, mpsc::Receiver<ProgressUpdate>) {
         let (sender, receiver) = mpsc::channel();
-        // Initialize last_sent to a time in the past so first send always succeeds.
+        // Initialise last_sent to a time in the past so first send always succeeds.
         // Use 2x interval to ensure first update passes even with timing jitter.
         // If subtraction fails (theoretically on freshly booted system), use now
         // which may rate-limit the first update - acceptable edge case.
