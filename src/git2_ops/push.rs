@@ -237,6 +237,270 @@ mod tests {
     }
 
     #[test]
+    fn push_options_force_flag_round_trips() {
+        // Document the Clone derive on PushOptions2 — exercises both
+        // fields plus the impl.
+        let opts = PushOptions2 {
+            branch: "release".to_string(),
+            force: true,
+        };
+        let cloned = opts.clone();
+        assert!(cloned.force);
+        assert_eq!(cloned.branch, "release");
+        // Original is still usable post-clone.
+        assert_eq!(opts.branch, "release");
+    }
+
+    #[test]
+    fn push_result_fields_are_accessible() {
+        // PushResult is the public success type; document its shape and
+        // exercise the Clone derive (keeps the original alive).
+        let result = PushResult {
+            branch: "main".to_string(),
+            commit: "deadbeef".to_string(),
+            remote_url: "https://github.com/o/r.git".to_string(),
+        };
+        let cloned = result.clone();
+        assert_eq!(cloned.branch, "main");
+        assert_eq!(cloned.commit, "deadbeef");
+        assert!(cloned.remote_url.contains("github.com"));
+        assert_eq!(result.commit, "deadbeef");
+    }
+
+    /// Build a bare repo with a single commit on `branch`, produce a git
+    /// bundle for it via the `git bundle create` CLI, and return the
+    /// bundle bytes plus the temp dir (kept alive so the bundle file
+    /// stays valid across drops if tests want the path).
+    ///
+    /// Bundles produced this way are real git bundles — `push_bundle`'s
+    /// internal `git fetch --no-tags <bundle>` accepts them.
+    fn make_bundle_for_branch(branch: &str) -> (TempDir, Vec<u8>) {
+        let temp = TempDir::new().unwrap();
+        {
+            let repo = Repository::init_bare(temp.path()).unwrap();
+            let signature = git2::Signature::now("Test", "test@example.com").unwrap();
+            let blob = repo.blob(b"hello\n").unwrap();
+            let mut tb = repo.treebuilder(None).unwrap();
+            tb.insert("hello.txt", blob, 0o100_644).unwrap();
+            let tree_oid = tb.write().unwrap();
+            let tree = repo.find_tree(tree_oid).unwrap();
+            let head_ref = format!("refs/heads/{branch}");
+            repo.commit(
+                Some(&head_ref),
+                &signature,
+                &signature,
+                "seed commit",
+                &tree,
+                &[],
+            )
+            .unwrap();
+        }
+
+        let bundle_path = temp.path().join("output.bundle");
+        let output = std::process::Command::new("git")
+            .args(["bundle", "create"])
+            .arg(&bundle_path)
+            .arg(branch)
+            .env("GIT_DIR", temp.path())
+            .output()
+            .expect("git bundle create must succeed");
+        assert!(
+            output.status.success(),
+            "git bundle create failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+
+        let bytes = std::fs::read(&bundle_path).expect("bundle file must exist");
+        (temp, bytes)
+    }
+
+    #[test]
+    fn push_bundle_rejects_invalid_url() {
+        // First branch in push_bundle: validate_url() rejects file://
+        // (and other unsupported schemes). No temp dir or bundle work
+        // happens — the function returns InvalidUrl immediately.
+        let opts = PushOptions2 {
+            branch: "main".to_string(),
+            force: false,
+        };
+        let result = push_bundle(b"unused", "file:///etc/passwd", opts, None);
+        assert!(matches!(result, Err(Git2Error::InvalidUrl)));
+    }
+
+    #[test]
+    fn push_bundle_rejects_ext_url() {
+        // ext:: URLs are also rejected by validate_url. Same fast path.
+        let opts = PushOptions2 {
+            branch: "main".to_string(),
+            force: false,
+        };
+        let result = push_bundle(b"unused", "ext::malicious", opts, None);
+        assert!(matches!(result, Err(Git2Error::InvalidUrl)));
+    }
+
+    #[test]
+    fn push_bundle_fails_with_malformed_bundle_data() {
+        // URL passes validate_url, temp + init succeed, write succeeds —
+        // but the bundle bytes aren't a real git bundle, so unbundle's
+        // `git fetch` invocation fails with BundleFailed. Exercises
+        // push_bundle lines 84-111 (validate, temp dir, init_bare,
+        // write, unbundle call).
+        let opts = PushOptions2 {
+            branch: "main".to_string(),
+            force: false,
+        };
+        let result = push_bundle(
+            b"this is definitely not a git bundle",
+            "https://example.invalid/repo.git",
+            opts,
+            None,
+        );
+        assert!(
+            matches!(result, Err(Git2Error::BundleFailed(_))),
+            "got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn push_bundle_returns_ref_not_found_when_branch_missing_after_unbundle() {
+        // Bundle has branch "main", but caller asks for "feature/missing".
+        // Unbundle succeeds, find_reference fails — covers lines 114-116
+        // (the `?` on find_reference returning RefNotFound).
+        let (_keep_alive, bundle_bytes) = make_bundle_for_branch("main");
+        let opts = PushOptions2 {
+            branch: "feature/missing".to_string(),
+            force: false,
+        };
+        let result = push_bundle(
+            &bundle_bytes,
+            "https://example.invalid/repo.git",
+            opts,
+            None,
+        );
+        match result {
+            Err(Git2Error::RefNotFound(name)) => {
+                assert_eq!(name, "feature/missing");
+            }
+            other => panic!("expected RefNotFound, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn push_bundle_fails_when_remote_unreachable_after_successful_unbundle() {
+        // Full happy path through unbundle + ref resolution + push call —
+        // the actual push fails because 127.0.0.1:1 RSTs immediately.
+        // Covers the body of push_bundle (lines 86-128) AND the body of
+        // push_to_remote (lines 179-224) up to the push call's error.
+        let (_keep_alive, bundle_bytes) = make_bundle_for_branch("main");
+        let opts = PushOptions2 {
+            branch: "main".to_string(),
+            force: false,
+        };
+        let result = push_bundle(
+            &bundle_bytes,
+            // 127.0.0.1:1 is the system's TCPMUX port — almost never
+            // listening, OS rejects with TCP RST immediately, no slow
+            // timeout.
+            "http://127.0.0.1:1/repo.git",
+            opts,
+            None,
+        );
+        assert!(
+            matches!(result, Err(Git2Error::PushFailed(_))),
+            "got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn push_bundle_force_path_takes_force_refspec() {
+        // Same as the unreachable test, but with force=true. Covers the
+        // `if force { ... } else { ... }` branch in push_to_remote
+        // (line 211) which the non-force test above doesn't reach.
+        let (_keep_alive, bundle_bytes) = make_bundle_for_branch("main");
+        let opts = PushOptions2 {
+            branch: "main".to_string(),
+            force: true,
+        };
+        let result = push_bundle(&bundle_bytes, "http://127.0.0.1:1/repo.git", opts, None);
+        // Same outcome as non-force (push fails on unreachable host),
+        // but the +refs/heads/main:refs/heads/main refspec branch is
+        // now exercised.
+        assert!(
+            matches!(result, Err(Git2Error::PushFailed(_))),
+            "got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn push_bundle_uses_proxy_when_configured() {
+        // proxy_url is forwarded into push_to_remote's ProxyOptions.
+        // We can't easily verify the proxy is consulted (no real
+        // proxy in the test), but we CAN confirm that passing one
+        // doesn't break the call path — it still hits push and fails
+        // on the unreachable proxy address.
+        let (_keep_alive, bundle_bytes) = make_bundle_for_branch("main");
+        let opts = PushOptions2 {
+            branch: "main".to_string(),
+            force: false,
+        };
+        let result = push_bundle(
+            &bundle_bytes,
+            "http://127.0.0.1:1/repo.git",
+            opts,
+            Some("http://127.0.0.1:1"),
+        );
+        // Whatever the underlying error, push_bundle must still
+        // surface as PushFailed (not panic, not BundleFailed).
+        assert!(
+            matches!(result, Err(Git2Error::PushFailed(_))),
+            "got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn unbundle_succeeds_with_valid_bundle() {
+        // Happy path for unbundle: produce a real bundle, unbundle it
+        // into a fresh bare repo, confirm the branch ref now exists.
+        // Covers lines 154-157, 174-175 (the success arms).
+        let (_keep_alive, bundle_bytes) = make_bundle_for_branch("main");
+
+        let target = TempDir::new().unwrap();
+        let target_repo = Repository::init_bare(target.path()).unwrap();
+        let bundle_path = target.path().join("input.bundle");
+        std::fs::write(&bundle_path, &bundle_bytes).unwrap();
+
+        unbundle(&target_repo, &bundle_path).expect("unbundle of valid bundle must succeed");
+
+        // After unbundle, refs/heads/main should resolve to a commit.
+        let reference = target_repo
+            .find_reference("refs/heads/main")
+            .expect("refs/heads/main must exist after unbundle");
+        let commit = reference.peel_to_commit().unwrap();
+        assert_eq!(commit.message(), Some("seed commit"));
+    }
+
+    #[test]
+    fn unbundle_returns_bundle_failed_when_bundle_path_missing() {
+        // Unbundle's `git fetch --no-tags <bundle_path>` errors out
+        // when the bundle file doesn't exist. Tests the "git ran but
+        // exited non-zero" path with a path-not-found stderr — same
+        // sanitisation logic as the malformed-bundle test, but a
+        // distinct trigger condition.
+        let temp = TempDir::new().unwrap();
+        let repo = Repository::init_bare(temp.path()).unwrap();
+        let missing = temp.path().join("does-not-exist.bundle");
+        let err = unbundle(&repo, &missing).expect_err("unbundle of nonexistent path must fail");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("git fetch from bundle failed"),
+            "expected unbundle's prefix, got: {msg:?}"
+        );
+        // No raw newlines (sanitisation invariant).
+        assert!(!msg.contains('\n'), "got: {msg:?}");
+    }
+
+    #[test]
     fn unbundle_sanitises_git_stderr_in_error() {
         // Set up a bare repo + write a malformed bundle. The header is
         // valid (passes `validate_bundle`'s magic check) but the
