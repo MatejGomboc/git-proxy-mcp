@@ -148,7 +148,7 @@ jobs:
                 components: llvm-tools-preview
 
             - name: Install cargo-llvm-cov
-              uses: taiki-e/install-action@7769b73c2ec98c38dfcf2e18c83cfd4880c038c1 # v2.75.27
+              uses: taiki-e/install-action@cca35edeb1d01366c2843b68fc3ca441446d73d3 # v2.77.1
               with:
                 tool: cargo-llvm-cov
 
@@ -176,7 +176,17 @@ jobs:
             - name: Generate coverage summary
               run: cargo llvm-cov report --summary-only
 
+            # Skip the Codecov upload on Dependabot PRs.
+            # Dependabot runs with a separately-scoped secret store and a
+            # read-only GITHUB_TOKEN (security feature so a malicious dep
+            # update can't exfiltrate Actions secrets), so secrets.CODECOV_TOKEN
+            # resolves to empty and Codecov returns
+            # "HTTP 400 — Token required because branch is protected".
+            # The actual coverage computation above still runs; we just don't
+            # upload from Dependabot PRs. Coverage gates are re-evaluated on
+            # the next push to main after merge.
             - name: Upload coverage to Codecov
+              if: github.actor != 'dependabot[bot]'
               uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6.0.0
               with:
                 files: lcov.info
