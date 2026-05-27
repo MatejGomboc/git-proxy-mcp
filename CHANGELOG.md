@@ -210,6 +210,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Security guards now share consistent pattern- and force-push detection.**
+  Two helpers are shared across the guards so they behave alike:
+    1. `BranchGuard::is_protected` honours `*` anywhere in a protected-branch
+       pattern (e.g. `*/hotfix`), not just a trailing `*` — the same matcher
+       `RepoFilter` uses for repository patterns. Previously a non-trailing `*`
+       in `security.protected_branches` silently never matched.
+    2. Force-push detection (`-f` / `--force` / `--force-with-lease[=<ref>]`) is
+       unified between `BranchGuard` and `PushGuard`; `BranchGuard` previously
+       missed the `--force-with-lease=<ref>` form. The MCP server's enforcement
+       is unchanged (it uses the structured `check_force_push` / `is_protected`
+       directly); this tightens the `SecurityGuard::check` CLI-argument path and
+       the protected-branch matching.
 - **`streaming::tar` test and doc hygiene** (no behaviour change):
     1. `is_binary`'s doc-comment claimed its heuristic is "similar to what Git
        uses internally" — Git's core check is only NUL-in-first-8000-bytes; the
@@ -1061,6 +1073,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **Force pushes to protected branches were not blocked when force push was
+  globally enabled.** `repo_push` called `BranchGuard::check("push", &[branch])`,
+  but that CLI-arg form expects a full `git push` argument vector: given only a
+  bare branch name it could neither locate the target branch (its parser skips
+  the remote and takes the *second* non-flag argument) nor see a `--force` flag,
+  so it always returned `Allowed`. With `security.allow_force_push: true` the
+  `PushGuard` then also allowed the push, leaving `security.protected_branches`
+  with no effect against force pushes — the exact thing it exists to prevent.
+  Added a structured `BranchGuard::check_force_push(branch, is_force)` (the
+  `SecurityGuard::check` CLI form now delegates to it) and switched the server
+  to call it with the branch and force flag it already holds. Force pushes to a
+  protected branch are now blocked regardless of the global force-push setting.
+- **`repo_diff` bypassed the repository allow/blocklist.** The server passed the
+  command string `"diff"` to `RepoFilter::check`, but `diff` was not in the
+  filter's set of remote commands (nor in its URL extractor), so the check
+  returned `Allowed` without consulting the policy — a blocklisted (or
+  non-allowlisted) repository could still be fetched and diffed. `diff` is now
+  treated like `clone`/`pull`/`fetch`, so `repo_diff` is filtered the same as
+  every other remote-accessing tool.
+- **Multi-`*` repository patterns silently never matched.** `RepoFilter`'s
+  pattern matcher only handled a single `*` (it required the split on `*` to
+  yield exactly two parts) and otherwise fell through to a literal prefix match,
+  so a pattern such as `github.com/*/secret-*` matched nothing — a blocklist
+  entry using it silently failed to block. The matcher now supports any number
+  of `*` (each matching an arbitrary run of characters, anchored at both ends);
+  single-`*` patterns behave exactly as before.
+- **`RepoFilter` credential stripping could drop the host and bypass the
+  blocklist.** `normalise_url` removed credentials by cutting everything before
+  the *first* `@` anywhere in the URL, so a repository under a blocked path that
+  happened to contain a later `@` (e.g. `github.com/secret/sub@x/y`) normalised
+  to just the trailing fragment and no longer matched the blocklist entry.
+  Credentials are now stripped only from the authority component (before the
+  first `/`), so a `@` in the path is preserved and the block still applies —
+  the same bug class as the `auth.rs` URL-sanitisation fix in PR #153.
 - **Network git2 error messages are now routed through a credential-safe
   sanitiser instead of being wrapped raw.** The connect/fetch/push call sites in
   `git2_ops::{clone,diff,pull,push}` mapped errors with
