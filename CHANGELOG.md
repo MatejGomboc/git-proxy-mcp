@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **9 new `config` regression tests** taking `config/mod.rs` line
-  coverage from 91.40 % to 97.35 % and adding drift guards around the
+  coverage from 91.40 % to 97.97 % and adding drift guards around the
   configuration schema. `config/settings.rs` was already at 100 %; the
   additions there are correctness guards, not coverage:
     - `load_config_with_directory_path_returns_read_error` — exercises
@@ -18,9 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
       `Path::exists()` check but cannot be read as a file, so it must
       surface as `ReadError`, not `NotFound`.
     - `load_config_none_resolves_default_path` — covers the `None`-path
-      fallback to the platform default location (asserting the two
-      legitimate outcomes so it stays deterministic whether or not a
-      real config exists on the host).
+      fallback to the platform default location. It asserts the single
+      environment-independent invariant (the resolved default path is a
+      file or absent, never a directory), so the test itself adds no
+      environment-dependent uncovered arm.
     - `load_config_parses_shipped_example_config` — asserts the shipped
       `config/example-config.json` parses against the current `Config`
       struct, and that every default-valued section matches the code
@@ -40,9 +41,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
       `deny_unknown_fields` rejects unknown keys in every sub-struct, not
       just at the top level. The former guards the removed
       `lfs.max_total_size` key specifically.
-  The single line left uncovered in `config/mod.rs` is the
-  `default_config_path() == None` arm, reachable only when
-  `dirs::home_dir()` returns `None` — not portably forceable in a test.
+  The only code left uncovered in `config/mod.rs` is the two-line
+  `ok_or_else` closure that builds the `NotFound` error when
+  `default_config_path()` returns `None` — reachable only when
+  `dirs::home_dir()` returns `None`, which is not portably forceable in
+  a test.
 - **11 new `git2_ops::push::tests` regressions** taking `push.rs` line
   coverage from 34.75 % to 93.04 % (+58.29 pts). The file was the
   worst-covered in scope; only `push_options_default_no_force` and
