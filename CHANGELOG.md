@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`mcp::transport` line-framing coverage.** The read/write paths were only
+  exercised by the Python integration suite because stdin/stdout were hardcoded.
+  Following the testability refactor, new unit tests cover LF / CRLF / EOF /
+  no-trailing-newline / empty-line reads and newline-terminated writes, taking
+  `transport.rs` unit line coverage from 40.86 % to ~78 % (the remainder is the
+  thin stdin/stdout glue, still integration-covered).
 - **`security::rate_limit` poison-recovery coverage.** The mutex poison-recovery
   arms in `lock_tokens` / `lock_last_refill` (which fall back to `into_inner()`
   when a thread panicked while holding the lock) had no test. Added unit tests
@@ -215,6 +221,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`mcp::transport` line framing refactored for unit-testability; concurrency
+  docs corrected** (no behaviour change):
+    1. The `\n` / `\r\n` stripping and the read/write framing were extracted into
+       a pure `strip_trailing_newline` helper and generic `read_message_line` /
+       `write_message_line` helpers (over any `AsyncBufRead` / `AsyncWrite`), so
+       the framing can be tested without real stdin/stdout. `read_line` and
+       `write_raw` delegate to them.
+    2. The module's "Thread Safety" section claimed reads and writes run on
+       separate tasks for concurrent operation; in fact the server drives a
+       single `StdioTransport` from one `tokio::select!` loop, so reads and
+       writes are sequential on one task. Reworded to describe the real
+       single-task model.
+    3. Documented that `read_line` is intentionally unbounded — `repo_push`
+       sends its bundle inline as base64 (up to the ~1 GiB bundle-size limit),
+       so a per-line length cap would break large pushes.
 - **Security guards now share consistent pattern- and force-push detection.**
   Two helpers are shared across the guards so they behave alike:
     1. `BranchGuard::is_protected` honours `*` anywhere in a protected-branch
