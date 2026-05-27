@@ -9,14 +9,21 @@
 //! - stdout: sends messages to client
 //! - stderr: may be used for logging (not MCP messages)
 //!
-//! # Thread Safety
+//! # Concurrency model
 //!
-//! The transport uses async I/O with Tokio. Reading and writing are
-//! handled through separate tasks to allow concurrent operation.
+//! The transport uses async I/O with Tokio but is driven from a single task:
+//! the server owns one [`StdioTransport`] and its main loop `tokio::select!`s
+//! on [`StdioTransport::read_line`] alongside shutdown signals, writing each
+//! response inline on the same task. Reads and writes are therefore sequential,
+//! not concurrent — the `&mut self` methods reflect that single-owner model.
+//!
+//! Because `read_line` is polled inside `select!`, it may be cancelled when a
+//! shutdown signal fires; that is safe here because the server then exits
+//! rather than resuming the partially-read line.
 
 use std::io;
 
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 
 use crate::mcp::protocol::{JsonRpcError, JsonRpcResponse, OutgoingNotification};
 
@@ -42,29 +49,21 @@ impl StdioTransport {
 
     /// Reads the next message line from stdin.
     ///
-    /// Returns `None` if stdin is closed (EOF).
+    /// Returns `None` if stdin is closed (EOF). A trailing `\n` or `\r\n` is
+    /// stripped before the line is returned.
+    ///
+    /// The read is intentionally unbounded: `repo_push` carries its git bundle
+    /// as base64 inline in a single JSON-RPC request (up to the configured
+    /// bundle-size limit, on the order of 1 GiB), so one message line can
+    /// legitimately be hundreds of megabytes. Capping the line length here
+    /// would break large pushes.
     ///
     /// # Errors
     ///
-    /// Returns an error if reading from stdin fails.
+    /// Returns an error if reading from stdin fails, including a line that is
+    /// not valid UTF-8.
     pub async fn read_line(&mut self) -> io::Result<Option<String>> {
-        let mut line = String::new();
-        let bytes_read = self.reader.read_line(&mut line).await?;
-
-        if bytes_read == 0 {
-            // EOF - stdin closed
-            return Ok(None);
-        }
-
-        // Remove the trailing newline
-        if line.ends_with('\n') {
-            line.pop();
-            if line.ends_with('\r') {
-                line.pop();
-            }
-        }
-
-        Ok(Some(line))
+        read_message_line(&mut self.reader).await
     }
 
     /// Writes a JSON-RPC response to stdout.
@@ -116,17 +115,7 @@ impl StdioTransport {
     ///
     /// Returns an error if writing fails.
     async fn write_raw(&mut self, json: &str) -> io::Result<()> {
-        // MCP spec: messages must not contain embedded newlines
-        debug_assert!(
-            !json.contains('\n'),
-            "JSON message must not contain embedded newlines"
-        );
-
-        self.writer.write_all(json.as_bytes()).await?;
-        self.writer.write_all(b"\n").await?;
-        self.writer.flush().await?;
-
-        Ok(())
+        write_message_line(&mut self.writer, json).await
     }
 
     /// Writes an arbitrary JSON value to stdout.
@@ -148,6 +137,59 @@ impl Default for StdioTransport {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Strips a single trailing line terminator (`\n` or `\r\n`) in place.
+///
+/// A lone `\r` (old-Mac style) is not a JSON-RPC delimiter, so it is left
+/// intact.
+fn strip_trailing_newline(line: &mut String) {
+    if line.ends_with('\n') {
+        line.pop();
+        if line.ends_with('\r') {
+            line.pop();
+        }
+    }
+}
+
+/// Reads one newline-delimited message from `reader`, returning `None` at EOF.
+///
+/// Generic over the reader so the line framing can be unit-tested without real
+/// stdin; [`StdioTransport::read_line`] delegates here. See that method for why
+/// the read is intentionally unbounded.
+async fn read_message_line<R>(reader: &mut R) -> io::Result<Option<String>>
+where
+    R: AsyncBufRead + Unpin,
+{
+    let mut line = String::new();
+    if reader.read_line(&mut line).await? == 0 {
+        // EOF - stream closed
+        return Ok(None);
+    }
+
+    strip_trailing_newline(&mut line);
+    Ok(Some(line))
+}
+
+/// Writes `json` to `writer`, terminates it with a newline, and flushes.
+///
+/// Generic over the writer so the framing can be unit-tested without real
+/// stdout; [`StdioTransport::write_raw`] delegates here.
+async fn write_message_line<W>(writer: &mut W, json: &str) -> io::Result<()>
+where
+    W: AsyncWrite + Unpin,
+{
+    // MCP spec: messages must not contain embedded newlines
+    debug_assert!(
+        !json.contains('\n'),
+        "JSON message must not contain embedded newlines"
+    );
+
+    writer.write_all(json.as_bytes()).await?;
+    writer.write_all(b"\n").await?;
+    writer.flush().await?;
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -188,5 +230,92 @@ mod tests {
             !json.contains('\n'),
             "Serialised JSON should not contain newlines"
         );
+    }
+
+    #[test]
+    fn strip_trailing_newline_handles_lf_crlf_and_bare() {
+        let mut lf = String::from("hello\n");
+        strip_trailing_newline(&mut lf);
+        assert_eq!(lf, "hello");
+
+        let mut crlf = String::from("hello\r\n");
+        strip_trailing_newline(&mut crlf);
+        assert_eq!(crlf, "hello");
+
+        // No terminator: unchanged.
+        let mut bare = String::from("hello");
+        strip_trailing_newline(&mut bare);
+        assert_eq!(bare, "hello");
+
+        // A lone CR is not a JSON-RPC delimiter and is preserved.
+        let mut cr = String::from("hello\r");
+        strip_trailing_newline(&mut cr);
+        assert_eq!(cr, "hello\r");
+
+        // Empty line stays empty.
+        let mut empty = String::new();
+        strip_trailing_newline(&mut empty);
+        assert_eq!(empty, "");
+    }
+
+    #[tokio::test]
+    async fn read_message_line_strips_lf_and_crlf_across_messages() {
+        let mut reader = BufReader::new(&b"first\nsecond\r\n"[..]);
+
+        assert_eq!(
+            read_message_line(&mut reader).await.unwrap(),
+            Some("first".to_string())
+        );
+        assert_eq!(
+            read_message_line(&mut reader).await.unwrap(),
+            Some("second".to_string())
+        );
+        // Stream exhausted -> EOF.
+        assert_eq!(read_message_line(&mut reader).await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn read_message_line_returns_final_line_without_newline() {
+        // A final line with no trailing newline is still returned, then EOF.
+        let mut reader = BufReader::new(&b"no-newline"[..]);
+        assert_eq!(
+            read_message_line(&mut reader).await.unwrap(),
+            Some("no-newline".to_string())
+        );
+        assert_eq!(read_message_line(&mut reader).await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn read_message_line_empty_input_is_eof() {
+        let mut reader = BufReader::new(&b""[..]);
+        assert_eq!(read_message_line(&mut reader).await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn read_message_line_preserves_empty_message() {
+        // A bare newline is an empty (but present) message, not EOF.
+        let mut reader = BufReader::new(&b"\n"[..]);
+        assert_eq!(
+            read_message_line(&mut reader).await.unwrap(),
+            Some(String::new())
+        );
+        assert_eq!(read_message_line(&mut reader).await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn write_message_line_appends_single_newline() {
+        let mut buf: Vec<u8> = Vec::new();
+        write_message_line(&mut buf, r#"{"jsonrpc":"2.0"}"#)
+            .await
+            .unwrap();
+        assert_eq!(String::from_utf8(buf).unwrap(), "{\"jsonrpc\":\"2.0\"}\n");
+    }
+
+    #[tokio::test]
+    async fn write_message_line_frames_each_message_separately() {
+        let mut buf: Vec<u8> = Vec::new();
+        write_message_line(&mut buf, "a").await.unwrap();
+        write_message_line(&mut buf, "b").await.unwrap();
+        assert_eq!(String::from_utf8(buf).unwrap(), "a\nb\n");
     }
 }
