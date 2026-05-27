@@ -78,14 +78,95 @@ pub struct Config {
 }
 
 impl Config {
-    /// Validates the configuration.
+    /// Validates the configuration after deserialisation.
+    ///
+    /// Most fields need no validation — they are booleans, free-form strings,
+    /// or numbers that degrade gracefully (for example `submodules.max_concurrent`
+    /// is clamped to a minimum of one by the fetcher, the LFS retry loop always
+    /// makes one attempt regardless of `lfs.retry_max_attempts`, and a
+    /// `rate_limits.refill_rate_per_sec` of `0.0` is a supported "burst once,
+    /// never refill" mode). This method rejects only values that would make a
+    /// subsystem unusable or trigger a panic downstream:
+    ///
+    /// - zero timeouts (`timeouts.request_timeout_secs` and the three
+    ///   `lfs.*_timeout_secs`) — a `Duration` of zero makes every request fail
+    ///   immediately;
+    /// - `rate_limits.max_burst` of zero — the token bucket can then never hand
+    ///   out a token, blocking every operation forever;
+    /// - a non-finite or negative `rate_limits.refill_rate_per_sec` — `NaN` and
+    ///   the infinities would otherwise panic in
+    ///   `RateLimiter::time_until_available` via `Duration::from_secs_f64`;
+    /// - zero session limits (`sessions.timeout_secs`,
+    ///   `sessions.max_streaming_sessions`, `sessions.max_repo_sessions`) —
+    ///   sessions would expire instantly or never be creatable;
+    /// - an unrecognised `logging.level` — otherwise it silently falls back to
+    ///   `warn`, masking a typo.
     ///
     /// # Errors
     ///
-    /// Returns an error if any validation checks fail.
-    pub const fn validate(&self) -> Result<(), ConfigError> {
-        // Currently no validation required for security/logging settings
-        // as they all have sensible defaults
+    /// Returns [`ConfigError::ValidationError`] naming the first out-of-range
+    /// field encountered.
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        fn reject(message: impl Into<String>) -> ConfigError {
+            ConfigError::ValidationError {
+                message: message.into(),
+            }
+        }
+
+        // Durations and counts that brick a subsystem when zero. They parse
+        // fine (serde does not range-check), so they are caught here.
+        let nonzero_u64: [(u64, &str); 5] = [
+            (
+                self.timeouts.request_timeout_secs,
+                "timeouts.request_timeout_secs",
+            ),
+            (self.sessions.timeout_secs, "sessions.timeout_secs"),
+            (self.lfs.request_timeout_secs, "lfs.request_timeout_secs"),
+            (self.lfs.connect_timeout_secs, "lfs.connect_timeout_secs"),
+            (self.lfs.download_timeout_secs, "lfs.download_timeout_secs"),
+        ];
+        for (value, field) in nonzero_u64 {
+            if value == 0 {
+                return Err(reject(format!("{field} must be greater than 0")));
+            }
+        }
+
+        let nonzero_usize: [(usize, &str); 3] = [
+            (self.limits.max_output_bytes, "limits.max_output_bytes"),
+            (
+                self.sessions.max_streaming_sessions,
+                "sessions.max_streaming_sessions",
+            ),
+            (
+                self.sessions.max_repo_sessions,
+                "sessions.max_repo_sessions",
+            ),
+        ];
+        for (value, field) in nonzero_usize {
+            if value == 0 {
+                return Err(reject(format!("{field} must be greater than 0")));
+            }
+        }
+
+        if self.rate_limits.max_burst == 0 {
+            return Err(reject("rate_limits.max_burst must be greater than 0"));
+        }
+
+        let refill = self.rate_limits.refill_rate_per_sec;
+        if !refill.is_finite() || refill < 0.0 {
+            return Err(reject(
+                "rate_limits.refill_rate_per_sec must be a finite, non-negative number",
+            ));
+        }
+
+        let level = self.logging.level.to_lowercase();
+        if !VALID_LOG_LEVELS.contains(&level.as_str()) {
+            return Err(reject(format!(
+                "logging.level must be one of trace, debug, info, warn, error (got {:?})",
+                self.logging.level
+            )));
+        }
+
         Ok(())
     }
 }
@@ -169,6 +250,13 @@ impl Default for LoggingConfig {
 fn default_log_level() -> String {
     "warn".to_string()
 }
+
+/// Log levels accepted by `logging.level` (compared case-insensitively).
+///
+/// Mirrors the arms of `get_log_level` in `src/main.rs`; an unrecognised level
+/// there silently falls back to `warn`, so `Config::validate` rejects anything
+/// outside this set to surface typos at load time instead.
+const VALID_LOG_LEVELS: [&str; 5] = ["trace", "debug", "info", "warn", "error"];
 
 /// Default request timeout in seconds.
 const fn default_request_timeout_secs() -> u64 {
@@ -1163,5 +1251,131 @@ mod tests {
             config.submodules.exclude_patterns,
             Some(vec!["vendor/*".to_string()])
         );
+    }
+
+    #[test]
+    fn validate_rejects_zero_valued_critical_fields() {
+        // Each is a duration or count that makes a subsystem unusable when
+        // zero. They parse fine (serde does not range-check), so validate()
+        // must reject them and name the offending field.
+        type Mutator = fn(&mut Config);
+        let cases: [(&str, Mutator); 9] = [
+            ("timeouts.request_timeout_secs", |c| {
+                c.timeouts.request_timeout_secs = 0;
+            }),
+            ("limits.max_output_bytes", |c| {
+                c.limits.max_output_bytes = 0;
+            }),
+            ("rate_limits.max_burst", |c| {
+                c.rate_limits.max_burst = 0;
+            }),
+            ("sessions.timeout_secs", |c| {
+                c.sessions.timeout_secs = 0;
+            }),
+            ("sessions.max_streaming_sessions", |c| {
+                c.sessions.max_streaming_sessions = 0;
+            }),
+            ("sessions.max_repo_sessions", |c| {
+                c.sessions.max_repo_sessions = 0;
+            }),
+            ("lfs.request_timeout_secs", |c| {
+                c.lfs.request_timeout_secs = 0;
+            }),
+            ("lfs.connect_timeout_secs", |c| {
+                c.lfs.connect_timeout_secs = 0;
+            }),
+            ("lfs.download_timeout_secs", |c| {
+                c.lfs.download_timeout_secs = 0;
+            }),
+        ];
+
+        for (field, mutate) in cases {
+            let mut config: Config = serde_json::from_str("{}").unwrap();
+            mutate(&mut config);
+            let err = config.validate().unwrap_err();
+            assert!(
+                matches!(err, ConfigError::ValidationError { .. }),
+                "{field}: expected ValidationError, got {err:?}"
+            );
+            assert!(
+                err.to_string().contains(field),
+                "{field}: error should name the field, got: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_rejects_non_finite_or_negative_refill_rate() {
+        // A non-finite refill rate would panic downstream in
+        // RateLimiter::time_until_available (Duration::from_secs_f64).
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -0.1, -1.0] {
+            let mut config: Config = serde_json::from_str("{}").unwrap();
+            config.rate_limits.refill_rate_per_sec = bad;
+            let err = config.validate().unwrap_err();
+            assert!(
+                err.to_string().contains("refill_rate_per_sec"),
+                "refill_rate_per_sec = {bad} should be rejected, got: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_allows_zero_refill_rate() {
+        // 0.0 is the supported "burst once, never refill" mode (RateLimiter
+        // special-cases refill_rate <= 0.0), so it must NOT be rejected.
+        let mut config: Config = serde_json::from_str("{}").unwrap();
+        config.rate_limits.refill_rate_per_sec = 0.0;
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_unknown_log_level() {
+        let mut config: Config = serde_json::from_str("{}").unwrap();
+        config.logging.level = "verbose".to_string();
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("logging.level"));
+    }
+
+    #[test]
+    fn validate_accepts_known_log_levels_case_insensitively() {
+        for level in ["trace", "DEBUG", "Info", "warn", "ERROR"] {
+            let mut config: Config = serde_json::from_str("{}").unwrap();
+            config.logging.level = level.to_string();
+            assert!(
+                config.validate().is_ok(),
+                "log level {level:?} should be accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_allows_values_handled_gracefully_downstream() {
+        // These zeros are intentionally NOT rejected because the consuming code
+        // copes with them: the submodule fetcher clamps max_concurrent to >= 1,
+        // max_failures of 0 is a valid "stop on first failure" choice, the LFS
+        // retry loop always makes one attempt regardless of retry_max_attempts,
+        // and max_object_size of 0 simply keeps every LFS object as a pointer.
+        let mut config: Config = serde_json::from_str("{}").unwrap();
+        config.submodules.max_concurrent = 0;
+        config.submodules.max_failures = 0;
+        config.lfs.retry_max_attempts = 0;
+        config.lfs.max_object_size = Some(0);
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_allows_minimal_positive_values() {
+        let mut config: Config = serde_json::from_str("{}").unwrap();
+        config.timeouts.request_timeout_secs = 1;
+        config.limits.max_output_bytes = 1;
+        config.rate_limits.max_burst = 1;
+        config.rate_limits.refill_rate_per_sec = 0.0;
+        config.sessions.timeout_secs = 1;
+        config.sessions.max_streaming_sessions = 1;
+        config.sessions.max_repo_sessions = 1;
+        config.lfs.request_timeout_secs = 1;
+        config.lfs.connect_timeout_secs = 1;
+        config.lfs.download_timeout_secs = 1;
+        assert!(config.validate().is_ok());
     }
 }

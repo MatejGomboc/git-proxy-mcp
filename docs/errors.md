@@ -82,10 +82,32 @@ These errors occur when loading or validating the configuration file.
 
 | Error | Message Format | Cause |
 |-------|---------------|-------|
-| Read error | `failed to read configuration file: {path}` | Cannot read the file (permissions, IO error) |
-| Parse error | `failed to parse configuration file: {path}` | Invalid JSON syntax in config file |
+| Read error | `failed to read configuration file: {path}` | Cannot read the file (permissions, IO error, or the path is a directory) |
+| Parse error | `failed to parse configuration file: {path}` | Invalid JSON syntax, or an unknown/mistyped field (every section uses `deny_unknown_fields`) |
 | Not found | `configuration file not found: {path}` | Config file doesn't exist at specified path |
-| Validation error | `configuration validation failed: {message}` | Configuration values are invalid |
+| Validation error | `configuration validation failed: {message}` | A value is out of range — see below |
+
+### Validation rules
+
+After parsing, the configuration is range-checked. The `{message}` names the
+offending field. Only values that would render a subsystem unusable (or panic)
+are rejected; values the consuming code already handles (`submodules.max_concurrent`,
+`submodules.max_failures`, `lfs.retry_max_attempts`, `lfs.max_object_size`) are
+accepted as-is.
+
+| Field(s) | Rule | Why |
+|----------|------|-----|
+| `timeouts.request_timeout_secs`, `lfs.request_timeout_secs`, `lfs.connect_timeout_secs`, `lfs.download_timeout_secs` | must be > 0 | a zero `Duration` makes every request time out immediately |
+| `rate_limits.max_burst` | must be > 0 | the token bucket would never hand out a token, blocking every operation |
+| `rate_limits.refill_rate_per_sec` | finite and ≥ 0 | `NaN`/`±∞` would panic in `time_until_available`; `0.0` is allowed ("burst once, never refill") |
+| `sessions.timeout_secs`, `sessions.max_streaming_sessions`, `sessions.max_repo_sessions` | must be > 0 | sessions would expire instantly or never be creatable |
+| `logging.level` | one of `trace`, `debug`, `info`, `warn`, `error` (case-insensitive) | an unknown level would otherwise silently fall back to `warn`, masking a typo |
+
+#### Example
+
+```text
+configuration validation failed: rate_limits.max_burst must be greater than 0
+```
 
 ---
 
