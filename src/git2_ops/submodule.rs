@@ -260,7 +260,9 @@ pub fn find_submodule_entries(
     tree.walk(TreeWalkMode::PreOrder, |dir, entry| {
         // Check if this is a submodule entry (mode 160000)
         if entry.filemode() == SUBMODULE_MODE && entry.kind() == Some(ObjectType::Commit) {
-            let Some(name) = entry.name() else {
+            // git2 0.21: `TreeEntry::name()` returns `Result` (UTF-8 check);
+            // `Err` means a non-UTF-8 name, which we skip as before.
+            let Ok(name) = entry.name() else {
                 return TreeWalkResult::Ok;
             };
 
@@ -904,6 +906,85 @@ mod tests {
     }
 
     #[test]
+    fn find_submodule_entries_detects_gitlink_in_tree() {
+        // A tree containing a real gitlink (mode 160000) exercises the
+        // `let Ok(name) = entry.name()` walk-callback branch that the
+        // no-submodule test above never reaches.
+        let temp = tempfile::TempDir::new().unwrap();
+        let repo = Repository::init_bare(temp.path()).unwrap();
+        let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+
+        // A commit to serve as the gitlink target oid (lives in this same repo
+        // for the test; `find_submodule_entries` only reads the tree entry's
+        // id/name, never peels the target).
+        let blob = repo.blob(b"sub\n").unwrap();
+        let mut sub_tb = repo.treebuilder(None).unwrap();
+        sub_tb.insert("f.txt", blob, 0o100_644).unwrap();
+        let sub_tree = repo.find_tree(sub_tb.write().unwrap()).unwrap();
+        let gitlink_target = repo
+            .commit(None, &sig, &sig, "submodule commit", &sub_tree, &[])
+            .unwrap();
+
+        // Parent commit whose tree has a gitlink at the root path "sub".
+        let mut root_tb = repo.treebuilder(None).unwrap();
+        root_tb
+            .insert("sub", gitlink_target, SUBMODULE_MODE)
+            .unwrap();
+        let root_tree = repo.find_tree(root_tb.write().unwrap()).unwrap();
+        let commit_oid = repo
+            .commit(None, &sig, &sig, "root commit", &root_tree, &[])
+            .unwrap();
+
+        let mut gitmodules = HashMap::new();
+        gitmodules.insert(
+            "sub".to_string(),
+            SubmoduleInfo {
+                name: "sub".to_string(),
+                path: "sub".to_string(),
+                url: "https://example.com/sub.git".to_string(),
+                branch: None,
+            },
+        );
+
+        let entries = find_submodule_entries(&repo, commit_oid, &gitmodules).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].path, "sub");
+        assert_eq!(entries[0].commit, gitlink_target);
+        assert_eq!(entries[0].url, "https://example.com/sub.git");
+    }
+
+    #[test]
+    fn find_submodule_entries_gitlink_missing_from_gitmodules_is_skipped() {
+        // Same gitlink tree, but with an empty .gitmodules map: the entry is
+        // found in the tree (hitting the same walk branch) yet produces no
+        // `SubmoduleEntry` because there's no URL to fetch from.
+        let temp = tempfile::TempDir::new().unwrap();
+        let repo = Repository::init_bare(temp.path()).unwrap();
+        let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+
+        let blob = repo.blob(b"sub\n").unwrap();
+        let mut sub_tb = repo.treebuilder(None).unwrap();
+        sub_tb.insert("f.txt", blob, 0o100_644).unwrap();
+        let sub_tree = repo.find_tree(sub_tb.write().unwrap()).unwrap();
+        let gitlink_target = repo
+            .commit(None, &sig, &sig, "submodule commit", &sub_tree, &[])
+            .unwrap();
+
+        let mut root_tb = repo.treebuilder(None).unwrap();
+        root_tb
+            .insert("sub", gitlink_target, SUBMODULE_MODE)
+            .unwrap();
+        let root_tree = repo.find_tree(root_tb.write().unwrap()).unwrap();
+        let commit_oid = repo
+            .commit(None, &sig, &sig, "root commit", &root_tree, &[])
+            .unwrap();
+
+        let gitmodules = HashMap::new();
+        let entries = find_submodule_entries(&repo, commit_oid, &gitmodules).unwrap();
+        assert!(entries.is_empty());
+    }
+
+    #[test]
     fn find_submodule_entries_invalid_commit_returns_error() {
         let temp = tempfile::TempDir::new().unwrap();
         let repo = Repository::init_bare(temp.path()).unwrap();
@@ -917,7 +998,7 @@ mod tests {
     fn submodule_entry_struct_fields() {
         let entry = SubmoduleEntry {
             path: "vendor/x".to_string(),
-            commit: Oid::zero(),
+            commit: Oid::ZERO_SHA1,
             url: "https://example.com/x.git".to_string(),
         };
         assert_eq!(entry.path, "vendor/x");
@@ -951,7 +1032,7 @@ mod tests {
     fn fetch_submodule_with_invalid_url_fails() {
         let entry = SubmoduleEntry {
             path: "vendor/x".to_string(),
-            commit: Oid::zero(),
+            commit: Oid::ZERO_SHA1,
             url: "not-a-valid-url".to_string(),
         };
         let result = fetch_submodule(&entry, None);
@@ -962,7 +1043,7 @@ mod tests {
     fn fetch_submodule_with_file_url_rejected() {
         let entry = SubmoduleEntry {
             path: "vendor/x".to_string(),
-            commit: Oid::zero(),
+            commit: Oid::ZERO_SHA1,
             url: "file:///etc/passwd".to_string(),
         };
         assert!(fetch_submodule(&entry, None).is_err());

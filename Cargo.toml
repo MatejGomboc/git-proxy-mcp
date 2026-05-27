@@ -50,8 +50,11 @@ glob = "0.3"
 # Platform-specific directories
 dirs = "6.0.0"
 
-# git2 library for in-process git operations (Tier 1 credential relay)
-git2 = "0.20.4"
+# git2 library for in-process git operations (Tier 1 credential relay).
+# 0.21 changed `default` features to empty (0.20 enabled "ssh" + "https"),
+# so they must now be requested explicitly. "https" + "ssh" transitively
+# enable the new "cred" feature that gates `Cred::credential_helper`.
+git2 = { version = "0.21.0", features = ["https", "ssh"] }
 
 # Compression for tar.gz archives
 flate2 = "1.0"
