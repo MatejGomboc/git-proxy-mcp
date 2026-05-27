@@ -342,7 +342,9 @@ pub fn create_tar_from_tree_with_options(
 
         // Walk the tree and add each blob to the tar
         tree.walk(TreeWalkMode::PreOrder, |dir, entry| {
-            let Some(name) = entry.name() else {
+            // git2 0.21: `TreeEntry::name()` returns `Result` (UTF-8 check);
+            // `Err` means a non-UTF-8 name, which we skip as before.
+            let Ok(name) = entry.name() else {
                 return TreeWalkResult::Skip;
             };
 
@@ -623,7 +625,9 @@ fn write_submodules_to_tar<W: std::io::Write>(
         let mut submodule_files = 0usize;
 
         let walk_result = submodule_tree.walk(TreeWalkMode::PreOrder, |dir, entry| {
-            let Some(name) = entry.name() else {
+            // git2 0.21: `TreeEntry::name()` returns `Result` (UTF-8 check);
+            // `Err` means a non-UTF-8 name, which we skip as before.
+            let Ok(name) = entry.name() else {
                 return TreeWalkResult::Skip;
             };
 

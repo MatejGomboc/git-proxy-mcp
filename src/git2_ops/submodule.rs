@@ -260,7 +260,9 @@ pub fn find_submodule_entries(
     tree.walk(TreeWalkMode::PreOrder, |dir, entry| {
         // Check if this is a submodule entry (mode 160000)
         if entry.filemode() == SUBMODULE_MODE && entry.kind() == Some(ObjectType::Commit) {
-            let Some(name) = entry.name() else {
+            // git2 0.21: `TreeEntry::name()` returns `Result` (UTF-8 check);
+            // `Err` means a non-UTF-8 name, which we skip as before.
+            let Ok(name) = entry.name() else {
                 return TreeWalkResult::Ok;
             };
 
@@ -917,7 +919,7 @@ mod tests {
     fn submodule_entry_struct_fields() {
         let entry = SubmoduleEntry {
             path: "vendor/x".to_string(),
-            commit: Oid::zero(),
+            commit: Oid::ZERO_SHA1,
             url: "https://example.com/x.git".to_string(),
         };
         assert_eq!(entry.path, "vendor/x");
@@ -951,7 +953,7 @@ mod tests {
     fn fetch_submodule_with_invalid_url_fails() {
         let entry = SubmoduleEntry {
             path: "vendor/x".to_string(),
-            commit: Oid::zero(),
+            commit: Oid::ZERO_SHA1,
             url: "not-a-valid-url".to_string(),
         };
         let result = fetch_submodule(&entry, None);
@@ -962,7 +964,7 @@ mod tests {
     fn fetch_submodule_with_file_url_rejected() {
         let entry = SubmoduleEntry {
             path: "vendor/x".to_string(),
-            commit: Oid::zero(),
+            commit: Oid::ZERO_SHA1,
             url: "file:///etc/passwd".to_string(),
         };
         assert!(fetch_submodule(&entry, None).is_err());

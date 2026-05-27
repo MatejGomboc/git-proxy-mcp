@@ -131,6 +131,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`git2` requirement bumped 0.20.4 → 0.21.0** (cargo-dependencies group).
+  0.21 ships two breaking changes that touched this crate:
+    1. **`default` features are now empty** (0.20 enabled `ssh` + `https`).
+       `Cargo.toml` now requests `features = ["https", "ssh"]` explicitly —
+       the exact set 0.20.4 enabled by default — which also pulls in the new
+       `cred` feature that gates `Cred::credential_helper`. No change to the
+       credential or transport behaviour.
+    2. **`TreeEntry::name()` and `Commit::message()` now return
+       `Result<&str, Error>`** (UTF-8 validation) instead of `Option<&str>`.
+       The three `let Some(name) = entry.name()` walk callbacks in
+       `streaming/tar.rs` and `git2_ops/submodule.rs` became
+       `let Ok(name) = …`, preserving the "skip non-UTF-8 names" behaviour;
+       one `push.rs` test assertion moved from `Some(..)` to `Ok(..)`.
+  Also replaced the now-deprecated `Oid::zero()` with the `Oid::ZERO_SHA1`
+  constant in three `submodule.rs` tests. No production behaviour change.
 - **`download_with_retry` and `download_with_progress` collapsed into a
   single `download_chunked` helper.** The two had drifted on observability
   (the progress variant was missing `url` in its `warn!` calls) and the
