@@ -1074,4 +1074,201 @@ mod tests {
         assert!(parsed.contains_key("vendor/a"));
         assert!(parsed.contains_key("vendor/b"));
     }
+
+    #[test]
+    fn parse_gitmodules_ignores_unknown_keys() {
+        // `ignore` / `update` etc. are valid .gitmodules keys we don't model;
+        // they must be skipped without dropping the submodule.
+        let content = b"[submodule \"lib\"]\n\
+                        \tpath = lib\n\
+                        \turl = https://example.com/lib.git\n\
+                        \tignore = dirty\n\
+                        \tupdate = rebase\n";
+        let parsed = parse_gitmodules(content);
+        let lib = parsed.get("lib").unwrap();
+        assert_eq!(lib.url, "https://example.com/lib.git");
+    }
+
+    #[test]
+    fn parse_gitmodules_section_without_closing_quote_is_dropped() {
+        // Malformed header: no closing quote, so the name is never captured and
+        // the (otherwise complete) submodule is not emitted.
+        let content = b"[submodule \"unclosed]\n\tpath = x\n\turl = https://e.com/x.git\n";
+        assert!(parse_gitmodules(content).is_empty());
+    }
+
+    #[test]
+    fn filter_invalid_exclude_pattern_skipped() {
+        // An invalid exclude glob is logged and dropped (mirrors the include
+        // case); with no valid patterns left, everything matches.
+        let filter = SubmoduleFilter::new(None, Some(&["[unclosed".to_string()]));
+        assert!(filter.matches("anything"));
+    }
+
+    /// Builds a bare repo whose root tree has a single root-level gitlink at
+    /// `sub_path` plus a matching `.gitmodules` entry pointing at `sub_url`.
+    /// Returns the temp dir and the parent commit OID.
+    fn build_repo_with_one_submodule(sub_path: &str, sub_url: &str) -> (tempfile::TempDir, Oid) {
+        let temp = tempfile::TempDir::new().unwrap();
+        let commit = {
+            let repo = Repository::init_bare(temp.path()).unwrap();
+            let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+
+            // A commit to serve as the gitlink target (never peeled).
+            let blob = repo.blob(b"x\n").unwrap();
+            let mut leaf = repo.treebuilder(None).unwrap();
+            leaf.insert("f.txt", blob, 0o100_644).unwrap();
+            let leaf_tree = repo.find_tree(leaf.write().unwrap()).unwrap();
+            let target = repo
+                .commit(None, &sig, &sig, "sub commit", &leaf_tree, &[])
+                .unwrap();
+
+            let gm =
+                format!("[submodule \"{sub_path}\"]\n\tpath = {sub_path}\n\turl = {sub_url}\n");
+            let gm_blob = repo.blob(gm.as_bytes()).unwrap();
+
+            let mut root = repo.treebuilder(None).unwrap();
+            root.insert(sub_path, target, SUBMODULE_MODE).unwrap();
+            root.insert(".gitmodules", gm_blob, 0o100_644).unwrap();
+            let root_tree = repo.find_tree(root.write().unwrap()).unwrap();
+            repo.commit(None, &sig, &sig, "root", &root_tree, &[])
+                .unwrap()
+        };
+        (temp, commit)
+    }
+
+    #[test]
+    fn find_submodule_entries_nested_path() {
+        // A gitlink inside a subdirectory exercises the `format!("{dir}{name}")`
+        // path-joining branch (the root-level tests only hit the `dir.is_empty()`
+        // branch).
+        let temp = tempfile::TempDir::new().unwrap();
+        let repo = Repository::init_bare(temp.path()).unwrap();
+        let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+
+        let blob = repo.blob(b"x\n").unwrap();
+        let mut leaf = repo.treebuilder(None).unwrap();
+        leaf.insert("f.txt", blob, 0o100_644).unwrap();
+        let leaf_tree = repo.find_tree(leaf.write().unwrap()).unwrap();
+        let target = repo
+            .commit(None, &sig, &sig, "sub commit", &leaf_tree, &[])
+            .unwrap();
+
+        // Subtree "sub/" holding the gitlink "mod".
+        let mut sub_tb = repo.treebuilder(None).unwrap();
+        sub_tb.insert("mod", target, SUBMODULE_MODE).unwrap();
+        let sub_tree_oid = sub_tb.write().unwrap();
+
+        let gm_blob = repo
+            .blob(b"[submodule \"sub/mod\"]\n\tpath = sub/mod\n\turl = https://e.com/m.git\n")
+            .unwrap();
+        let mut root = repo.treebuilder(None).unwrap();
+        root.insert("sub", sub_tree_oid, 0o040_000).unwrap(); // subdirectory
+        root.insert(".gitmodules", gm_blob, 0o100_644).unwrap();
+        let root_tree = repo.find_tree(root.write().unwrap()).unwrap();
+        let commit = repo
+            .commit(None, &sig, &sig, "root", &root_tree, &[])
+            .unwrap();
+
+        let gm = parse_gitmodules(
+            b"[submodule \"sub/mod\"]\n\tpath = sub/mod\n\turl = https://e.com/m.git\n",
+        );
+        let entries = find_submodule_entries(&repo, commit, &gm).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].path, "sub/mod");
+    }
+
+    #[test]
+    fn get_gitmodules_content_returns_none_when_not_a_blob() {
+        // `.gitmodules` present but as a directory (tree), not a file.
+        let temp = tempfile::TempDir::new().unwrap();
+        let repo = Repository::init_bare(temp.path()).unwrap();
+        let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+
+        let blob = repo.blob(b"x\n").unwrap();
+        let mut inner = repo.treebuilder(None).unwrap();
+        inner.insert("f.txt", blob, 0o100_644).unwrap();
+        let inner_tree_oid = inner.write().unwrap();
+
+        let mut root = repo.treebuilder(None).unwrap();
+        root.insert(".gitmodules", inner_tree_oid, 0o040_000)
+            .unwrap(); // a tree, not a blob
+        let root_tree = repo.find_tree(root.write().unwrap()).unwrap();
+        let commit = repo
+            .commit(None, &sig, &sig, "root", &root_tree, &[])
+            .unwrap();
+
+        assert!(get_gitmodules_content(&repo, commit).is_none());
+    }
+
+    #[test]
+    fn fetch_all_submodules_empty_when_no_gitmodules() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let commit = {
+            let repo = Repository::init_bare(temp.path()).unwrap();
+            let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+            let blob = repo.blob(b"hi\n").unwrap();
+            let mut tb = repo.treebuilder(None).unwrap();
+            tb.insert("README.md", blob, 0o100_644).unwrap();
+            let tree = repo.find_tree(tb.write().unwrap()).unwrap();
+            repo.commit(None, &sig, &sig, "root", &tree, &[]).unwrap()
+        };
+        let repo = Repository::open_bare(temp.path()).unwrap();
+        let filter = SubmoduleFilter::new(None, None);
+        let result = fetch_all_submodules(&repo, commit, None, 1, 3, 4, &filter).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn fetch_all_submodules_empty_when_gitmodules_has_no_entries() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let commit = {
+            let repo = Repository::init_bare(temp.path()).unwrap();
+            let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+            // .gitmodules present but only a comment -> parse yields nothing.
+            let gm_blob = repo.blob(b"# no submodules here\n").unwrap();
+            let mut tb = repo.treebuilder(None).unwrap();
+            tb.insert(".gitmodules", gm_blob, 0o100_644).unwrap();
+            let tree = repo.find_tree(tb.write().unwrap()).unwrap();
+            repo.commit(None, &sig, &sig, "root", &tree, &[]).unwrap()
+        };
+        let repo = Repository::open_bare(temp.path()).unwrap();
+        let filter = SubmoduleFilter::new(None, None);
+        let result = fetch_all_submodules(&repo, commit, None, 1, 3, 4, &filter).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn fetch_all_submodules_skips_filtered_entries() {
+        // The only submodule is excluded by the filter, so nothing is fetched
+        // (no network) and the result is empty.
+        let (temp, commit) = build_repo_with_one_submodule("vendor", "https://e.com/v.git");
+        let repo = Repository::open_bare(temp.path()).unwrap();
+        let filter = SubmoduleFilter::new(None, Some(&["vendor".to_string()]));
+        let result = fetch_all_submodules(&repo, commit, None, 1, 3, 4, &filter).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn fetch_all_submodules_stops_at_zero_max_failures() {
+        // max_failures == 0 makes the filter phase break before fetching, so no
+        // network call happens.
+        let (temp, commit) = build_repo_with_one_submodule("vendor", "https://e.com/v.git");
+        let repo = Repository::open_bare(temp.path()).unwrap();
+        let filter = SubmoduleFilter::new(None, None);
+        let result = fetch_all_submodules(&repo, commit, None, 1, 0, 4, &filter).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn fetch_all_submodules_counts_failed_fetch() {
+        // An eligible submodule whose URL refuses instantly (127.0.0.1:1)
+        // exercises the parallel-fetch batch and the failure-handling arm
+        // (fetch attempted, fails, logged + skipped) without slow network.
+        let (temp, commit) = build_repo_with_one_submodule("vendor", "https://127.0.0.1:1/v.git");
+        let repo = Repository::open_bare(temp.path()).unwrap();
+        let filter = SubmoduleFilter::new(None, None);
+        let result = fetch_all_submodules(&repo, commit, None, 1, 3, 4, &filter).unwrap();
+        assert!(result.is_empty());
+    }
 }
