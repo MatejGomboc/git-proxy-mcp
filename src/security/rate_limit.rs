@@ -184,7 +184,11 @@ impl RateLimiter {
         } else {
             let tokens_needed = 1.0 - current_tokens;
             let seconds = tokens_needed / self.refill_rate;
-            Duration::from_secs_f64(seconds)
+            // A minuscule (but config-valid: finite and positive) refill_rate
+            // makes `seconds` exceed Duration's range, and `from_secs_f64`
+            // panics on overflow/non-finite input. Saturate to `Duration::MAX`
+            // — semantically "effectively never" — instead of crashing.
+            Duration::try_from_secs_f64(seconds).unwrap_or(Duration::MAX)
         }
     }
 
@@ -431,6 +435,20 @@ mod tests {
         limiter.try_acquire();
 
         // With zero refill rate, should return Duration::MAX
+        assert_eq!(limiter.time_until_available(), Duration::MAX);
+    }
+
+    #[test]
+    fn time_until_available_saturates_on_tiny_refill_rate() {
+        // A finite, positive but minuscule refill_rate passes config validation
+        // (`Config::validate` only rejects non-finite/negative), yet makes
+        // `seconds = 1.0 / refill_rate` overflow Duration's range. The method
+        // must saturate to Duration::MAX rather than panic in from_secs_f64.
+        let limiter = RateLimiter::new(1, f64::MIN_POSITIVE);
+
+        // Drain the single token so the else-branch (refill_rate > 0) is taken.
+        assert!(limiter.try_acquire());
+
         assert_eq!(limiter.time_until_available(), Duration::MAX);
     }
 }
