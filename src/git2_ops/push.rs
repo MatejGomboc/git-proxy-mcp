@@ -534,7 +534,8 @@ mod tests {
             .find_reference("refs/heads/main")
             .expect("refs/heads/main must exist after unbundle");
         let commit = reference.peel_to_commit().unwrap();
-        assert_eq!(commit.message(), Some("seed commit"));
+        // git2 0.21: `Commit::message()` returns `Result` (UTF-8 check).
+        assert_eq!(commit.message(), Ok("seed commit"));
     }
 
     #[test]

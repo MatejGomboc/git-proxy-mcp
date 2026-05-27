@@ -193,7 +193,7 @@ jobs:
                 components: llvm-tools-preview
 
             - name: Install cargo-llvm-cov
-              uses: taiki-e/install-action@cca35edeb1d01366c2843b68fc3ca441446d73d3 # v2.77.1
+              uses: taiki-e/install-action@8f531eaecd1898bc3da7d104ad91bee98d1b97bd # v2.79.9
               with:
                 tool: cargo-llvm-cov
 
@@ -297,7 +297,7 @@ jobs:
               run: rm -f ~/.git-credentials
 
             - name: Upload coverage to Codecov
-              uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6.0.0
+              uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6.0.1
               with:
                 files: lcov.info
                 fail_ci_if_error: true

@@ -40,6 +40,28 @@ pub struct FetchResult {
     _temp_dir: TempDir,
 }
 
+#[cfg(test)]
+impl FetchResult {
+    /// Construct a `FetchResult` from already-prepared parts. Test-only: lets
+    /// unit tests in other modules (e.g. `streaming::tar`) build a fetched-repo
+    /// handle around a locally-created bare repo without a real network fetch.
+    /// The private `_temp_dir` field keeps the temp directory alive for the
+    /// lifetime of the returned value, exactly as the production path does.
+    pub(crate) fn from_parts_for_test(
+        repo: Repository,
+        head_commit: Oid,
+        branch: String,
+        temp_dir: TempDir,
+    ) -> Self {
+        Self {
+            repo,
+            head_commit,
+            branch,
+            _temp_dir: temp_dir,
+        }
+    }
+}
+
 /// Options for fetch operations.
 #[derive(Debug, Clone, Default)]
 pub struct FetchOptions2 {
