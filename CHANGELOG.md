@@ -451,6 +451,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`repo_refs` reported a non-deterministic default branch when several
+  branches shared the `HEAD` commit.** `list_remote_refs` derived
+  `default_branch` by scanning the branch list for the first entry whose OID
+  equalled `HEAD`'s OID — but that scan ran over the remote's *advertised* ref
+  order (before the alphabetical sort), so a repo where, say, `develop` and
+  `main` both point at the same commit (a freshly-cut branch off `main`) could
+  report whichever the remote happened to list first. It now uses the remote's
+  advertised `HEAD` symref via `Remote::default_branch()` (the same
+  authoritative source `clone.rs`'s `fetch_bare` already relies on), falling
+  back to `"main"` only when no symref is advertised. The OID-matching logic is
+  gone. As part of the fix, the connect/list/parse body was split into a private
+  `list_refs_inner` helper so the path can be exercised against a local
+  `file://` remote (`list_remote_refs` still rejects `file://` via
+  `validate_url` before delegating), and the default-branch resolution is now a
+  pure `resolve_default_branch` helper. `git2_ops/refs.rs` line coverage rose
+  from 49.53 % to 99.04 % (15 tests, up from 4): a local-remote integration test
+  (branches, lightweight + annotated tags with `^{}` peeled entries skipped,
+  HEAD excluded, the same-commit ambiguity that the bug mishandled), seven
+  `resolve_default_branch` cases, and proxy/empty-repo/unreachable-remote paths.
 - **`is_lfs_pointer` would have misclassified a hypothetical future
   `spec/v10` (or `v11`, `v100`, …) as a v1 pointer.** The previous
   check was `starts_with("version https://git-lfs.github.com/spec/v1")`,
