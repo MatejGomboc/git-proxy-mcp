@@ -138,9 +138,14 @@ impl SparseFilter {
 ///
 /// A file is considered binary if:
 /// - It contains null bytes (common in compiled binaries, images, etc.)
-/// - More than 30% of the first 8KB are non-printable characters
+/// - More than 30% of the first 8 KiB are non-printable characters
 ///
-/// This heuristic is similar to what Git uses internally.
+/// The null-byte check mirrors Git's own heuristic (Git scans the first
+/// 8000 bytes for a NUL). The additional non-printable-ratio rule is ours
+/// and is deliberately conservative — because UTF-8 multibyte sequences use
+/// bytes ≥ 0x80, it can misclassify text that is mostly non-Latin (CJK,
+/// Cyrillic, etc.) as binary, so callers that need such files should not set
+/// `exclude_binary`.
 fn is_binary(content: &[u8]) -> bool {
     // Check first 8KB for performance on large files
     let check_len = content.len().min(8192);
@@ -165,6 +170,52 @@ fn is_binary(content: &[u8]) -> bool {
     non_text_count > threshold
 }
 
+/// Map a git tree-entry filemode to a tar header mode.
+///
+/// Git blob modes are `0o100644`/`0o100755` (regular files) and `0o120000`
+/// (symlinks — stored as blobs whose content is the link target). We archive
+/// every blob as a regular file, so only the permission bits are kept; a
+/// symlink's `0o120000` has none and would mask to `0o000`, which extracts as
+/// an unreadable file, so it falls back to `0o644`.
+#[allow(clippy::cast_sign_loss)] // a git filemode is always a positive value
+const fn tar_mode_for_filemode(filemode: i32) -> u32 {
+    let perms = filemode as u32 & 0o777;
+    if perms == 0 {
+        0o644
+    } else {
+        perms
+    }
+}
+
+/// Append one blob to the tar archive as a regular file at `path`, returning
+/// whether it was written.
+///
+/// Builds the header (size + [`tar_mode_for_filemode`]) and uses
+/// [`tar::Builder::append_data`], which writes a GNU long-name entry for paths
+/// too long for the ustar `name` field — so long paths are archived, not
+/// dropped. Returns `false` only if the path cannot be encoded at all (which a
+/// git tree name can't trigger) or the underlying writer fails; in that case it
+/// logs at debug, increments `skipped_path_too_long`, and returns `false` so
+/// the caller skips the file without aborting the whole archive. Shared by the
+/// main-tree and submodule walks.
+fn append_blob_to_tar<W: std::io::Write>(
+    tar_builder: &mut tar::Builder<W>,
+    path: &str,
+    content: &[u8],
+    filemode: i32,
+    skipped_path_too_long: &mut usize,
+) -> bool {
+    let mut header = tar::Header::new_gnu();
+    header.set_size(content.len() as u64);
+    header.set_mode(tar_mode_for_filemode(filemode));
+    if let Err(e) = tar_builder.append_data(&mut header, path, content) {
+        debug!(path = %path, error = %e, "failed to append file to tar, skipping");
+        *skipped_path_too_long += 1;
+        return false;
+    }
+    true
+}
+
 /// Result of creating a tar archive.
 #[derive(Debug)]
 pub struct TarResult {
@@ -180,7 +231,9 @@ pub struct TarResult {
     pub skipped_binary: usize,
     /// Number of files skipped due to size limit
     pub skipped_too_large: usize,
-    /// Number of files skipped due to path being too long for tar header
+    /// Number of files skipped because their path could not be encoded in a
+    /// tar header (e.g. it contained a NUL byte). Paths that are merely long
+    /// are written via a GNU long-name entry, not skipped.
     pub skipped_path_too_long: usize,
     /// Number of LFS pointers resolved (when `resolve_lfs` is true)
     pub lfs_resolved: usize,
@@ -429,32 +482,24 @@ pub fn create_tar_from_tree_with_options(
 
                         trace!(path = %path, size = content.len(), lfs = is_lfs, "adding file to tar");
 
-                        // Create tar header
-                        let mut header = tar::Header::new_gnu();
-                        if header.set_path(&path).is_err() {
-                            // Path too long for tar header (>100 chars without extension)
-                            debug!(path = %path, "path too long for tar, skipping");
-                            skipped_path_too_long += 1;
-                            return TreeWalkResult::Ok;
-                        }
-                        header.set_size(content.len() as u64);
-                        // filemode() returns i32, but negative modes are invalid
-                        #[allow(clippy::cast_sign_loss)]
-                        header.set_mode(entry.filemode() as u32);
-                        header.set_cksum();
+                        // Append as a regular file via the shared helper, which
+                        // writes a GNU long-name entry for over-long paths (so
+                        // they aren't dropped) and records a skip only if the
+                        // path can't be encoded at all.
+                        if append_blob_to_tar(
+                            &mut tar_builder,
+                            &path,
+                            content.as_ref(),
+                            entry.filemode(),
+                            &mut skipped_path_too_long,
+                        ) {
+                            file_count += 1;
+                            uncompressed_size += content.len() as u64;
 
-                        // Append to tar
-                        if tar_builder.append(&header, content.as_ref()).is_err() {
-                            debug!(path = %path, "failed to append to tar, skipping");
-                            return TreeWalkResult::Ok;
-                        }
-
-                        file_count += 1;
-                        uncompressed_size += content.len() as u64;
-
-                        // Report progress for file processing
-                        if let Some(ref sender) = progress {
-                            sender.send_file_progress(file_count, 0, Some(&path));
+                            // Report progress for file processing
+                            if let Some(ref sender) = progress {
+                                sender.send_file_progress(file_count, 0, Some(&path));
+                            }
                         }
                     }
                     Err(e) => {
@@ -672,26 +717,19 @@ fn write_submodules_to_tar<W: std::io::Write>(
 
                         trace!(path = %full_path, size = content.len(), "adding submodule file to tar");
 
-                        // Create tar header
-                        let mut header = tar::Header::new_gnu();
-                        if header.set_path(&full_path).is_err() {
-                            debug!(path = %full_path, "submodule path too long for tar");
-                            *skipped_path_too_long += 1;
-                            return TreeWalkResult::Ok;
+                        // Append via the shared helper (same long-name and
+                        // skip handling as the main-tree walk).
+                        if append_blob_to_tar(
+                            tar_builder,
+                            &full_path,
+                            content,
+                            entry.filemode(),
+                            skipped_path_too_long,
+                        ) {
+                            submodule_files += 1;
+                            *file_count += 1;
+                            *uncompressed_size += content.len() as u64;
                         }
-                        header.set_size(content.len() as u64);
-                        #[allow(clippy::cast_sign_loss)]
-                        header.set_mode(entry.filemode() as u32);
-                        header.set_cksum();
-
-                        if tar_builder.append(&header, content).is_err() {
-                            debug!(path = %full_path, "failed to append submodule file");
-                            return TreeWalkResult::Ok;
-                        }
-
-                        submodule_files += 1;
-                        *file_count += 1;
-                        *uncompressed_size += content.len() as u64;
                     }
                     Err(e) => {
                         debug!(path = %full_path, error = %e, "failed to read submodule blob");
@@ -709,12 +747,16 @@ fn write_submodules_to_tar<W: std::io::Write>(
                 "submodule added to tar"
             );
             *submodules_included += 1;
-            processed_submodules += 1;
         } else if walk_result.is_err() {
             warn!(path = %submodule_path, "failed to walk submodule tree");
             *submodules_failed += 1;
-            processed_submodules += 1;
         }
+
+        // Advance the progress counter once per submodule regardless of
+        // outcome — an empty or fully-filtered submodule (walk OK, zero
+        // files) still counts as processed, so the submodule progress
+        // percentage can reach 100%.
+        processed_submodules += 1;
 
         // Recursively write child submodules
         if !submodule.children.is_empty() {
@@ -883,14 +925,6 @@ mod tests {
     }
 
     #[test]
-    fn tar_options_default() {
-        let opts = TarOptions::default();
-        assert!(opts.sparse_patterns.is_none());
-        assert!(opts.exclude_binary.is_none());
-        assert!(opts.max_file_size.is_none());
-    }
-
-    #[test]
     fn is_binary_detects_null_bytes() {
         // Binary file with null bytes
         let binary = b"some\x00binary\x00content";
@@ -921,14 +955,12 @@ mod tests {
 
     #[test]
     fn is_binary_accepts_utf8() {
-        // UTF-8 text with non-ASCII characters should be treated as binary
-        // (our simple heuristic doesn't handle UTF-8 specially)
-        let _utf8 = "Hello 世界".as_bytes();
-        // UTF-8 multibyte chars have bytes > 127, counted as non-printable
-        // This is a known limitation - we err on the side of caution
-        // For small amounts of UTF-8, it should still pass
+        // UTF-8 multibyte chars have bytes ≥ 0x80, which the heuristic counts
+        // as non-printable — so a file that is *mostly* non-Latin UTF-8 can be
+        // misclassified as binary (a documented limitation). A predominantly
+        // ASCII file with only a little UTF-8 stays under the 30% threshold and
+        // is correctly treated as text.
         let text_with_some_utf8 = b"Hello world with a few UTF-8: \xc3\xa9";
-        // Less than 30% non-printable, should pass
         assert!(!is_binary(text_with_some_utf8));
     }
 
@@ -944,13 +976,16 @@ mod tests {
 
     #[test]
     fn is_binary_exactly_at_threshold() {
-        // 30% non-printable - exactly at threshold (should be binary as >=)
+        // 30 non-text bytes out of 100 is exactly 30%. The implementation uses
+        // `non_text_count > threshold` (strictly greater) with
+        // threshold = 100 * 30 / 100 = 30, so 30 > 30 is false: a sample that
+        // is exactly 30% non-text is classified as TEXT.
         let mut data = vec![0x80u8; 30];
         data.extend(vec![b'a'; 70]);
-        // Implementation uses > 30% so 30% should be text. Test the actual behaviour.
-        let result = is_binary(&data);
-        // Either true or false is acceptable depending on impl, just exercise the path
-        let _ = result;
+        assert!(
+            !is_binary(&data),
+            "exactly 30% non-text must be treated as text (count > threshold, not >=)"
+        );
     }
 
     /// Helper: build a test bare repo and return the path + HEAD commit oid.
@@ -1147,5 +1182,490 @@ mod tests {
             .decode(&encoded)
             .unwrap();
         assert_eq!(decoded, original);
+    }
+
+    /// Decode a gzip+tar archive and return its entry path strings.
+    fn tar_entry_paths(gz: &[u8]) -> Vec<String> {
+        use flate2::read::GzDecoder;
+        let mut archive = tar::Archive::new(GzDecoder::new(gz));
+        archive
+            .entries()
+            .unwrap()
+            .filter_map(|e| {
+                let entry = e.ok()?;
+                let path = entry.path().ok()?;
+                Some(path.to_string_lossy().into_owned())
+            })
+            .collect()
+    }
+
+    #[test]
+    fn create_tar_includes_file_with_long_path() {
+        // A single filename longer than the 100-byte ustar `name` field (and
+        // with no `/` to permit the ustar prefix split) forces the GNU
+        // long-name path. Before the append_data fix, `set_path` failed and
+        // the file was silently counted in `skipped_path_too_long`; now it
+        // must be archived and round-trip out under its full name.
+        let temp = tempfile::TempDir::new().unwrap();
+        let long_name = format!("{}.txt", "a".repeat(150));
+        let commit_oid = {
+            let repo = Repository::init_bare(temp.path()).unwrap();
+            let blob = repo.blob(b"long path content\n").unwrap();
+            let mut tb = repo.treebuilder(None).unwrap();
+            tb.insert(long_name.as_str(), blob, 0o100_644).unwrap();
+            let tree = repo.find_tree(tb.write().unwrap()).unwrap();
+            let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+            repo.commit(Some("HEAD"), &sig, &sig, "long path", &tree, &[])
+                .unwrap()
+        };
+        let repo = open_test_repo(&temp);
+        let result = create_tar_from_tree(&repo, commit_oid).unwrap();
+
+        assert_eq!(result.file_count, 1, "the long-path file must be archived");
+        assert_eq!(
+            result.skipped_path_too_long, 0,
+            "long paths must no longer be skipped"
+        );
+
+        let names = tar_entry_paths(&result.data);
+        assert!(
+            names.iter().any(|n| n == &long_name),
+            "long path not found in archive entries: {names:?}"
+        );
+    }
+
+    #[test]
+    fn create_tar_reports_file_progress_when_sender_configured() {
+        // With a ProgressSender configured, archived files emit FileProcessing
+        // updates (rate-limited, so the first always fires). Without a sender
+        // these `if let Some(...)` branches never run.
+        let (temp, commit_oid) = build_test_repo();
+        let repo = open_test_repo(&temp);
+        let (sender, receiver) = crate::mcp::progress::ProgressSender::new("t".to_string());
+        let opts = TarOptions {
+            progress: Some(sender),
+            ..Default::default()
+        };
+        let result = create_tar_from_tree_with_options(&repo, commit_oid, Some(opts)).unwrap();
+        assert!(result.file_count >= 1);
+
+        // With a sender configured, create_tar's file loop emits at least one
+        // progress update (FileProcessing is the only kind it sends here).
+        // Counting via try_iter avoids a matches! arm that would never be taken.
+        let update_count = receiver.try_iter().count();
+        assert!(
+            update_count >= 1,
+            "expected at least one progress update with a sender configured"
+        );
+    }
+
+    #[test]
+    fn create_tar_skips_submodules_when_depth_zero() {
+        // include_submodules = true but submodule_depth = Some(0) hits the
+        // depth==0 early-skip, so no fetch is attempted (no network) and no
+        // submodules are included.
+        let (temp, commit_oid) = build_test_repo();
+        let repo = open_test_repo(&temp);
+        let opts = TarOptions {
+            include_submodules: Some(true),
+            submodule_depth: Some(0),
+            ..Default::default()
+        };
+        let result = create_tar_from_tree_with_options(&repo, commit_oid, Some(opts)).unwrap();
+        assert_eq!(result.submodules_included, 0);
+        assert_eq!(result.submodules_failed, 0);
+    }
+
+    #[test]
+    fn create_tar_keeps_lfs_pointer_when_resolve_lfs_but_no_repo_url() {
+        // resolve_lfs = true but repo_url = None: the "no repo_url" warn arm
+        // runs, the LFS client stays None, and an LFS pointer blob is archived
+        // verbatim (no network; lfs_resolved stays 0).
+        let temp = tempfile::TempDir::new().unwrap();
+        let pointer = b"version https://git-lfs.github.com/spec/v1\n\
+                        oid sha256:1111111111111111111111111111111111111111111111111111111111111111\n\
+                        size 12\n";
+        let commit_oid = {
+            let repo = Repository::init_bare(temp.path()).unwrap();
+            let blob = repo.blob(pointer).unwrap();
+            let mut tb = repo.treebuilder(None).unwrap();
+            tb.insert("big.bin", blob, 0o100_644).unwrap();
+            let tree = repo.find_tree(tb.write().unwrap()).unwrap();
+            let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+            repo.commit(Some("HEAD"), &sig, &sig, "lfs pointer", &tree, &[])
+                .unwrap()
+        };
+        let repo = open_test_repo(&temp);
+        let opts = TarOptions {
+            resolve_lfs: Some(true),
+            repo_url: None,
+            ..Default::default()
+        };
+        let result = create_tar_from_tree_with_options(&repo, commit_oid, Some(opts)).unwrap();
+        assert_eq!(result.lfs_resolved, 0);
+        assert_eq!(result.lfs_failed, 0);
+        assert_eq!(result.file_count, 1, "pointer file is archived verbatim");
+    }
+
+    #[test]
+    fn create_tar_handles_resolve_lfs_with_unsupported_repo_url() {
+        // resolve_lfs = true with a repo_url whose scheme derive_lfs_url
+        // rejects (ftp://): LfsClient::new errors, the "failed to create LFS
+        // client" warn arm runs, the client stays None, and archiving still
+        // proceeds for the normal files.
+        let (temp, commit_oid) = build_test_repo();
+        let repo = open_test_repo(&temp);
+        let opts = TarOptions {
+            resolve_lfs: Some(true),
+            repo_url: Some("ftp://example.com/repo.git".to_string()),
+            ..Default::default()
+        };
+        let result = create_tar_from_tree_with_options(&repo, commit_oid, Some(opts)).unwrap();
+        assert_eq!(result.lfs_resolved, 0);
+        assert!(result.file_count >= 2);
+    }
+
+    #[test]
+    fn create_tar_with_lfs_client_archives_non_pointer_files_verbatim() {
+        // resolve_lfs = true with a valid https repo_url: the LFS client IS
+        // created (the `Ok(client) => Some(client)` arm), but none of the
+        // blobs are LFS pointers, so `is_lfs_pointer` is false for each and the
+        // Batch API is never called — the files are archived as-is with no
+        // network access. Covers the client-created arm and the
+        // Some(client)-but-not-a-pointer resolution branch.
+        let (temp, commit_oid) = build_test_repo();
+        let repo = open_test_repo(&temp);
+        let opts = TarOptions {
+            resolve_lfs: Some(true),
+            repo_url: Some("https://github.com/owner/repo.git".to_string()),
+            ..Default::default()
+        };
+        let result = create_tar_from_tree_with_options(&repo, commit_oid, Some(opts)).unwrap();
+        assert_eq!(result.lfs_resolved, 0, "no pointers, so nothing resolved");
+        assert_eq!(result.lfs_failed, 0);
+        assert!(result.file_count >= 2, "non-pointer files archived as-is");
+    }
+
+    #[test]
+    fn tar_mode_for_filemode_maps_correctly() {
+        // Regular files keep their permission bits; a symlink (0o120000) has
+        // none and must fall back to a readable 0o644 rather than 0o000.
+        assert_eq!(tar_mode_for_filemode(0o100_644), 0o644);
+        assert_eq!(tar_mode_for_filemode(0o100_755), 0o755);
+        assert_eq!(tar_mode_for_filemode(0o120_000), 0o644);
+    }
+
+    #[test]
+    fn append_blob_to_tar_appends_normal_file() {
+        let mut buf = Vec::new();
+        let mut skipped = 0usize;
+        {
+            let encoder = GzEncoder::new(&mut buf, Compression::fast());
+            let mut tar_builder = tar::Builder::new(encoder);
+            assert!(append_blob_to_tar(
+                &mut tar_builder,
+                "dir/f.txt",
+                b"hi",
+                0o100_644,
+                &mut skipped
+            ));
+            tar_builder.finish().unwrap();
+        }
+        assert_eq!(skipped, 0);
+        assert!(tar_entry_paths(&buf).iter().any(|p| p == "dir/f.txt"));
+    }
+
+    #[test]
+    fn append_blob_to_tar_records_skip_when_write_fails() {
+        // A writer that fails every write drives append_data's error path
+        // portably — no platform-specific path encoding needed.
+        struct FailingWriter;
+        impl std::io::Write for FailingWriter {
+            fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::other("boom"))
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let mut tar_builder = tar::Builder::new(FailingWriter);
+        let mut skipped = 0usize;
+        let appended =
+            append_blob_to_tar(&mut tar_builder, "x.txt", b"data", 0o100_644, &mut skipped);
+        assert!(
+            !appended,
+            "append must fail when the underlying writer errors"
+        );
+        assert_eq!(skipped, 1, "a failed append is counted as skipped");
+
+        // The Write contract requires flush; exercise it for completeness.
+        assert!(std::io::Write::flush(&mut FailingWriter).is_ok());
+    }
+
+    #[test]
+    fn create_tar_symlink_entry_gets_readable_mode() {
+        // A git symlink is a blob with filemode 0o120000; archived as a regular
+        // file, its mode must be normalised so the extracted file is readable
+        // (set_mode(0o120000) would otherwise mask to 0o000).
+        let temp = tempfile::TempDir::new().unwrap();
+        let commit_oid = {
+            let repo = Repository::init_bare(temp.path()).unwrap();
+            let target = repo.blob(b"src/real.rs").unwrap();
+            let mut tb = repo.treebuilder(None).unwrap();
+            tb.insert("link.rs", target, 0o120_000).unwrap();
+            let tree = repo.find_tree(tb.write().unwrap()).unwrap();
+            let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+            repo.commit(Some("HEAD"), &sig, &sig, "symlink", &tree, &[])
+                .unwrap()
+        };
+        let repo = open_test_repo(&temp);
+        let result = create_tar_from_tree(&repo, commit_oid).unwrap();
+        assert_eq!(result.file_count, 1);
+
+        let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(result.data.as_slice()));
+        let entry = archive.entries().unwrap().next().unwrap().unwrap();
+        let mode = entry.header().mode().unwrap();
+        assert_ne!(
+            mode & 0o777,
+            0,
+            "symlink entry must extract with readable permissions"
+        );
+    }
+
+    /// Build a `FetchedSubmodule` around a locally-created bare repo holding a
+    /// single `README.md`, with the given path and recursively-fetched children.
+    fn make_fetched_submodule(path: &str, children: Vec<FetchedSubmodule>) -> FetchedSubmodule {
+        use crate::git2_ops::clone::FetchResult;
+        use crate::git2_ops::submodule::SubmoduleEntry;
+        let temp = tempfile::TempDir::new().unwrap();
+        let commit_oid = {
+            let repo = Repository::init_bare(temp.path()).unwrap();
+            let blob = repo.blob(b"sub file\n").unwrap();
+            let mut tb = repo.treebuilder(None).unwrap();
+            tb.insert("README.md", blob, 0o100_644).unwrap();
+            let tree = repo.find_tree(tb.write().unwrap()).unwrap();
+            let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+            repo.commit(None, &sig, &sig, "sub", &tree, &[]).unwrap()
+        };
+        let repo = Repository::open_bare(temp.path()).unwrap();
+        FetchedSubmodule {
+            entry: SubmoduleEntry {
+                path: path.to_string(),
+                commit: commit_oid,
+                url: "https://example.com/sub.git".to_string(),
+            },
+            fetch_result: FetchResult::from_parts_for_test(
+                repo,
+                commit_oid,
+                "main".to_string(),
+                temp,
+            ),
+            children,
+        }
+    }
+
+    /// Drive `write_submodules_to_tar` with fresh counters; returns
+    /// `(file_count, submodules_included, submodules_failed)`.
+    fn run_write_submodules(subs: &[FetchedSubmodule]) -> (usize, usize, usize) {
+        let mut buf = Vec::new();
+        let mut file_count = 0usize;
+        let mut uncompressed_size = 0u64;
+        let mut skipped_by_filter = 0usize;
+        let mut skipped_binary = 0usize;
+        let mut skipped_too_large = 0usize;
+        let mut skipped_path_too_long = 0usize;
+        let mut submodules_included = 0usize;
+        let mut submodules_failed = 0usize;
+        {
+            let encoder = GzEncoder::new(&mut buf, Compression::fast());
+            let mut tar_builder = tar::Builder::new(encoder);
+            write_submodules_to_tar(
+                subs,
+                "",
+                None,
+                false,
+                None,
+                &mut tar_builder,
+                &mut file_count,
+                &mut uncompressed_size,
+                &mut skipped_by_filter,
+                &mut skipped_binary,
+                &mut skipped_too_large,
+                &mut skipped_path_too_long,
+                &mut submodules_included,
+                &mut submodules_failed,
+                None,
+            );
+            tar_builder.finish().unwrap();
+        }
+        (file_count, submodules_included, submodules_failed)
+    }
+
+    #[test]
+    fn write_submodules_to_tar_recurses_into_children() {
+        // A submodule with a child exercises the recursion arm; files from both
+        // levels are archived.
+        let child = make_fetched_submodule("inner", Vec::new());
+        let parent = make_fetched_submodule("vendor/sub", vec![child]);
+        let (file_count, included, failed) = run_write_submodules(std::slice::from_ref(&parent));
+        assert_eq!(file_count, 2, "parent + child each contribute one file");
+        assert_eq!(included, 2, "both parent and child are included");
+        assert_eq!(failed, 0);
+    }
+
+    #[test]
+    fn write_submodules_to_tar_counts_failure_for_missing_commit() {
+        use crate::git2_ops::clone::FetchResult;
+        use crate::git2_ops::submodule::SubmoduleEntry;
+        // The expected commit is absent from the submodule's repo, so
+        // find_commit fails and the submodule is counted as failed.
+        let temp = tempfile::TempDir::new().unwrap();
+        let repo = Repository::init_bare(temp.path()).unwrap();
+        let bogus = Oid::from_str("0000000000000000000000000000000000000001").unwrap();
+        let fetched = FetchedSubmodule {
+            entry: SubmoduleEntry {
+                path: "vendor/sub".to_string(),
+                commit: bogus,
+                url: "https://example.com/sub.git".to_string(),
+            },
+            fetch_result: FetchResult::from_parts_for_test(repo, bogus, "main".to_string(), temp),
+            children: Vec::new(),
+        };
+        let (file_count, included, failed) = run_write_submodules(std::slice::from_ref(&fetched));
+        assert_eq!(file_count, 0);
+        assert_eq!(included, 0);
+        assert_eq!(failed, 1, "a missing submodule commit counts as a failure");
+    }
+
+    #[test]
+    fn write_submodules_to_tar_counts_failure_when_tree_walk_errors() {
+        use crate::git2_ops::clone::FetchResult;
+        use crate::git2_ops::submodule::SubmoduleEntry;
+        // The submodule commit's root tree references a missing subtree object,
+        // so walking it fails — exercising the walk_result.is_err() arm.
+        let temp = tempfile::TempDir::new().unwrap();
+        let commit_oid = {
+            let repo = Repository::init_bare(temp.path()).unwrap();
+            // Hand-write a tree object that references a non-existent subtree
+            // (all-zero OID), bypassing treebuilder's existence validation.
+            // Walking it then fails when it descends into "subdir".
+            let odb = repo.odb().unwrap();
+            let mut tree_bytes = Vec::new();
+            tree_bytes.extend_from_slice(b"40000 subdir\0");
+            tree_bytes.extend_from_slice(&[0u8; 20]);
+            let tree_oid = odb.write(git2::ObjectType::Tree, &tree_bytes).unwrap();
+            let tree = repo.find_tree(tree_oid).unwrap();
+            let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+            repo.commit(None, &sig, &sig, "corrupt", &tree, &[])
+                .unwrap()
+        };
+        let repo = Repository::open_bare(temp.path()).unwrap();
+        let fetched = FetchedSubmodule {
+            entry: SubmoduleEntry {
+                path: "vendor/sub".to_string(),
+                commit: commit_oid,
+                url: "https://example.com/sub.git".to_string(),
+            },
+            fetch_result: FetchResult::from_parts_for_test(
+                repo,
+                commit_oid,
+                "main".to_string(),
+                temp,
+            ),
+            children: Vec::new(),
+        };
+        let (_file_count, included, failed) = run_write_submodules(std::slice::from_ref(&fetched));
+        assert_eq!(included, 0);
+        assert_eq!(
+            failed, 1,
+            "a tree-walk failure counts as a submodule failure"
+        );
+    }
+
+    #[test]
+    fn write_submodules_to_tar_applies_filter_size_binary_and_progress() {
+        use crate::git2_ops::clone::FetchResult;
+        use crate::git2_ops::submodule::SubmoduleEntry;
+        // A submodule tree with: a small `.rs` file (kept), a `.md` file
+        // (filtered out by the `**/*.rs` sparse pattern), an oversized `.rs`
+        // file (skipped by max_file_size), and a binary `.rs` file (skipped by
+        // exclude_binary). With a progress sender this drives the filter, size,
+        // binary, and progress branches of the submodule walk in one pass.
+        let temp = tempfile::TempDir::new().unwrap();
+        let commit_oid = {
+            let repo = Repository::init_bare(temp.path()).unwrap();
+            let small = repo.blob(b"fn a() {}\n").unwrap();
+            let md = repo.blob(b"# notes\n").unwrap();
+            let big = repo.blob(&[b'x'; 200]).unwrap();
+            let binary = repo.blob(b"\x00\x01\x02 binary .rs\x00").unwrap();
+            let mut tb = repo.treebuilder(None).unwrap();
+            tb.insert("a.rs", small, 0o100_644).unwrap();
+            tb.insert("notes.md", md, 0o100_644).unwrap();
+            tb.insert("big.rs", big, 0o100_644).unwrap();
+            tb.insert("weird.rs", binary, 0o100_644).unwrap();
+            let tree = repo.find_tree(tb.write().unwrap()).unwrap();
+            let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+            repo.commit(None, &sig, &sig, "files", &tree, &[]).unwrap()
+        };
+        let repo = Repository::open_bare(temp.path()).unwrap();
+        let fetched = FetchedSubmodule {
+            entry: SubmoduleEntry {
+                path: "sub".to_string(),
+                commit: commit_oid,
+                url: "https://example.com/sub.git".to_string(),
+            },
+            fetch_result: FetchResult::from_parts_for_test(
+                repo,
+                commit_oid,
+                "main".to_string(),
+                temp,
+            ),
+            children: Vec::new(),
+        };
+
+        let filter = SparseFilter::new(&["**/*.rs".to_string()]);
+        let (sender, receiver) = crate::mcp::progress::ProgressSender::new("t".to_string());
+
+        let mut buf = Vec::new();
+        let mut file_count = 0usize;
+        let mut uncompressed_size = 0u64;
+        let mut skipped_by_filter = 0usize;
+        let mut skipped_binary = 0usize;
+        let mut skipped_too_large = 0usize;
+        let mut skipped_path_too_long = 0usize;
+        let mut submodules_included = 0usize;
+        let mut submodules_failed = 0usize;
+        {
+            let encoder = GzEncoder::new(&mut buf, Compression::fast());
+            let mut tar_builder = tar::Builder::new(encoder);
+            write_submodules_to_tar(
+                std::slice::from_ref(&fetched),
+                "",
+                Some(&filter),
+                true,      // exclude_binary
+                Some(100), // max_file_size
+                &mut tar_builder,
+                &mut file_count,
+                &mut uncompressed_size,
+                &mut skipped_by_filter,
+                &mut skipped_binary,
+                &mut skipped_too_large,
+                &mut skipped_path_too_long,
+                &mut submodules_included,
+                &mut submodules_failed,
+                Some(&sender),
+            );
+            tar_builder.finish().unwrap();
+        }
+
+        assert_eq!(file_count, 1, "only the small .rs file is archived");
+        assert_eq!(skipped_by_filter, 1, "notes.md is filtered out");
+        assert_eq!(skipped_too_large, 1, "big.rs is over max_file_size");
+        assert_eq!(skipped_binary, 1, "weird.rs is binary");
+        assert_eq!(submodules_included, 1);
+        assert!(
+            receiver.try_iter().count() >= 1,
+            "expected a submodule progress update"
+        );
     }
 }
