@@ -99,7 +99,7 @@ accepted as-is.
 |----------|------|-----|
 | `timeouts.request_timeout_secs`, `lfs.request_timeout_secs`, `lfs.connect_timeout_secs`, `lfs.download_timeout_secs` | must be > 0 | a zero `Duration` makes every request time out immediately |
 | `rate_limits.max_burst` | must be > 0 | the token bucket would never hand out a token, blocking every operation |
-| `rate_limits.refill_rate_per_sec` | finite and ≥ 0 | `NaN`/`±∞` would panic in `time_until_available`; `0.0` is allowed ("burst once, never refill") |
+| `rate_limits.refill_rate_per_sec` | finite and ≥ 0 | `NaN` panics in `time_until_available`; `±∞`/negatives break the token-bucket maths; `0.0` is allowed ("burst once, never refill") |
 | `sessions.timeout_secs`, `sessions.max_streaming_sessions`, `sessions.max_repo_sessions` | must be > 0 | sessions would expire instantly or never be creatable |
 | `logging.level` | one of `trace`, `debug`, `info`, `warn`, `error` (case-insensitive) | an unknown level would otherwise silently fall back to `warn`, masking a typo |
 

@@ -179,10 +179,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     2. **`rate_limits.max_burst` of zero** — the token bucket starts empty and
        never refills past zero, so *every* operation is blocked forever.
     3. **A non-finite or negative `rate_limits.refill_rate_per_sec`** — this is
-       the one that was not merely a foot-gun: `NaN`/`±∞` reaches
+       the one that was not merely a foot-gun: `NaN` reaches
        `RateLimiter::time_until_available`, whose `Duration::from_secs_f64`
-       **panics** on a non-finite value. `0.0` is still accepted (the supported
-       "burst once, never refill" mode).
+       **panics** on a non-finite value. The infinities and negatives don't
+       panic but break the token-bucket maths (permanent block, or effectively
+       no throttling). `0.0` is still accepted (the supported "burst once,
+       never refill" mode).
     4. **Zero session limits** — `sessions.timeout_secs` (sessions expire
        instantly), `sessions.max_streaming_sessions` and
        `sessions.max_repo_sessions` (no session can ever be created).

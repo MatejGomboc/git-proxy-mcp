@@ -93,9 +93,11 @@ impl Config {
     ///   immediately;
     /// - `rate_limits.max_burst` of zero — the token bucket can then never hand
     ///   out a token, blocking every operation forever;
-    /// - a non-finite or negative `rate_limits.refill_rate_per_sec` — `NaN` and
-    ///   the infinities would otherwise panic in
-    ///   `RateLimiter::time_until_available` via `Duration::from_secs_f64`;
+    /// - a non-finite or negative `rate_limits.refill_rate_per_sec` — `NaN`
+    ///   panics in `RateLimiter::time_until_available` (`Duration::from_secs_f64`
+    ///   rejects non-finite input), and the infinities/negatives break the
+    ///   token-bucket maths (permanent block, or effectively no throttling).
+    ///   `0.0` stays allowed — the supported "burst once, never refill" mode;
     /// - zero session limits (`sessions.timeout_secs`,
     ///   `sessions.max_streaming_sessions`, `sessions.max_repo_sessions`) —
     ///   sessions would expire instantly or never be creatable;
@@ -1306,8 +1308,9 @@ mod tests {
 
     #[test]
     fn validate_rejects_non_finite_or_negative_refill_rate() {
-        // A non-finite refill rate would panic downstream in
-        // RateLimiter::time_until_available (Duration::from_secs_f64).
+        // NaN panics downstream in RateLimiter::time_until_available
+        // (Duration::from_secs_f64); the infinities and negatives break the
+        // token-bucket maths instead. All are rejected (0.0 is allowed).
         for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -0.1, -1.0] {
             let mut config: Config = serde_json::from_str("{}").unwrap();
             config.rate_limits.refill_rate_per_sec = bad;
