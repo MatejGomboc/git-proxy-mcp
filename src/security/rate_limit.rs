@@ -288,7 +288,9 @@ impl RateLimiterStats {
     #[must_use]
     #[allow(clippy::cast_precision_loss)] // Percentage calculation is acceptable
     pub fn block_rate(&self) -> f64 {
-        let total = self.total_allowed + self.total_blocked;
+        // saturating_add: the sum only overflows after ~1.8e19 lifetime
+        // operations, but an unchecked add would panic there in debug builds.
+        let total = self.total_allowed.saturating_add(self.total_blocked);
         if total == 0 {
             0.0
         } else {
