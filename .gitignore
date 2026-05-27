@@ -4,3 +4,7 @@ Cargo.lock
 nul
 __pycache__/
 .env.local
+
+# Coverage artefacts (cargo-llvm-cov --output-path; HTML reports land under target/)
+*.lcov
+lcov.info
