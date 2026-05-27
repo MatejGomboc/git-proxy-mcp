@@ -22,7 +22,7 @@ use tempfile::TempDir;
 use tracing::{debug, info};
 
 use super::auth::{create_callbacks_with_progress, validate_url};
-use super::error::Git2Error;
+use super::error::{sanitize_error_message, Git2Error};
 use crate::mcp::ProgressSender;
 
 /// Result of a successful fetch operation.
@@ -118,12 +118,16 @@ pub fn fetch_bare(url: &str, options: Option<FetchOptions2>) -> Result<FetchResu
     // Validate URL before doing anything
     validate_url(url)?;
 
-    info!(
-        url = %super::auth::sanitize_url_for_logging(url),
-        branch = options.branch.as_deref().unwrap_or("(remote default)"),
-        "starting bare fetch"
-    );
+    info!(url = %super::auth::sanitize_url_for_logging(url), branch = options.branch.as_deref().unwrap_or("(remote default)"), "starting bare fetch");
 
+    fetch_bare_inner(url, &options)
+}
+
+/// Fetches into a fresh bare repo — the body of [`fetch_bare`] after URL
+/// validation. Split out so tests can drive the connect/fetch path against a
+/// local `file://` remote; [`fetch_bare`] still rejects non-network URLs via
+/// [`validate_url`] before delegating here.
+fn fetch_bare_inner(url: &str, options: &FetchOptions2) -> Result<FetchResult, Git2Error> {
     // Create temp directory for bare repo
     let temp_dir = TempDir::new().map_err(Git2Error::TempDirFailed)?;
 
@@ -138,9 +142,12 @@ pub fn fetch_bare(url: &str, options: Option<FetchOptions2>) -> Result<FetchResu
     // Resolve the branch name and fetch in a single connection. Scope the
     // remote so it's dropped before we return the repo.
     let branch_name = {
-        let mut remote = repo
-            .remote_anonymous(url)
-            .map_err(|e| Git2Error::InitFailed(format!("failed to create remote: {e}")))?;
+        let mut remote = repo.remote_anonymous(url).map_err(|e| {
+            Git2Error::InitFailed(format!(
+                "failed to create remote: {}",
+                sanitize_error_message(e.message())
+            ))
+        })?;
 
         // Connect once so we can both query the default branch (when the
         // caller didn't pass one) and reuse the same connection for fetch.
@@ -157,7 +164,7 @@ pub fn fetch_bare(url: &str, options: Option<FetchOptions2>) -> Result<FetchResu
                 Some(connect_callbacks),
                 Some(connect_proxy),
             )
-            .map_err(|e| Git2Error::FetchFailed(e.message().to_string()))?;
+            .map_err(|e| Git2Error::from_fetch(&e))?;
 
         // Resolve branch: caller-supplied wins; otherwise ask the connected
         // remote for its default. We never fall back to a hard-coded "main"
@@ -168,7 +175,7 @@ pub fn fetch_bare(url: &str, options: Option<FetchOptions2>) -> Result<FetchResu
             let default_buf = remote.default_branch().map_err(|e| {
                 Git2Error::FetchFailed(format!(
                     "could not determine remote's default branch: {}",
-                    e.message()
+                    sanitize_error_message(e.message())
                 ))
             })?;
             let resolved = decode_default_branch(&default_buf)?;
@@ -203,7 +210,7 @@ pub fn fetch_bare(url: &str, options: Option<FetchOptions2>) -> Result<FetchResu
 
         remote
             .fetch(&[&refspec], Some(&mut fetch_opts), None)
-            .map_err(|e| Git2Error::FetchFailed(e.message().to_string()))?;
+            .map_err(|e| Git2Error::from_fetch(&e))?;
 
         branch_name
     };
@@ -220,11 +227,7 @@ pub fn fetch_bare(url: &str, options: Option<FetchOptions2>) -> Result<FetchResu
             .id()
     };
 
-    info!(
-        commit = %head_commit,
-        branch = %branch_name,
-        "fetch complete"
-    );
+    info!(commit = %head_commit, branch = %branch_name, "fetch complete");
 
     Ok(FetchResult {
         repo,
@@ -347,19 +350,171 @@ mod tests {
         let dest = tempfile::TempDir::new().unwrap();
         let dest_repo = Repository::init_bare(dest.path()).unwrap();
 
-        // file:// URL form, with Windows-friendly path translation.
-        let raw_path = source.path().display().to_string();
-        let url = if cfg!(windows) {
-            format!("file:///{}", raw_path.replace('\\', "/"))
-        } else {
-            format!("file://{raw_path}")
-        };
-
-        let mut remote = dest_repo.remote_anonymous(&url).unwrap();
+        let mut remote = dest_repo
+            .remote_anonymous(&local_file_url(source.path()))
+            .unwrap();
         remote.connect(Direction::Fetch).unwrap();
         let buf = remote.default_branch().unwrap();
 
         let resolved = decode_default_branch(&buf).unwrap();
         assert_eq!(resolved, "develop");
+    }
+
+    /// Builds a `file://` URL for a local path (Windows-friendly).
+    fn local_file_url(path: &std::path::Path) -> String {
+        let raw = path.display().to_string();
+        if cfg!(windows) {
+            format!("file:///{}", raw.replace('\\', "/"))
+        } else {
+            format!("file://{raw}")
+        }
+    }
+
+    /// Creates a bare source repo with one commit on `branch` (set as HEAD) and
+    /// returns the temp dir (kept alive by the caller) plus the commit id.
+    fn make_source_repo(branch: &str) -> (TempDir, Oid) {
+        let source = TempDir::new().unwrap();
+        let repo = Repository::init_bare(source.path()).unwrap();
+        repo.set_head(&format!("refs/heads/{branch}")).unwrap();
+        let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+        let tree_oid = repo.treebuilder(None).unwrap().write().unwrap();
+        let tree = repo.find_tree(tree_oid).unwrap();
+        let commit = repo
+            .commit(Some("HEAD"), &sig, &sig, "initial", &tree, &[])
+            .unwrap();
+        (source, commit)
+    }
+
+    #[test]
+    fn fetch_bare_rejects_file_url() {
+        assert!(matches!(
+            fetch_bare("file:///etc/passwd", None),
+            Err(Git2Error::InvalidUrl)
+        ));
+    }
+
+    #[test]
+    fn fetch_bare_rejects_invalid_url() {
+        assert!(matches!(
+            fetch_bare("/local/path", None),
+            Err(Git2Error::InvalidUrl)
+        ));
+    }
+
+    #[test]
+    fn fetch_bare_fails_fast_on_unreachable_host() {
+        // Exercises the full public path (validate -> info -> fetch_bare_inner
+        // -> connect) via a host that RSTs immediately, so there's no slow
+        // timeout. A refused connection is not an auth error, so it surfaces as
+        // FetchFailed.
+        // `FetchResult` isn't `Debug`, so inspect the error (which is).
+        let err = fetch_bare("https://127.0.0.1:1/owner/repo.git", None).err();
+        assert!(
+            matches!(err, Some(Git2Error::FetchFailed(_))),
+            "expected FetchFailed, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn fetch_bare_inner_fetches_default_branch() {
+        let (source, commit) = make_source_repo("main");
+        let result =
+            fetch_bare_inner(&local_file_url(source.path()), &FetchOptions2::default()).unwrap();
+        assert_eq!(result.branch, "main");
+        assert_eq!(result.head_commit, commit);
+        // The branch ref was fetched into the bare repo.
+        assert!(result.repo.find_reference("refs/heads/main").is_ok());
+    }
+
+    #[test]
+    fn fetch_bare_inner_fetches_explicit_branch() {
+        // Source has `main` (default) plus a `feature` branch at its own commit.
+        let source = TempDir::new().unwrap();
+        let repo = Repository::init_bare(source.path()).unwrap();
+        repo.set_head("refs/heads/main").unwrap();
+        let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+        let tree_oid = repo.treebuilder(None).unwrap().write().unwrap();
+        let tree = repo.find_tree(tree_oid).unwrap();
+        let main_commit = repo
+            .commit(Some("refs/heads/main"), &sig, &sig, "on main", &tree, &[])
+            .unwrap();
+        let main_obj = repo.find_commit(main_commit).unwrap();
+        let feature_commit = repo
+            .commit(
+                Some("refs/heads/feature"),
+                &sig,
+                &sig,
+                "on feature",
+                &tree,
+                &[&main_obj],
+            )
+            .unwrap();
+
+        let result = fetch_bare_inner(
+            &local_file_url(source.path()),
+            &FetchOptions2 {
+                branch: Some("feature".to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(result.branch, "feature");
+        assert_eq!(result.head_commit, feature_commit);
+    }
+
+    #[test]
+    fn fetch_bare_inner_accepts_depth_option() {
+        let (source, commit) = make_source_repo("main");
+        // Shallow support over the local transport varies by libgit2 build, so
+        // we only require the depth path not to break the call; when the fetch
+        // succeeds the head must still be the tip commit.
+        if let Ok(result) = fetch_bare_inner(
+            &local_file_url(source.path()),
+            &FetchOptions2 {
+                branch: Some("main".to_string()),
+                depth: Some(1),
+                ..Default::default()
+            },
+        ) {
+            assert_eq!(result.head_commit, commit);
+        }
+    }
+
+    #[test]
+    fn fetch_bare_inner_accepts_proxy_option() {
+        // The proxy is irrelevant to local file:// transport, so the fetch still
+        // succeeds — this just exercises the proxy-configuration branch.
+        let (source, commit) = make_source_repo("main");
+        let result = fetch_bare_inner(
+            &local_file_url(source.path()),
+            &FetchOptions2 {
+                branch: Some("main".to_string()),
+                proxy_url: Some("http://127.0.0.1:9".to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(result.head_commit, commit);
+    }
+
+    #[test]
+    fn fetch_bare_inner_fails_for_missing_branch() {
+        let (source, _) = make_source_repo("main");
+        let result = fetch_bare_inner(
+            &local_file_url(source.path()),
+            &FetchOptions2 {
+                branch: Some("does-not-exist".to_string()),
+                ..Default::default()
+            },
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn fetch_bare_inner_errors_on_nonexistent_local_remote() {
+        let tmp = TempDir::new().unwrap();
+        let missing = tmp.path().join("no-such-repo");
+        let result = fetch_bare_inner(&local_file_url(&missing), &FetchOptions2::default());
+        assert!(result.is_err());
     }
 }

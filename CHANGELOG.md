@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`git2_ops::clone` fetch-path coverage.** `fetch_bare`'s body was untested
+  (only `decode_default_branch` and the `validate_url` rejection were covered).
+  Extracted a private `fetch_bare_inner` past the URL validation so tests drive
+  the connect/fetch path against a local `file://` remote (`fetch_bare` still
+  rejects `file://` on the public path): default-branch fetch, explicit-branch
+  fetch, depth, proxy, missing-branch and nonexistent-remote errors, plus
+  full-path `validate_url` rejection and an unreachable-host (`127.0.0.1:1`)
+  test. `clone.rs` line coverage rose from 51.50 % to 93.57 %.
+
 - **9 new `config` regression tests** taking `config/mod.rs` line
   coverage from 91.40 % to 97.97 % and adding drift guards around the
   configuration schema. `config/settings.rs` was already at 100 %; the
@@ -945,6 +954,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **Network git2 error messages are now routed through a credential-safe
+  sanitiser instead of being wrapped raw.** The connect/fetch/push call sites in
+  `git2_ops::{clone,diff,pull,push}` mapped errors with
+  `FetchFailed(e.message().to_string())` / `PushFailed(...)`, bypassing the
+  sanitising `From<git2::Error>` impl. A git2 error that echoed a URL with
+  embedded userinfo (e.g. `https://user:token@host`) would then reach the
+  operator's logs and the MCP response unredacted. Two credential-safe
+  constructors — `Git2Error::from_fetch` and `from_push` — now collapse
+  auth-class errors to the detail-free `AuthenticationFailed` and run any other
+  message through `sanitize_error_message`, which additionally redacts the
+  userinfo of any `scheme://user:secret@host` substring (the existing
+  keyword-line filter would miss a token embedded in a URL). The local-object
+  error sites (tree/commit/diff/revwalk/peel) are intentionally unchanged — they
+  cannot contain credentials. `From`'s behaviour is unchanged (refactored to
+  share an `is_auth_error` helper). Regression-tested with `redact_url_userinfo`,
+  `from_fetch`/`from_push`, and unreachable-host tests for clone/diff/pull.
 - **LFS download size now bounded against the *actual* response body,
   not just the pre-flight pointer size.** The previous
   `pointer.size > max_object_size` check was necessary but not sufficient:

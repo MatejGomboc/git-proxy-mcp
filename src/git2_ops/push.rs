@@ -23,7 +23,7 @@ use tempfile::TempDir;
 use tracing::{debug, info, warn};
 
 use super::auth::{create_callbacks, validate_url};
-use super::error::Git2Error;
+use super::error::{sanitize_error_message, Git2Error};
 use crate::util::sanitize_for_log;
 
 /// Result of a successful push operation.
@@ -200,9 +200,12 @@ fn push_to_remote(
         "pushing to remote"
     );
 
-    let mut remote = repo
-        .remote_anonymous(remote_url)
-        .map_err(|e| Git2Error::PushFailed(format!("failed to create remote: {e}")))?;
+    let mut remote = repo.remote_anonymous(remote_url).map_err(|e| {
+        Git2Error::PushFailed(format!(
+            "failed to create remote: {}",
+            sanitize_error_message(e.message())
+        ))
+    })?;
 
     let callbacks = create_callbacks();
 
@@ -227,7 +230,7 @@ fn push_to_remote(
 
     remote
         .push(&[&refspec], Some(&mut push_opts))
-        .map_err(|e| Git2Error::PushFailed(e.message().to_string()))?;
+        .map_err(|e| Git2Error::from_push(&e))?;
 
     debug!("push complete");
     Ok(())
