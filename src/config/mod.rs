@@ -7,7 +7,9 @@
 //!
 //! The MCP server does NOT store credentials. It relies on the user's
 //! existing Git configuration (credential helpers, SSH agent, etc.).
-//! The config file only contains security and logging settings.
+//! The config file holds only non-secret operational settings — git identity,
+//! security guards, logging, timeouts, limits, rate limits, proxy, session
+//! management, LFS, and submodule options.
 //!
 //! # Configuration File Locations
 //!
@@ -57,8 +59,8 @@ pub fn default_config_path() -> Option<PathBuf> {
 /// Returns an error if:
 /// - The configuration file cannot be found
 /// - The file cannot be read
-/// - The JSON is malformed
-/// - Required fields are missing or invalid
+/// - The JSON is malformed (unknown or mistyped fields are rejected)
+/// - A configured value is out of range (see [`Config::validate`])
 pub fn load_config(path: Option<&Path>) -> Result<Config, ConfigError> {
     let config_path = match path {
         Some(p) => p.to_path_buf(),
