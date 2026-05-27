@@ -1138,10 +1138,13 @@ impl McpServer {
             return ToolCallResult::error(reason.to_string());
         }
 
-        // Check branch guard (protected branches)
+        // Check branch guard (block force pushes to protected branches). The
+        // server knows the branch and force flag directly, so it uses the
+        // structured check rather than the CLI-arg form (which can't see the
+        // force flag from a lone branch name).
         if let Some(reason) = self
             .branch_guard
-            .check("push", std::slice::from_ref(&args.branch))
+            .check_force_push(&args.branch, args.force)
             .reason()
         {
             self.audit_logger.log_silent(&AuditEvent::repo_push_blocked(

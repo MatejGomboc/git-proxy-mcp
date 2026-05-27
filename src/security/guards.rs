@@ -60,6 +60,50 @@ pub trait SecurityGuard {
     fn check(&self, command: &str, args: &[String]) -> SecurityCheckResult;
 }
 
+/// Matches `text` against a `*`-wildcard `pattern`.
+///
+/// Each `*` matches any (possibly empty) run of characters; the pattern is
+/// anchored at both ends (no implicit leading/trailing wildcard). Supports any
+/// number of `*`. The cursor only advances past a substring just matched within
+/// `text`, so slicing stays on UTF-8 boundaries. Shared by [`RepoFilter`] (repo
+/// URL patterns) and [`BranchGuard`] (protected-branch patterns) so both behave
+/// alike.
+fn wildcard_match(text: &str, pattern: &str) -> bool {
+    let mut segments = pattern.split('*').peekable();
+    // `str::split` always yields at least one segment.
+    let first = segments.next().unwrap_or("");
+    let Some(mut rest) = text.strip_prefix(first) else {
+        return false;
+    };
+    while let Some(segment) = segments.next() {
+        if segments.peek().is_none() {
+            // The segment after the final `*` must be a suffix of what remains.
+            return rest.ends_with(segment);
+        }
+        // A middle segment must occur in the remaining text; consume up to and
+        // including its first occurrence.
+        match rest.find(segment) {
+            Some(idx) => rest = &rest[idx + segment.len()..],
+            None => return false,
+        }
+    }
+    // Reached only when the pattern had no `*` (callers guard against that);
+    // then the prefix had to consume the whole string.
+    rest.is_empty()
+}
+
+/// Returns `true` if a `git push` argument vector requests a force push, via
+/// `-f`, `--force`, or `--force-with-lease[=<ref>]`. Shared by [`BranchGuard`]
+/// and [`PushGuard`] so both recognise the same flags.
+fn is_force_push(args: &[String]) -> bool {
+    args.iter().any(|a| {
+        a == "-f"
+            || a == "--force"
+            || a == "--force-with-lease"
+            || a.starts_with("--force-with-lease=")
+    })
+}
+
 /// Guard that protects specific branches from modifications.
 #[derive(Debug, Clone)]
 pub struct BranchGuard {
@@ -105,16 +149,38 @@ impl BranchGuard {
             return true;
         }
 
-        // Check for wildcard patterns (e.g., "release/*")
+        // Wildcard patterns (e.g. "release/*", "*/hotfix"). Shares the matcher
+        // with RepoFilter so branch and repo patterns behave consistently;
+        // previously only a trailing `*` was honoured.
         for pattern in &self.protected_branches {
-            if let Some(prefix) = pattern.strip_suffix('*') {
-                if branch.starts_with(prefix) {
-                    return true;
-                }
+            if pattern.contains('*') && wildcard_match(branch, pattern) {
+                return true;
             }
         }
 
         false
+    }
+
+    /// Checks a push against the protected-branch policy.
+    ///
+    /// Returns [`SecurityCheckResult::Blocked`] when `is_force` is true and
+    /// `branch` is protected (a force push to a protected branch); normal,
+    /// non-force pushes are always allowed by this guard.
+    ///
+    /// This is the structured entry point the MCP server uses — it knows the
+    /// target branch and force flag directly and does not shell out to `git`,
+    /// so it cannot rely on the CLI-arg parsing in [`SecurityGuard::check`]
+    /// (which expects a full `git push` argument vector). The `check`
+    /// implementation delegates here once it has parsed the branch and flag.
+    #[must_use]
+    pub fn check_force_push(&self, branch: &str, is_force: bool) -> SecurityCheckResult {
+        if is_force && self.is_protected(branch) {
+            SecurityCheckResult::Blocked {
+                reason: format!("Cannot force push to protected branch '{branch}'"),
+            }
+        } else {
+            SecurityCheckResult::Allowed
+        }
     }
 
     /// Extracts branch name from command arguments.
@@ -188,19 +254,11 @@ impl SecurityGuard for BranchGuard {
             return SecurityCheckResult::Allowed;
         }
 
-        // For push, check the target branch
+        // For push, block a force push to a protected branch (delegating to the
+        // structured `check_force_push` so the CLI and server paths share logic).
         if command == "push" {
             if let Some(branch) = Self::extract_branch_from_args(command, args) {
-                // Check for force push to protected branch
-                let is_force = args
-                    .iter()
-                    .any(|a| a == "-f" || a == "--force" || a == "--force-with-lease");
-
-                if is_force && self.is_protected(&branch) {
-                    return SecurityCheckResult::Blocked {
-                        reason: format!("Cannot force push to protected branch '{branch}'"),
-                    };
-                }
+                return self.check_force_push(&branch, is_force_push(args));
             }
         }
 
@@ -263,12 +321,7 @@ impl SecurityGuard for PushGuard {
         }
 
         // Check for force push flags
-        let is_force = args.iter().any(|a| {
-            a == "-f"
-                || a == "--force"
-                || a == "--force-with-lease"
-                || a.starts_with("--force-with-lease=")
-        });
+        let is_force = is_force_push(args);
 
         if !is_force {
             return SecurityCheckResult::Allowed;
@@ -396,9 +449,15 @@ impl RepoFilter {
         if let Some(rest) = normalised.strip_prefix("git@") {
             // Replace first : with / (separates host from path in SSH URLs)
             normalised = rest.replacen(':', "/", 1);
-        } else if let Some((_creds, rest)) = normalised.split_once('@') {
-            // Remove credentials if present (user:pass@host format)
-            normalised = rest.to_string();
+        } else {
+            // Remove credentials (user[:pass]@) only when the `@` is in the
+            // authority (before the first `/`), not when it appears in the path
+            // — otherwise a URL like `host/a@b/c` would lose its host and could
+            // slip past a blocklist.
+            let authority_end = normalised.find('/').unwrap_or(normalised.len());
+            if let Some(at) = normalised[..authority_end].rfind('@') {
+                normalised = normalised[at + 1..].to_string();
+            }
         }
 
         // Remove .git suffix (case-insensitive, UTF-8 safe)
@@ -423,16 +482,13 @@ impl RepoFilter {
             return true;
         }
 
-        // Wildcard matching
+        // Wildcard matching — each `*` matches any (possibly empty) run of
+        // characters, anchored at both ends. Handles any number of `*`; the
+        // previous implementation only matched a single `*` (`parts.len() == 2`)
+        // and silently fell through for multi-`*` patterns, so a blocklist entry
+        // such as `github.com/*/secret-*` never matched and never blocked.
         if normalised_pattern.contains('*') {
-            let parts: Vec<&str> = normalised_pattern.split('*').collect();
-
-            if parts.len() == 2 {
-                let prefix = parts[0];
-                let suffix = parts[1];
-
-                return url.starts_with(prefix) && url.ends_with(suffix);
-            }
+            return wildcard_match(url, &normalised_pattern);
         }
 
         // Prefix matching (e.g., "github.com/org" matches "github.com/org/repo")
@@ -451,7 +507,7 @@ impl RepoFilter {
                 // clone <url> [directory]
                 args.first().cloned()
             }
-            "push" | "pull" | "fetch" | "ls-remote" => {
+            "push" | "pull" | "fetch" | "ls-remote" | "diff" => {
                 // First non-flag argument might be the remote
                 args.iter().find(|a| !a.starts_with('-')).cloned()
             }
@@ -476,8 +532,18 @@ impl Default for RepoFilter {
 
 impl SecurityGuard for RepoFilter {
     fn check(&self, command: &str, args: &[String]) -> SecurityCheckResult {
-        // Only check commands that access remote repositories
-        let remote_commands = ["clone", "push", "pull", "fetch", "ls-remote", "remote"];
+        // Only check commands that access remote repositories. `diff` is
+        // included because `repo_diff` fetches the remote before diffing, so it
+        // must be subject to the same allow/blocklist as clone/pull/fetch.
+        let remote_commands = [
+            "clone",
+            "push",
+            "pull",
+            "fetch",
+            "ls-remote",
+            "remote",
+            "diff",
+        ];
 
         if !remote_commands.contains(&command) {
             return SecurityCheckResult::Allowed;
@@ -692,5 +758,151 @@ mod tests {
         assert!(!blocked.is_allowed());
         assert!(blocked.is_blocked());
         assert_eq!(blocked.reason(), Some("test"));
+    }
+
+    #[test]
+    fn branch_guard_check_force_push_blocks_protected() {
+        let guard = BranchGuard::with_defaults();
+        // Force push to a protected branch is blocked — this is what the MCP
+        // server relies on, independent of the global force-push setting.
+        assert!(guard.check_force_push("main", true).is_blocked());
+        // Force push to a non-protected branch is allowed by this guard.
+        assert!(guard.check_force_push("feature/x", true).is_allowed());
+        // A normal (non-force) push to a protected branch is allowed here:
+        // protected branches block force pushes and deletions, not all pushes.
+        assert!(guard.check_force_push("main", false).is_allowed());
+    }
+
+    #[test]
+    fn repo_filter_blocks_diff_command() {
+        // `repo_diff` fetches the remote, so the allow/blocklist must apply to
+        // the `diff` command too — it was previously unrecognised and bypassed
+        // the filter entirely.
+        let mut filter = RepoFilter::blocklist_mode();
+        filter.block("github.com/blocked/repo");
+
+        assert!(filter
+            .check("diff", &["https://github.com/blocked/repo.git".to_string()])
+            .is_blocked());
+        assert!(filter
+            .check("diff", &["https://github.com/ok/repo.git".to_string()])
+            .is_allowed());
+    }
+
+    #[test]
+    fn repo_filter_diff_respects_allowlist() {
+        let mut filter = RepoFilter::allowlist_mode();
+        filter.allow("github.com/myorg/*");
+        assert!(filter
+            .check("diff", &["https://github.com/myorg/repo.git".to_string()])
+            .is_allowed());
+        assert!(filter
+            .check("diff", &["https://github.com/other/repo.git".to_string()])
+            .is_blocked());
+    }
+
+    #[test]
+    fn repo_filter_multi_wildcard_pattern() {
+        // A pattern with more than one `*` must match. Previously it fell
+        // through to a literal prefix-match and never matched, so the block
+        // silently did nothing.
+        let mut filter = RepoFilter::blocklist_mode();
+        filter.block("github.com/*/secret-*");
+
+        assert!(!filter.is_allowed("https://github.com/org/secret-data.git"));
+        assert!(!filter.is_allowed("https://github.com/team/secret-keys"));
+        // Allowed: the middle and trailing segments aren't both present.
+        assert!(filter.is_allowed("https://github.com/org/public.git"));
+        assert!(filter.is_allowed("https://github.com/org/data-secret.git"));
+    }
+
+    #[test]
+    fn repo_filter_leading_and_trailing_wildcards() {
+        // Leading `*` (pure suffix match) and trailing `*` (pure prefix match).
+        let mut filter = RepoFilter::blocklist_mode();
+        filter.block("*/internal-repo");
+        filter.block("github.com/secret/*");
+
+        assert!(!filter.is_allowed("https://github.com/org/internal-repo.git"));
+        assert!(!filter.is_allowed("https://github.com/secret/anything.git"));
+        assert!(filter.is_allowed("https://github.com/org/public-repo.git"));
+    }
+
+    #[test]
+    fn wildcard_match_covers_all_positions() {
+        // Single `*` in the middle (matches any run, including empty).
+        assert!(wildcard_match("abc", "a*c"));
+        assert!(wildcard_match("aXYZc", "a*c"));
+        assert!(wildcard_match("ac", "a*c"));
+        assert!(!wildcard_match("abd", "a*c"));
+        // Multiple `*` — middle segments must appear in order.
+        assert!(wildcard_match("aXbYc", "a*b*c"));
+        assert!(!wildcard_match("aXc", "a*b*c"));
+        // Leading `*` (pure suffix) and trailing `*` (pure prefix).
+        assert!(wildcard_match("anything", "*"));
+        assert!(wildcard_match("the-end", "*end"));
+        assert!(!wildcard_match("the-end-x", "*end"));
+        assert!(wildcard_match("start-here", "start*"));
+        assert!(!wildcard_match("nope", "start*"));
+        // No `*`: the prefix must consume the whole string (exact match) — the
+        // post-loop fall-through. `matches_pattern` never calls this path, but
+        // the helper handles it correctly.
+        assert!(wildcard_match("exact", "exact"));
+        assert!(!wildcard_match("exactly", "exact"));
+    }
+
+    #[test]
+    fn branch_guard_protects_non_suffix_wildcard() {
+        // Branch protection now honours `*` anywhere in the pattern (previously
+        // only a trailing `*`), matching RepoFilter's behaviour.
+        let mut guard = BranchGuard::new(std::iter::empty::<String>());
+        guard.protect("*/hotfix");
+        assert!(guard.is_protected("release/hotfix"));
+        assert!(guard.is_protected("team/hotfix"));
+        assert!(!guard.is_protected("hotfix")); // no leading "<segment>/"
+        assert!(!guard.is_protected("release/feature"));
+    }
+
+    #[test]
+    fn branch_guard_detects_force_with_lease_value() {
+        // `--force-with-lease=<ref>` must be recognised as a force push.
+        // Previously BranchGuard missed it (it only matched the bare flag),
+        // even though PushGuard caught it.
+        let guard = BranchGuard::with_defaults();
+        let result = guard.check(
+            "push",
+            &[
+                "--force-with-lease=origin/main".to_string(),
+                "origin".to_string(),
+                "main".to_string(),
+            ],
+        );
+        assert!(result.is_blocked());
+    }
+
+    #[test]
+    fn push_guard_detects_force_with_lease_value() {
+        let guard = PushGuard::block_force_push();
+        let result = guard.check(
+            "push",
+            &["--force-with-lease=abc".to_string(), "origin".to_string()],
+        );
+        assert!(result.is_blocked());
+    }
+
+    #[test]
+    fn repo_filter_strips_credentials_only_in_authority() {
+        let mut filter = RepoFilter::blocklist_mode();
+        filter.block("github.com/secret");
+
+        // A repo under the blocked path with a later `@` in the path must still
+        // be blocked — previously `normalise_url` cut everything before the
+        // first `@`, dropping the host and org and bypassing the block.
+        assert!(!filter.is_allowed("https://github.com/secret/sub@x/y.git"));
+        // Real credentials in the authority are still stripped, so the block
+        // continues to apply.
+        assert!(!filter.is_allowed("https://user:tok@github.com/secret/repo.git"));
+        // A genuinely different repo is unaffected.
+        assert!(filter.is_allowed("https://github.com/public/repo.git"));
     }
 }
