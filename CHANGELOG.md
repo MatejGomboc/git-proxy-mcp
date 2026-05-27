@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`git2_ops::pull` fetch/delta-path coverage.** The body of `pull_changes`
+  after the fetch (commit resolution, up-to-date check, the change-type
+  classification loop, diff formatting, tar archiving) was untested. Extracted a
+  private `pull_changes_inner` past `validate_url` and drove it against a local
+  `file://` remote: a multi-change pull (added/modified/deleted + a detected
+  rename, with stats and `files_archive`), the up-to-date short-circuit, and the
+  invalid/absent `since_commit` error paths. `pull.rs` line coverage rose from
+  53.35 % to 91.97 %.
 - **`git2_ops::diff` fetch/diff-path coverage.** The body of `generate_diff`
   after the network fetch (commit resolution, tree diff, stats, patch
   formatting) was untested. Extracted a private `generate_diff_inner` past
@@ -467,6 +475,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`repo_pull` never detected renames, so a renamed file was reported as a
+  delete + an add with no `old_path`.** `pull_changes` ran `diff_tree_to_tree`
+  but never called `Diff::find_similar`, which is what actually coalesces a
+  delete/add pair into a rename — so the `Renamed` match arm and
+  `ChangedFile::old_path` were dead, and `stats.files_changed` double-counted a
+  rename as two files. `find_similar` is now run before the deltas and stats are
+  read, so renames (and copies) are reported with their old path and counted
+  once. Regression-tested by
+  `pull_changes_inner_reports_changes_and_detects_rename`.
 - **`repo_diff` could not resolve a short (abbreviated) commit SHA** despite
   documenting "Short SHA (minimum 4 hex chars)" support. `resolve_commit` tried
   `Oid::from_str` first and returned on success — but `Oid::from_str` *zero-pads*
