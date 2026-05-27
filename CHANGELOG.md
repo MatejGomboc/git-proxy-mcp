@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`git2_ops::diff` fetch/diff-path coverage.** The body of `generate_diff`
+  after the network fetch (commit resolution, tree diff, stats, patch
+  formatting) was untested. Extracted a private `generate_diff_inner` past
+  `validate_url` and drove it against a local `file://` remote with two commits:
+  the full diff (modified + added file, stats, full base/head SHAs), tag-ref
+  resolution, a missing-commit error, and a nonexistent-remote error. `diff.rs`
+  line coverage rose from 70.56 % to 90.88 %.
 - **`git2_ops::clone` fetch-path coverage.** `fetch_bare`'s body was untested
   (only `decode_default_branch` and the `validate_url` rejection were covered).
   Extracted a private `fetch_bare_inner` past the URL validation so tests drive
@@ -460,6 +467,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`repo_diff` could not resolve a short (abbreviated) commit SHA** despite
+  documenting "Short SHA (minimum 4 hex chars)" support. `resolve_commit` tried
+  `Oid::from_str` first and returned on success — but `Oid::from_str` *zero-pads*
+  a short hex string into a bogus full OID (e.g. `617b10e692` →
+  `617b10e692000…000`) rather than resolving the abbreviation, so it never
+  reached the `revparse_single` call that actually resolves short SHAs against
+  the repo. `find_commit` then failed with a misleading "commit not found". The
+  direct-OID fast path is now taken only for a full 40-char SHA; anything shorter
+  (and branch/tag/`HEAD~N` refs) goes through `revparse_single`. Regression-tested
+  by `resolve_commit_short_sha`.
 - **`repo_refs` reported a non-deterministic default branch when several
   branches shared the `HEAD` commit.** `list_remote_refs` derived
   `default_branch` by scanning the branch list for the first entry whose OID

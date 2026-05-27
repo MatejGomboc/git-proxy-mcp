@@ -93,6 +93,19 @@ pub fn generate_diff(
     // Validate URL
     validate_url(url)?;
 
+    generate_diff_inner(url, base_commit, head_commit, proxy_url)
+}
+
+/// Fetches the repo and diffs `base_commit`..`head_commit` — the body of
+/// [`generate_diff`] after URL validation. Split out so tests can drive the
+/// fetch/resolve/diff path against a local `file://` remote; [`generate_diff`]
+/// still rejects `file://` via [`validate_url`] before delegating here.
+fn generate_diff_inner(
+    url: &str,
+    base_commit: &str,
+    head_commit: &str,
+    proxy_url: Option<&str>,
+) -> Result<DiffResult, Git2Error> {
     // Create temp directory for bare repo
     let temp_dir = TempDir::new().map_err(Git2Error::TempDirFailed)?;
 
@@ -228,12 +241,20 @@ pub fn generate_diff(
 /// - Branch names (looks up refs/heads/...)
 /// - Tag names (looks up refs/tags/...)
 fn resolve_commit(repo: &Repository, reference: &str) -> Result<Oid, Git2Error> {
-    // Try as direct OID first (full or short SHA)
-    if let Ok(oid) = Oid::from_str(reference) {
-        return Ok(oid);
+    // Try as a direct OID, but only for a full-length (40-char) SHA. A shorter
+    // hex string must NOT take this path: `Oid::from_str` zero-pads the missing
+    // nibbles into a bogus OID (e.g. "abc1" -> abc1000…0) rather than resolving
+    // the abbreviation, so it would never reach the `revparse_single` below
+    // (which does resolve short SHAs against the repo). A full SHA is parsed
+    // directly because the object may not be present yet — the caller verifies
+    // existence via `find_commit`.
+    if reference.len() == 40 {
+        if let Ok(oid) = Oid::from_str(reference) {
+            return Ok(oid);
+        }
     }
 
-    // Try revparse (handles branch names, tags, HEAD~N, etc.)
+    // Try revparse (handles full/abbreviated SHAs, branch names, tags, HEAD~N)
     if let Ok(obj) = repo.revparse_single(reference) {
         if let Some(commit) = obj.as_commit() {
             return Ok(commit.id());
@@ -425,6 +446,86 @@ mod tests {
         let (temp, _, _) = build_test_repo_with_two_commits();
         let repo = Repository::open_bare(temp.path()).unwrap();
         let result = resolve_commit(&repo, "not-a-sha-or-anything");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn resolve_commit_short_sha() {
+        let (temp, _, oid2) = build_test_repo_with_two_commits();
+        let repo = Repository::open_bare(temp.path()).unwrap();
+        let short = &oid2.to_string()[..10];
+        let resolved = resolve_commit(&repo, short).unwrap();
+        assert_eq!(
+            resolved, oid2,
+            "short SHA should resolve to the full commit"
+        );
+    }
+
+    /// Builds a `file://` URL for a local path (Windows-friendly).
+    fn local_file_url(path: &std::path::Path) -> String {
+        let raw = path.display().to_string();
+        if cfg!(windows) {
+            format!("file:///{}", raw.replace('\\', "/"))
+        } else {
+            format!("file://{raw}")
+        }
+    }
+
+    #[test]
+    fn generate_diff_inner_diffs_two_commits() {
+        // Drives the whole fetch/resolve/diff/format body against a local
+        // remote (bypassing validate_url's file:// rejection via the inner fn).
+        let (source, oid1, oid2) = build_test_repo_with_two_commits();
+        let result = generate_diff_inner(
+            &local_file_url(source.path()),
+            &oid1.to_string(),
+            &oid2.to_string(),
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(result.base_commit, oid1.to_string());
+        assert_eq!(result.head_commit, oid2.to_string());
+        // commit1 -> commit2: README.md modified + main.rs added.
+        assert_eq!(result.stats.files_changed, 2);
+        assert!(result.diff.contains("main.rs"), "diff: {}", result.diff);
+        assert!(result.diff.contains("# Test (updated)"));
+    }
+
+    #[test]
+    fn generate_diff_inner_resolves_tag_ref() {
+        // head given as a tag name exercises resolve_commit's revparse/tag path
+        // inside the fetch/diff flow.
+        let (source, oid1, oid2) = build_test_repo_with_two_commits();
+        let result = generate_diff_inner(
+            &local_file_url(source.path()),
+            &oid1.to_string(),
+            "v1.0",
+            None,
+        )
+        .unwrap();
+        assert_eq!(result.head_commit, oid2.to_string());
+    }
+
+    #[test]
+    fn generate_diff_inner_errors_on_missing_commit() {
+        // A well-formed but absent SHA resolves (Oid::from_str) yet isn't in the
+        // fetched repo, so find_commit fails with RefNotFound.
+        let (source, _, oid2) = build_test_repo_with_two_commits();
+        let result = generate_diff_inner(
+            &local_file_url(source.path()),
+            "0000000000000000000000000000000000000000",
+            &oid2.to_string(),
+            None,
+        );
+        assert!(matches!(result, Err(Git2Error::RefNotFound(_))));
+    }
+
+    #[test]
+    fn generate_diff_inner_errors_on_nonexistent_local_remote() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let missing = tmp.path().join("no-such-repo");
+        let result = generate_diff_inner(&local_file_url(&missing), "abc", "def", None);
         assert!(result.is_err());
     }
 }
