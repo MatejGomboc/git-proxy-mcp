@@ -429,6 +429,14 @@ mod tests {
     }
 
     #[test]
+    fn rate_limiter_default_impl_delegates_to_ai_defaults() {
+        // The Default impl just forwards to default_for_ai().
+        let limiter = RateLimiter::default();
+        assert_eq!(limiter.max_burst, 20);
+        assert!((limiter.refill_rate - 5.0).abs() < 0.01);
+    }
+
+    #[test]
     fn block_rate_with_no_operations() {
         let limiter = RateLimiter::new(10, 1.0);
         let stats = limiter.stats();
