@@ -55,29 +55,61 @@ pub enum Git2Error {
 
 impl From<git2::Error> for Git2Error {
     fn from(err: git2::Error) -> Self {
-        // Sanitise the error message to avoid credential leakage
-        let message = err.message();
-
-        // Check for authentication-related errors
-        if err.class() == git2::ErrorClass::Ssh
-            || err.class() == git2::ErrorClass::Http
-            || message.contains("auth")
-            || message.contains("credential")
-            || message.contains("password")
-            || message.contains("token")
-        {
-            return Self::AuthenticationFailed;
+        if is_auth_error(&err) {
+            Self::AuthenticationFailed
+        } else {
+            Self::Git2(sanitize_error_message(err.message()))
         }
-
-        // Generic sanitised error
-        Self::Git2(sanitize_error_message(message))
     }
 }
 
-/// Sanitise an error message to remove potential credential information.
-fn sanitize_error_message(message: &str) -> String {
-    // Remove anything that looks like a token or password
-    // This is a basic implementation — extend as needed
+impl Git2Error {
+    /// Credential-safe mapping for a git2 error from a *network* operation
+    /// (`connect` / `fetch`). Auth-class or auth-keyword errors collapse to
+    /// [`Self::AuthenticationFailed`] (no detail leaked); any other message is
+    /// run through [`sanitize_error_message`] and wrapped in
+    /// [`Self::FetchFailed`].
+    ///
+    /// Prefer this over `FetchFailed(err.message().to_string())`, which would
+    /// let a credential-bearing git2 message (e.g. a URL with embedded
+    /// userinfo) reach logs and the client unmodified.
+    #[must_use]
+    pub(crate) fn from_fetch(err: &git2::Error) -> Self {
+        if is_auth_error(err) {
+            Self::AuthenticationFailed
+        } else {
+            Self::FetchFailed(sanitize_error_message(err.message()))
+        }
+    }
+
+    /// As [`Self::from_fetch`], but non-auth messages are wrapped in
+    /// [`Self::PushFailed`].
+    #[must_use]
+    pub(crate) fn from_push(err: &git2::Error) -> Self {
+        if is_auth_error(err) {
+            Self::AuthenticationFailed
+        } else {
+            Self::PushFailed(sanitize_error_message(err.message()))
+        }
+    }
+}
+
+/// Returns `true` if a git2 error is authentication-related, so its message
+/// must not be surfaced (it may name the credential helper, an SSH key, or an
+/// `Authorization` header).
+fn is_auth_error(err: &git2::Error) -> bool {
+    let message = err.message();
+    matches!(err.class(), git2::ErrorClass::Ssh | git2::ErrorClass::Http)
+        || message.contains("auth")
+        || message.contains("credential")
+        || message.contains("password")
+        || message.contains("token")
+}
+
+/// Sanitise an error message to remove potential credential information: drops
+/// whole lines naming a secret keyword, and redacts the userinfo of any
+/// `scheme://user:secret@host` URL the message happened to echo.
+pub(crate) fn sanitize_error_message(message: &str) -> String {
     let sanitized = message
         .lines()
         .filter(|line| {
@@ -88,6 +120,7 @@ fn sanitize_error_message(message: &str) -> String {
                 && !lower.contains("bearer")
                 && !lower.contains("authorization")
         })
+        .map(redact_url_userinfo)
         .collect::<Vec<_>>()
         .join(" ");
 
@@ -96,6 +129,32 @@ fn sanitize_error_message(message: &str) -> String {
     } else {
         sanitized
     }
+}
+
+/// Replace the userinfo of any `scheme://userinfo@host` substring with `***`,
+/// so credentials embedded in a URL that a git2 error echoed never survive.
+fn redact_url_userinfo(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut remaining = text;
+    while let Some(idx) = remaining.find("://") {
+        let scheme_end = idx + 3;
+        out.push_str(&remaining[..scheme_end]);
+        let after = &remaining[scheme_end..];
+        // The authority ends at the first '/', '?', '#', or whitespace.
+        let auth_end = after
+            .find(|c: char| matches!(c, '/' | '?' | '#') || c.is_whitespace())
+            .unwrap_or(after.len());
+        let authority = &after[..auth_end];
+        if let Some(at) = authority.rfind('@') {
+            out.push_str("***");
+            out.push_str(&authority[at..]);
+        } else {
+            out.push_str(authority);
+        }
+        remaining = &after[auth_end..];
+    }
+    out.push_str(remaining);
+    out
 }
 
 #[cfg(test)]
@@ -266,5 +325,111 @@ mod tests {
             }
             other => panic!("expected TempDirFailed, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn redact_url_userinfo_strips_credentials() {
+        let redacted =
+            redact_url_userinfo("unable to access 'https://user:ghp_secret@github.com/o/r.git/'");
+        assert!(!redacted.contains("ghp_secret"));
+        assert!(!redacted.contains("user:"));
+        assert!(redacted.contains("***@github.com"));
+        assert!(redacted.contains("github.com/o/r.git"));
+    }
+
+    #[test]
+    fn redact_url_userinfo_leaves_clean_url_untouched() {
+        let text = "failed to connect to https://github.com/o/r.git";
+        assert_eq!(redact_url_userinfo(text), text);
+    }
+
+    #[test]
+    fn redact_url_userinfo_handles_text_without_url() {
+        assert_eq!(redact_url_userinfo("object not found"), "object not found");
+    }
+
+    #[test]
+    fn redact_url_userinfo_redacts_ssh_scheme_userinfo() {
+        let redacted = redact_url_userinfo("ssh://git:tok@example.com:22/repo");
+        assert!(!redacted.contains("tok"));
+        assert!(redacted.contains("***@example.com:22/repo"));
+    }
+
+    #[test]
+    fn redact_url_userinfo_handles_multiple_urls() {
+        let redacted = redact_url_userinfo("from https://a:b@h1/x to https://c:d@h2/y");
+        assert!(!redacted.contains("a:b"));
+        assert!(!redacted.contains("c:d"));
+        assert_eq!(redacted.matches("***@").count(), 2);
+    }
+
+    #[test]
+    fn sanitize_error_message_redacts_embedded_url_credentials() {
+        // The keyword filter would NOT catch a token embedded in a URL; the
+        // userinfo redaction does.
+        let sanitized =
+            sanitize_error_message("unable to access https://u:ghp_x@github.com/o/r.git");
+        assert!(!sanitized.contains("ghp_x"));
+        assert!(sanitized.contains("***@github.com"));
+    }
+
+    #[test]
+    fn from_fetch_auth_class_collapses_to_authentication_failed() {
+        let err = git2::Error::new(git2::ErrorCode::Auth, git2::ErrorClass::Http, "401");
+        assert!(matches!(
+            Git2Error::from_fetch(&err),
+            Git2Error::AuthenticationFailed
+        ));
+    }
+
+    #[test]
+    fn from_fetch_non_auth_is_sanitised_fetch_failed() {
+        let err = git2::Error::new(
+            git2::ErrorCode::GenericError,
+            git2::ErrorClass::Net,
+            "connection refused",
+        );
+        match Git2Error::from_fetch(&err) {
+            Git2Error::FetchFailed(msg) => assert!(msg.contains("connection refused")),
+            other => panic!("expected FetchFailed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn from_fetch_redacts_url_credentials_in_message() {
+        let err = git2::Error::new(
+            git2::ErrorCode::GenericError,
+            git2::ErrorClass::Net,
+            "failed to resolve https://u:ghp_x@github.com/o/r.git",
+        );
+        match Git2Error::from_fetch(&err) {
+            Git2Error::FetchFailed(msg) => {
+                assert!(!msg.contains("ghp_x"));
+                assert!(msg.contains("***@github.com"));
+            }
+            other => panic!("expected FetchFailed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn from_push_non_auth_is_push_failed() {
+        let err = git2::Error::new(
+            git2::ErrorCode::GenericError,
+            git2::ErrorClass::Net,
+            "remote rejected",
+        );
+        match Git2Error::from_push(&err) {
+            Git2Error::PushFailed(msg) => assert!(msg.contains("remote rejected")),
+            other => panic!("expected PushFailed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn from_push_auth_collapses_to_authentication_failed() {
+        let err = git2::Error::new(git2::ErrorCode::Auth, git2::ErrorClass::Ssh, "auth");
+        assert!(matches!(
+            Git2Error::from_push(&err),
+            Git2Error::AuthenticationFailed
+        ));
     }
 }

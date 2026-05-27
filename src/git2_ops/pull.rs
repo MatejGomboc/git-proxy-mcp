@@ -28,7 +28,7 @@ use tempfile::TempDir;
 use tracing::{debug, info, warn};
 
 use super::auth::{create_callbacks, sanitize_url_for_logging, validate_url};
-use super::error::Git2Error;
+use super::error::{sanitize_error_message, Git2Error};
 
 /// Statistics about the incremental sync.
 #[derive(Debug, Clone, Serialize, Default)]
@@ -156,9 +156,12 @@ pub fn pull_changes(
     // Fetch the branch
     let refspec = format!("+refs/heads/{branch}:refs/heads/{branch}");
     {
-        let mut remote = repo
-            .remote_anonymous(url)
-            .map_err(|e| Git2Error::InitFailed(format!("failed to create remote: {e}")))?;
+        let mut remote = repo.remote_anonymous(url).map_err(|e| {
+            Git2Error::InitFailed(format!(
+                "failed to create remote: {}",
+                sanitize_error_message(e.message())
+            ))
+        })?;
 
         let callbacks = create_callbacks();
         let mut fetch_opts = FetchOptions::new();
@@ -176,7 +179,7 @@ pub fn pull_changes(
 
         remote
             .fetch(&[&refspec], Some(&mut fetch_opts), None)
-            .map_err(|e| Git2Error::FetchFailed(e.message().to_string()))?;
+            .map_err(|e| Git2Error::from_fetch(&e))?;
     }
 
     debug!("fetch complete, looking up commits");
@@ -523,6 +526,14 @@ mod tests {
     fn pull_changes_rejects_file_url() {
         let result = pull_changes("file:///etc/passwd", "main", "abc123", None);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn pull_changes_fails_fast_on_unreachable_host() {
+        // Reaches the fetch (past validate_url) against a host that RSTs
+        // immediately, exercising the credential-safe fetch error mapping.
+        let result = pull_changes("https://127.0.0.1:1/o/r.git", "main", "abc123", None);
+        assert!(matches!(result, Err(Git2Error::FetchFailed(_))));
     }
 
     /// Helper: build a test bare repo with commits, return temp dir + commit OIDs.
