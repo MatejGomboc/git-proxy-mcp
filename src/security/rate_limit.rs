@@ -196,6 +196,16 @@ impl RateLimiter {
     #[allow(clippy::significant_drop_tightening)] // Lock ordering is intentional
     #[allow(clippy::cast_precision_loss)] // max_burst as f64 is acceptable
     fn refill(&self) {
+        // A non-positive refill rate means the bucket never refills: 0.0 is the
+        // supported "burst once" mode, and a negative rate (rejected by config
+        // but accepted by the public constructor) would otherwise *drain*
+        // tokens, since `elapsed * negative` is negative. Skip entirely — this
+        // matches `time_until_available`'s "rate <= 0 means never available"
+        // contract and avoids locking the tokens mutex in the 0.0 mode.
+        if self.refill_rate <= 0.0 {
+            return;
+        }
+
         let now = Instant::now();
 
         let mut last_refill = self.lock_last_refill();
@@ -450,5 +460,19 @@ mod tests {
         assert!(limiter.try_acquire());
 
         assert_eq!(limiter.time_until_available(), Duration::MAX);
+    }
+
+    #[test]
+    fn refill_does_not_drain_tokens_with_negative_rate() {
+        // A negative refill_rate is rejected by Config::validate, but the public
+        // RateLimiter::new accepts it. refill() must not *remove* tokens
+        // (`elapsed * negative` is negative); it no-ops for non-positive rates.
+        let limiter = RateLimiter::new(3, -100.0);
+
+        thread::sleep(Duration::from_millis(20));
+
+        // Tokens stay at the full burst rather than draining below 3.
+        assert!((limiter.available_tokens() - 3.0).abs() < f64::EPSILON);
+        assert!(limiter.would_allow());
     }
 }
