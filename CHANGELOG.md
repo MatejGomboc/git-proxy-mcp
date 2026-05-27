@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`git2_ops::submodule` orchestration coverage.** The recursive fetch
+  orchestration (`fetch_all_submodules` / `fetch_submodules_recursive` /
+  `fetch_submodule`) was only exercised by the Python integration tests. Added
+  unit tests that drive it without slow network: the no-`.gitmodules`,
+  empty-`.gitmodules`, all-entries-filtered and `max_failures == 0` early-exit
+  paths, and an eligible submodule whose URL refuses instantly (`127.0.0.1:1`)
+  to cover the parallel-fetch batch and the failure-handling arm. Plus smaller
+  gaps: an invalid exclude pattern, an unknown `.gitmodules` key, a section
+  header without a closing quote, a nested-path submodule, and `.gitmodules`
+  present as a tree rather than a blob. `submodule.rs` line coverage rose from
+  77.17 % to 94.06 % (the remaining lines are the successful-fetch + child
+  recursion arm, which needs a working remote and stays integration-covered).
 - **`git2_ops::pull` fetch/delta-path coverage.** The body of `pull_changes`
   after the fetch (commit resolution, up-to-date check, the change-type
   classification loop, diff formatting, tar archiving) was untested. Extracted a
