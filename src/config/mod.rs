@@ -7,7 +7,9 @@
 //!
 //! The MCP server does NOT store credentials. It relies on the user's
 //! existing Git configuration (credential helpers, SSH agent, etc.).
-//! The config file only contains security and logging settings.
+//! The config file holds only non-secret operational settings — git identity,
+//! security guards, logging, timeouts, limits, rate limits, proxy, session
+//! management, LFS, and submodule options.
 //!
 //! # Configuration File Locations
 //!
@@ -57,8 +59,8 @@ pub fn default_config_path() -> Option<PathBuf> {
 /// Returns an error if:
 /// - The configuration file cannot be found
 /// - The file cannot be read
-/// - The JSON is malformed
-/// - Required fields are missing or invalid
+/// - The JSON is malformed (unknown or mistyped fields are rejected)
+/// - A configured value is out of range (see [`Config::validate`])
 pub fn load_config(path: Option<&Path>) -> Result<Config, ConfigError> {
     let config_path = match path {
         Some(p) => p.to_path_buf(),
@@ -174,6 +176,22 @@ mod tests {
         std::fs::write(temp.path(), json).unwrap();
         let config = load_config(Some(temp.path())).unwrap();
         assert_eq!(config.timeouts.request_timeout_secs, 60);
+    }
+
+    #[test]
+    fn load_config_rejects_out_of_range_value() {
+        // A value that parses but fails Config::validate must surface as a
+        // ValidationError — proving validation is wired into the load path,
+        // not merely callable in isolation. (The per-field rules themselves are
+        // covered in settings.rs.)
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(temp.path(), r#"{"rate_limits": {"max_burst": 0}}"#).unwrap();
+        let err = load_config(Some(temp.path())).unwrap_err();
+        assert!(
+            matches!(err, ConfigError::ValidationError { .. }),
+            "expected ValidationError, got {err:?}"
+        );
+        assert!(err.to_string().contains("max_burst"));
     }
 
     #[test]

@@ -168,6 +168,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`Config::validate` now range-checks the configuration instead of being a
+  no-op.** Previously every value that parsed was accepted; a handful of
+  out-of-range values then silently broke a subsystem — or panicked. `validate`
+  (run by `load_config` at startup) now rejects, with a `ValidationError` that
+  names the offending field:
+    1. **Zero timeouts** — `timeouts.request_timeout_secs` and the three
+       `lfs.*_timeout_secs`. `Duration::from_secs(0)` makes the corresponding
+       git command or LFS HTTP request fail immediately.
+    2. **`rate_limits.max_burst` of zero** — the token bucket starts empty and
+       never refills past zero, so *every* operation is blocked forever.
+    3. **A non-finite or negative `rate_limits.refill_rate_per_sec`** — this is
+       the one that was not merely a foot-gun: `NaN` reaches
+       `RateLimiter::time_until_available`, whose `Duration::from_secs_f64`
+       **panics** on a non-finite value. The infinities and negatives don't
+       panic but break the token-bucket maths (permanent block, or effectively
+       no throttling). `0.0` is still accepted (the supported "burst once,
+       never refill" mode).
+    4. **Zero session limits** — `sessions.timeout_secs` (sessions expire
+       instantly), `sessions.max_streaming_sessions` and
+       `sessions.max_repo_sessions` (no session can ever be created).
+    5. **An unrecognised `logging.level`** — previously any unknown string
+       silently became `warn`; a mistake such as `"verbose"` or `"warning"`
+       (the level is `warn`, not `warning`) is now rejected with the list of
+       valid levels.
+  Values that the consuming code already handles are deliberately *not*
+  rejected: `submodules.max_concurrent` (clamped to ≥ 1 by the fetcher),
+  `submodules.max_failures` of 0, `lfs.retry_max_attempts` of 0 (the retry loop
+  always makes one attempt), and `lfs.max_object_size` of 0 (every object kept
+  as a pointer). Eight new unit tests cover every rejected and every
+  deliberately-accepted case, and confirm `load_config` surfaces the
+  `ValidationError` (i.e. validation is wired into the load path). `validate` is
+  no longer `const fn` (it now builds error strings); no other API change.
 - **`git2` requirement bumped 0.20.4 → 0.21.0** (cargo-dependencies group).
   0.21 ships two breaking changes that touched this crate:
     1. **`default` features are now empty** (0.20 enabled `ssh` + `https`).
