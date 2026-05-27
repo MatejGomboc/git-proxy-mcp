@@ -1038,6 +1038,103 @@ mod tests {
     }
 
     #[test]
+    fn session_config_defaults() {
+        let config = SessionConfig::default();
+        assert_eq!(config.timeout_secs, 3600);
+        assert_eq!(config.max_streaming_sessions, 10);
+        assert_eq!(config.max_repo_sessions, 100);
+        assert_eq!(config.timeout(), Duration::from_secs(3600));
+    }
+
+    #[test]
+    fn parse_session_config() {
+        let json = r#"{
+            "sessions": {
+                "timeout_secs": 1800,
+                "max_streaming_sessions": 5,
+                "max_repo_sessions": 50
+            }
+        }"#;
+
+        let config: Config = serde_json::from_str(json).unwrap();
+        assert_eq!(config.sessions.timeout_secs, 1800);
+        assert_eq!(config.sessions.max_streaming_sessions, 5);
+        assert_eq!(config.sessions.max_repo_sessions, 50);
+        assert_eq!(config.sessions.timeout(), Duration::from_secs(1800));
+    }
+
+    #[test]
+    fn parse_session_config_partial() {
+        let json = r#"{
+            "sessions": {
+                "timeout_secs": 7200
+            }
+        }"#;
+
+        let config: Config = serde_json::from_str(json).unwrap();
+        assert_eq!(config.sessions.timeout_secs, 7200);
+        // Other fields should use defaults.
+        assert_eq!(config.sessions.max_streaming_sessions, 10);
+        assert_eq!(config.sessions.max_repo_sessions, 100);
+    }
+
+    #[test]
+    fn parse_lfs_config_timeout_fields() {
+        // parse_lfs_config does not set the three HTTP-timeout fields; pin
+        // their parse path explicitly so a rename/regression is caught.
+        let json = r#"{
+            "lfs": {
+                "request_timeout_secs": 120,
+                "connect_timeout_secs": 15,
+                "download_timeout_secs": 900
+            }
+        }"#;
+
+        let config: Config = serde_json::from_str(json).unwrap();
+        assert_eq!(config.lfs.request_timeout_secs, 120);
+        assert_eq!(config.lfs.connect_timeout_secs, 15);
+        assert_eq!(config.lfs.download_timeout_secs, 900);
+        // Untouched fields keep their defaults.
+        assert_eq!(config.lfs.retry_max_attempts, 3);
+    }
+
+    #[test]
+    fn rejects_removed_lfs_max_total_size_field() {
+        // `lfs.max_total_size` was removed (see CHANGELOG [Unreleased]); the
+        // LFS section uses deny_unknown_fields, so a config that still sets it
+        // must be rejected rather than silently ignored.
+        let json = r#"{ "lfs": { "max_total_size": 1024 } }"#;
+        let result: Result<Config, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn rejects_unknown_fields_in_every_subsection() {
+        // deny_unknown_fields is declared on every sub-struct, not just the
+        // top level. A typo'd key in any section must fail loudly.
+        let cases = [
+            r#"{ "git_identity": { "username": "x" } }"#,
+            r#"{ "security": { "allow_forcepush": true } }"#,
+            r#"{ "logging": { "lvl": "info" } }"#,
+            r#"{ "timeouts": { "request_timeout_sec": 1 } }"#,
+            r#"{ "limits": { "max_bytes": 1 } }"#,
+            r#"{ "rate_limits": { "burst": 1 } }"#,
+            r#"{ "proxy": { "host": "x" } }"#,
+            r#"{ "sessions": { "max_sessions": 1 } }"#,
+            r#"{ "lfs": { "retries": 1 } }"#,
+            r#"{ "submodules": { "depth": 1 } }"#,
+        ];
+
+        for json in cases {
+            let result: Result<Config, _> = serde_json::from_str(json);
+            assert!(
+                result.is_err(),
+                "expected unknown field to be rejected: {json}"
+            );
+        }
+    }
+
+    #[test]
     fn parse_full_config_with_lfs_and_submodules() {
         let json = r#"{
             "$schema": "https://json-schema.org/draft/2020-12/schema",

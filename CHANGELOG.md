@@ -9,6 +9,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **9 new `config` regression tests** taking `config/mod.rs` line
+  coverage from 91.40 % to 97.97 % and adding drift guards around the
+  configuration schema. `config/settings.rs` was already at 100 %; the
+  additions there are correctness guards, not coverage:
+    - `load_config_with_directory_path_returns_read_error` — exercises
+      the previously-uncovered `ReadError` arm. A directory passes the
+      `Path::exists()` check but cannot be read as a file, so it must
+      surface as `ReadError`, not `NotFound`.
+    - `load_config_none_resolves_default_path` — covers the `None`-path
+      fallback to the platform default location. It asserts the single
+      environment-independent invariant (the resolved default path is a
+      file or absent, never a directory), so the test itself adds no
+      environment-dependent uncovered arm.
+    - `load_config_parses_shipped_example_config` — asserts the shipped
+      `config/example-config.json` parses against the current `Config`
+      struct, and that every default-valued section matches the code
+      default. Because each section uses `deny_unknown_fields`, this
+      catches drift in either direction (a field added to or removed
+      from the struct or the example, or a default value that changed in
+      only one place).
+    - `session_config_defaults`, `parse_session_config`,
+      `parse_session_config_partial` — `SessionConfig` previously had
+      neither a defaults nor a parse test (every sibling config did);
+      these also pin `SessionConfig::timeout()`.
+    - `parse_lfs_config_timeout_fields` — pins the parse path of the
+      three LFS HTTP-timeout fields, which the existing `parse_lfs_config`
+      test does not set.
+    - `rejects_removed_lfs_max_total_size_field` and
+      `rejects_unknown_fields_in_every_subsection` — confirm
+      `deny_unknown_fields` rejects unknown keys in every sub-struct, not
+      just at the top level. The former guards the removed
+      `lfs.max_total_size` key specifically.
+  The only code left uncovered in `config/mod.rs` is the two-line
+  `ok_or_else` closure that builds the `NotFound` error when
+  `default_config_path()` returns `None` — reachable only when
+  `dirs::home_dir()` returns `None`, which is not portably forceable in
+  a test.
 - **11 new `git2_ops::push::tests` regressions** taking `push.rs` line
   coverage from 34.75 % to 93.04 % (+58.29 pts). The file was the
   worst-covered in scope; only `push_options_default_no_force` and
