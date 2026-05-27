@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`streaming::tar` coverage for previously-untested branches.** New unit
+  tests drive the file-progress callback (`ProgressSender` configured), the
+  `submodule_depth == 0` early skip, and both LFS-client-setup fallbacks
+  (`resolve_lfs` with no `repo_url`, and with a `repo_url` whose scheme
+  `derive_lfs_url` rejects) — none of which need network access. The long-path
+  regression test is noted under Fixed.
 - **`git2_ops::submodule` orchestration coverage.** The recursive fetch
   orchestration (`fetch_all_submodules` / `fetch_submodules_recursive` /
   `fetch_submodule`) was only exercised by the Python integration tests. Added
@@ -204,6 +210,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`streaming::tar` test and doc hygiene** (no behaviour change):
+    1. `is_binary`'s doc-comment claimed its heuristic is "similar to what Git
+       uses internally" — Git's core check is only NUL-in-first-8000-bytes; the
+       30%-non-printable rule is this crate's own and (because UTF-8 multibyte
+       bytes are ≥ 0x80) can misclassify mostly-non-Latin text as binary. The
+       doc now states this accurately.
+    2. `is_binary_exactly_at_threshold` asserted nothing (`let _ = result;`); it
+       now asserts the real boundary behaviour (exactly 30% non-text is treated
+       as text, since the check is `> threshold`, not `>=`).
+    3. `is_binary_accepts_utf8` computed an unused `_utf8` binding; removed.
+    4. `tar_options_default` was fully subsumed by
+       `tar_options_default_has_all_none`; removed the duplicate.
 - **`Config::validate` now range-checks the configuration instead of being a
   no-op.** Previously every value that parsed was accepted; a handful of
   out-of-range values then silently broke a subsystem — or panicked. `validate`
@@ -487,6 +505,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`create_tar_from_tree` silently dropped files whose path was too long for
+  a tar header.** The tar builder set the entry path via `tar::Header::set_path`
+  and then `append`, but `set_path` fails for any path that doesn't fit the
+  ustar 100-byte `name` field (and can't be split across the 155-byte `prefix`
+  at a `/`) — e.g. a single path component longer than 100 bytes. Such files
+  were counted in `skipped_path_too_long` and left out of the archive, so a
+  repository with deep paths (common in `node_modules`, generated code, or
+  deeply nested packages) reached the AI missing files with no error reported.
+  Both the main-tree walk and the submodule walk now use
+  `tar::Builder::append_data`, which emits a GNU long-name (`././@LongLink`)
+  entry for over-long paths — the same approach
+  `git2_ops::pull::create_files_archive` already used. `skipped_path_too_long`
+  now only counts paths that cannot be encoded at all (e.g. an embedded NUL,
+  which a git tree name can never contain). Regression-tested by
+  `create_tar_includes_file_with_long_path`, which archives a 154-character
+  filename and reads it back out of the resulting tar.
+- **Submodule progress never reached 100%.** `write_submodules_to_tar` advanced
+  its `processed_submodules` counter only on the "added files" and "walk failed"
+  arms, so a submodule that walked successfully but contributed no files (empty,
+  or fully removed by the sparse/binary/size filters) advanced neither it nor a
+  result counter — leaving the submodule progress percentage permanently short.
+  The counter is now incremented once per submodule regardless of outcome;
+  `submodules_included` / `submodules_failed` semantics are unchanged.
 - **`repo_pull` never detected renames, so a renamed file was reported as a
   delete + an add with no `old_path`.** `pull_changes` ran `diff_tree_to_tree`
   but never called `Diff::find_similar`, which is what actually coalesces a

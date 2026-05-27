@@ -138,9 +138,14 @@ impl SparseFilter {
 ///
 /// A file is considered binary if:
 /// - It contains null bytes (common in compiled binaries, images, etc.)
-/// - More than 30% of the first 8KB are non-printable characters
+/// - More than 30% of the first 8 KiB are non-printable characters
 ///
-/// This heuristic is similar to what Git uses internally.
+/// The null-byte check mirrors Git's own heuristic (Git scans the first
+/// 8000 bytes for a NUL). The additional non-printable-ratio rule is ours
+/// and is deliberately conservative — because UTF-8 multibyte sequences use
+/// bytes ≥ 0x80, it can misclassify text that is mostly non-Latin (CJK,
+/// Cyrillic, etc.) as binary, so callers that need such files should not set
+/// `exclude_binary`.
 fn is_binary(content: &[u8]) -> bool {
     // Check first 8KB for performance on large files
     let check_len = content.len().min(8192);
@@ -180,7 +185,9 @@ pub struct TarResult {
     pub skipped_binary: usize,
     /// Number of files skipped due to size limit
     pub skipped_too_large: usize,
-    /// Number of files skipped due to path being too long for tar header
+    /// Number of files skipped because their path could not be encoded in a
+    /// tar header (e.g. it contained a NUL byte). Paths that are merely long
+    /// are written via a GNU long-name entry, not skipped.
     pub skipped_path_too_long: usize,
     /// Number of LFS pointers resolved (when `resolve_lfs` is true)
     pub lfs_resolved: usize,
@@ -429,23 +436,30 @@ pub fn create_tar_from_tree_with_options(
 
                         trace!(path = %path, size = content.len(), lfs = is_lfs, "adding file to tar");
 
-                        // Create tar header
+                        // Create tar header. We let `append_data` set the
+                        // path and checksum rather than `Header::set_path` +
+                        // `append`: `append_data` emits a GNU long-name
+                        // (`././@LongLink`) entry for paths too long for the
+                        // 100-byte ustar `name` field, so deep paths are
+                        // archived faithfully instead of being silently
+                        // dropped (`pull.rs::create_files_archive` already
+                        // uses this pattern).
                         let mut header = tar::Header::new_gnu();
-                        if header.set_path(&path).is_err() {
-                            // Path too long for tar header (>100 chars without extension)
-                            debug!(path = %path, "path too long for tar, skipping");
-                            skipped_path_too_long += 1;
-                            return TreeWalkResult::Ok;
-                        }
                         header.set_size(content.len() as u64);
                         // filemode() returns i32, but negative modes are invalid
                         #[allow(clippy::cast_sign_loss)]
                         header.set_mode(entry.filemode() as u32);
-                        header.set_cksum();
 
-                        // Append to tar
-                        if tar_builder.append(&header, content.as_ref()).is_err() {
+                        // Append to tar. The only remaining failure is a path
+                        // that can't be encoded at all (e.g. an embedded NUL,
+                        // which a git tree name can't contain); count it as
+                        // skipped rather than aborting the whole archive.
+                        if tar_builder
+                            .append_data(&mut header, &path, content.as_ref())
+                            .is_err()
+                        {
                             debug!(path = %path, "failed to append to tar, skipping");
+                            skipped_path_too_long += 1;
                             return TreeWalkResult::Ok;
                         }
 
@@ -672,20 +686,19 @@ fn write_submodules_to_tar<W: std::io::Write>(
 
                         trace!(path = %full_path, size = content.len(), "adding submodule file to tar");
 
-                        // Create tar header
+                        // Create tar header — `append_data` handles GNU
+                        // long names, same as the main-tree walk above.
                         let mut header = tar::Header::new_gnu();
-                        if header.set_path(&full_path).is_err() {
-                            debug!(path = %full_path, "submodule path too long for tar");
-                            *skipped_path_too_long += 1;
-                            return TreeWalkResult::Ok;
-                        }
                         header.set_size(content.len() as u64);
                         #[allow(clippy::cast_sign_loss)]
                         header.set_mode(entry.filemode() as u32);
-                        header.set_cksum();
 
-                        if tar_builder.append(&header, content).is_err() {
+                        if tar_builder
+                            .append_data(&mut header, &full_path, content)
+                            .is_err()
+                        {
                             debug!(path = %full_path, "failed to append submodule file");
+                            *skipped_path_too_long += 1;
                             return TreeWalkResult::Ok;
                         }
 
@@ -709,12 +722,16 @@ fn write_submodules_to_tar<W: std::io::Write>(
                 "submodule added to tar"
             );
             *submodules_included += 1;
-            processed_submodules += 1;
         } else if walk_result.is_err() {
             warn!(path = %submodule_path, "failed to walk submodule tree");
             *submodules_failed += 1;
-            processed_submodules += 1;
         }
+
+        // Advance the progress counter once per submodule regardless of
+        // outcome — an empty or fully-filtered submodule (walk OK, zero
+        // files) still counts as processed, so the submodule progress
+        // percentage can reach 100%.
+        processed_submodules += 1;
 
         // Recursively write child submodules
         if !submodule.children.is_empty() {
@@ -883,14 +900,6 @@ mod tests {
     }
 
     #[test]
-    fn tar_options_default() {
-        let opts = TarOptions::default();
-        assert!(opts.sparse_patterns.is_none());
-        assert!(opts.exclude_binary.is_none());
-        assert!(opts.max_file_size.is_none());
-    }
-
-    #[test]
     fn is_binary_detects_null_bytes() {
         // Binary file with null bytes
         let binary = b"some\x00binary\x00content";
@@ -921,14 +930,12 @@ mod tests {
 
     #[test]
     fn is_binary_accepts_utf8() {
-        // UTF-8 text with non-ASCII characters should be treated as binary
-        // (our simple heuristic doesn't handle UTF-8 specially)
-        let _utf8 = "Hello 世界".as_bytes();
-        // UTF-8 multibyte chars have bytes > 127, counted as non-printable
-        // This is a known limitation - we err on the side of caution
-        // For small amounts of UTF-8, it should still pass
+        // UTF-8 multibyte chars have bytes ≥ 0x80, which the heuristic counts
+        // as non-printable — so a file that is *mostly* non-Latin UTF-8 can be
+        // misclassified as binary (a documented limitation). A predominantly
+        // ASCII file with only a little UTF-8 stays under the 30% threshold and
+        // is correctly treated as text.
         let text_with_some_utf8 = b"Hello world with a few UTF-8: \xc3\xa9";
-        // Less than 30% non-printable, should pass
         assert!(!is_binary(text_with_some_utf8));
     }
 
@@ -944,13 +951,16 @@ mod tests {
 
     #[test]
     fn is_binary_exactly_at_threshold() {
-        // 30% non-printable - exactly at threshold (should be binary as >=)
+        // 30 non-text bytes out of 100 is exactly 30%. The implementation uses
+        // `non_text_count > threshold` (strictly greater) with
+        // threshold = 100 * 30 / 100 = 30, so 30 > 30 is false: a sample that
+        // is exactly 30% non-text is classified as TEXT.
         let mut data = vec![0x80u8; 30];
         data.extend(vec![b'a'; 70]);
-        // Implementation uses > 30% so 30% should be text. Test the actual behaviour.
-        let result = is_binary(&data);
-        // Either true or false is acceptable depending on impl, just exercise the path
-        let _ = result;
+        assert!(
+            !is_binary(&data),
+            "exactly 30% non-text must be treated as text (count > threshold, not >=)"
+        );
     }
 
     /// Helper: build a test bare repo and return the path + HEAD commit oid.
@@ -1147,5 +1157,172 @@ mod tests {
             .decode(&encoded)
             .unwrap();
         assert_eq!(decoded, original);
+    }
+
+    /// Decode a gzip+tar archive and return its entry path strings.
+    fn tar_entry_paths(gz: &[u8]) -> Vec<String> {
+        use flate2::read::GzDecoder;
+        let mut archive = tar::Archive::new(GzDecoder::new(gz));
+        archive
+            .entries()
+            .unwrap()
+            .filter_map(|e| {
+                let entry = e.ok()?;
+                let path = entry.path().ok()?;
+                Some(path.to_string_lossy().into_owned())
+            })
+            .collect()
+    }
+
+    #[test]
+    fn create_tar_includes_file_with_long_path() {
+        // A single filename longer than the 100-byte ustar `name` field (and
+        // with no `/` to permit the ustar prefix split) forces the GNU
+        // long-name path. Before the append_data fix, `set_path` failed and
+        // the file was silently counted in `skipped_path_too_long`; now it
+        // must be archived and round-trip out under its full name.
+        let temp = tempfile::TempDir::new().unwrap();
+        let long_name = format!("{}.txt", "a".repeat(150));
+        let commit_oid = {
+            let repo = Repository::init_bare(temp.path()).unwrap();
+            let blob = repo.blob(b"long path content\n").unwrap();
+            let mut tb = repo.treebuilder(None).unwrap();
+            tb.insert(long_name.as_str(), blob, 0o100_644).unwrap();
+            let tree = repo.find_tree(tb.write().unwrap()).unwrap();
+            let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+            repo.commit(Some("HEAD"), &sig, &sig, "long path", &tree, &[])
+                .unwrap()
+        };
+        let repo = open_test_repo(&temp);
+        let result = create_tar_from_tree(&repo, commit_oid).unwrap();
+
+        assert_eq!(result.file_count, 1, "the long-path file must be archived");
+        assert_eq!(
+            result.skipped_path_too_long, 0,
+            "long paths must no longer be skipped"
+        );
+
+        let names = tar_entry_paths(&result.data);
+        assert!(
+            names.iter().any(|n| n == &long_name),
+            "long path not found in archive entries: {names:?}"
+        );
+    }
+
+    #[test]
+    fn create_tar_reports_file_progress_when_sender_configured() {
+        // With a ProgressSender configured, archived files emit FileProcessing
+        // updates (rate-limited, so the first always fires). Without a sender
+        // these `if let Some(...)` branches never run.
+        let (temp, commit_oid) = build_test_repo();
+        let repo = open_test_repo(&temp);
+        let (sender, receiver) = crate::mcp::progress::ProgressSender::new("t".to_string());
+        let opts = TarOptions {
+            progress: Some(sender),
+            ..Default::default()
+        };
+        let result = create_tar_from_tree_with_options(&repo, commit_oid, Some(opts)).unwrap();
+        assert!(result.file_count >= 1);
+
+        let mut file_updates = 0;
+        while let Ok(update) = receiver.try_recv() {
+            if matches!(
+                update,
+                crate::mcp::progress::ProgressUpdate::FileProcessing { .. }
+            ) {
+                file_updates += 1;
+            }
+        }
+        assert!(
+            file_updates >= 1,
+            "expected at least one FileProcessing progress update"
+        );
+    }
+
+    #[test]
+    fn create_tar_skips_submodules_when_depth_zero() {
+        // include_submodules = true but submodule_depth = Some(0) hits the
+        // depth==0 early-skip, so no fetch is attempted (no network) and no
+        // submodules are included.
+        let (temp, commit_oid) = build_test_repo();
+        let repo = open_test_repo(&temp);
+        let opts = TarOptions {
+            include_submodules: Some(true),
+            submodule_depth: Some(0),
+            ..Default::default()
+        };
+        let result = create_tar_from_tree_with_options(&repo, commit_oid, Some(opts)).unwrap();
+        assert_eq!(result.submodules_included, 0);
+        assert_eq!(result.submodules_failed, 0);
+    }
+
+    #[test]
+    fn create_tar_keeps_lfs_pointer_when_resolve_lfs_but_no_repo_url() {
+        // resolve_lfs = true but repo_url = None: the "no repo_url" warn arm
+        // runs, the LFS client stays None, and an LFS pointer blob is archived
+        // verbatim (no network; lfs_resolved stays 0).
+        let temp = tempfile::TempDir::new().unwrap();
+        let pointer = b"version https://git-lfs.github.com/spec/v1\n\
+                        oid sha256:1111111111111111111111111111111111111111111111111111111111111111\n\
+                        size 12\n";
+        let commit_oid = {
+            let repo = Repository::init_bare(temp.path()).unwrap();
+            let blob = repo.blob(pointer).unwrap();
+            let mut tb = repo.treebuilder(None).unwrap();
+            tb.insert("big.bin", blob, 0o100_644).unwrap();
+            let tree = repo.find_tree(tb.write().unwrap()).unwrap();
+            let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+            repo.commit(Some("HEAD"), &sig, &sig, "lfs pointer", &tree, &[])
+                .unwrap()
+        };
+        let repo = open_test_repo(&temp);
+        let opts = TarOptions {
+            resolve_lfs: Some(true),
+            repo_url: None,
+            ..Default::default()
+        };
+        let result = create_tar_from_tree_with_options(&repo, commit_oid, Some(opts)).unwrap();
+        assert_eq!(result.lfs_resolved, 0);
+        assert_eq!(result.lfs_failed, 0);
+        assert_eq!(result.file_count, 1, "pointer file is archived verbatim");
+    }
+
+    #[test]
+    fn create_tar_handles_resolve_lfs_with_unsupported_repo_url() {
+        // resolve_lfs = true with a repo_url whose scheme derive_lfs_url
+        // rejects (ftp://): LfsClient::new errors, the "failed to create LFS
+        // client" warn arm runs, the client stays None, and archiving still
+        // proceeds for the normal files.
+        let (temp, commit_oid) = build_test_repo();
+        let repo = open_test_repo(&temp);
+        let opts = TarOptions {
+            resolve_lfs: Some(true),
+            repo_url: Some("ftp://example.com/repo.git".to_string()),
+            ..Default::default()
+        };
+        let result = create_tar_from_tree_with_options(&repo, commit_oid, Some(opts)).unwrap();
+        assert_eq!(result.lfs_resolved, 0);
+        assert!(result.file_count >= 2);
+    }
+
+    #[test]
+    fn create_tar_with_lfs_client_archives_non_pointer_files_verbatim() {
+        // resolve_lfs = true with a valid https repo_url: the LFS client IS
+        // created (the `Ok(client) => Some(client)` arm), but none of the
+        // blobs are LFS pointers, so `is_lfs_pointer` is false for each and the
+        // Batch API is never called — the files are archived as-is with no
+        // network access. Covers the client-created arm and the
+        // Some(client)-but-not-a-pointer resolution branch.
+        let (temp, commit_oid) = build_test_repo();
+        let repo = open_test_repo(&temp);
+        let opts = TarOptions {
+            resolve_lfs: Some(true),
+            repo_url: Some("https://github.com/owner/repo.git".to_string()),
+            ..Default::default()
+        };
+        let result = create_tar_from_tree_with_options(&repo, commit_oid, Some(opts)).unwrap();
+        assert_eq!(result.lfs_resolved, 0, "no pointers, so nothing resolved");
+        assert_eq!(result.lfs_failed, 0);
+        assert!(result.file_count >= 2, "non-pointer files archived as-is");
     }
 }
