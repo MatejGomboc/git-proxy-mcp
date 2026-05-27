@@ -521,6 +521,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   which a git tree name can never contain). Regression-tested by
   `create_tar_includes_file_with_long_path`, which archives a 154-character
   filename and reads it back out of the resulting tar.
+- **Symlinks were archived with an unreadable mode.** A git symlink is stored
+  as a blob with filemode `0o120000` whose content is the link target; the tar
+  builder passed that filemode straight to `Header::set_mode`, but `0o120000`
+  masks to `0o000` — so the extracted file had no permission bits and the AI
+  couldn't read it. Both walks now go through a shared `append_blob_to_tar`
+  helper that maps the filemode to its permission bits, falling back to `0o644`
+  when there are none (the symlink case), so symlink files extract readable.
+  (They remain regular files containing the target path; writing true symlink
+  entries is deferred — see the PR notes on the extraction path-traversal
+  trade-off.)
 - **Submodule progress never reached 100%.** `write_submodules_to_tar` advanced
   its `processed_submodules` counter only on the "added files" and "walk failed"
   arms, so a submodule that walked successfully but contributed no files (empty,
