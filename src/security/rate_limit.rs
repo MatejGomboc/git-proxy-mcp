@@ -477,4 +477,35 @@ mod tests {
         assert!((limiter.available_tokens() - 3.0).abs() < f64::EPSILON);
         assert!(limiter.would_allow());
     }
+
+    #[test]
+    fn try_acquire_recovers_from_poisoned_tokens_mutex() {
+        let limiter = RateLimiter::new(5, 1.0);
+
+        // Poison the tokens mutex by panicking while holding it. catch_unwind
+        // keeps the deliberate panic on this (output-captured) test thread.
+        let poisoned = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = limiter.tokens.lock().unwrap();
+            panic!("intentionally poisoning the tokens mutex");
+        }));
+        assert!(poisoned.is_err());
+
+        // lock_tokens() must recover via into_inner() rather than propagating
+        // the poison (which would panic on .unwrap()).
+        assert!(limiter.try_acquire());
+    }
+
+    #[test]
+    fn refill_recovers_from_poisoned_last_refill_mutex() {
+        let limiter = RateLimiter::new(5, 10.0);
+
+        let poisoned = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = limiter.last_refill.lock().unwrap();
+            panic!("intentionally poisoning the last_refill mutex");
+        }));
+        assert!(poisoned.is_err());
+
+        // refill() (invoked by try_acquire) must recover the last_refill lock.
+        assert!(limiter.try_acquire());
+    }
 }
