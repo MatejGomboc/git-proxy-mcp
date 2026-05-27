@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`mcp::transport` line-framing coverage.** The read/write paths were only
+  exercised by the Python integration suite because stdin/stdout were hardcoded.
+  Following the testability refactor, new unit tests cover LF / CRLF / EOF /
+  no-trailing-newline / empty-line reads and newline-terminated writes, taking
+  `transport.rs` unit line coverage from 40.86 % to ~78 % (the remainder is the
+  thin stdin/stdout glue, still integration-covered).
+- **`security::rate_limit` poison-recovery coverage.** The mutex poison-recovery
+  arms in `lock_tokens` / `lock_last_refill` (which fall back to `into_inner()`
+  when a thread panicked while holding the lock) had no test. Added unit tests
+  that poison each mutex — panicking while holding the lock, contained with
+  `catch_unwind` on the test thread — and assert the limiter keeps operating.
 - **`streaming::tar` coverage for previously-untested branches.** New unit
   tests drive the file-progress callback (`ProgressSender` configured), the
   `submodule_depth == 0` early skip, and both LFS-client-setup fallbacks
@@ -210,6 +221,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`mcp::transport` line framing refactored for unit-testability; concurrency
+  docs corrected** (no behaviour change):
+    1. The `\n` / `\r\n` stripping and the read/write framing were extracted into
+       a pure `strip_trailing_newline` helper and generic `read_message_line` /
+       `write_message_line` helpers (over any `AsyncBufRead` / `AsyncWrite`), so
+       the framing can be tested without real stdin/stdout. `read_line` and
+       `write_raw` delegate to them.
+    2. The module's "Thread Safety" section claimed reads and writes run on
+       separate tasks for concurrent operation; in fact the server drives a
+       single `StdioTransport` from one `tokio::select!` loop, so reads and
+       writes are sequential on one task. Reworded to describe the real
+       single-task model.
+    3. Documented that `read_line` is intentionally unbounded — `repo_push`
+       sends its bundle inline as base64 (up to the ~1 GiB bundle-size limit),
+       so a per-line length cap would break large pushes.
 - **Security guards now share consistent pattern- and force-push detection.**
   Two helpers are shared across the guards so they behave alike:
     1. `BranchGuard::is_protected` honours `*` anywhere in a protected-branch
@@ -517,6 +543,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`RateLimiter::time_until_available` could panic on a config-valid input.**
+  It computed `Duration::from_secs_f64(1.0 / refill_rate)`, which panics when the
+  result overflows `Duration`. A finite, positive but minuscule
+  `rate_limits.refill_rate_per_sec` (e.g. `1e-20`) passes `Config::validate`
+  (which only rejects non-finite or negative rates) yet overflows here. The
+  method now uses `try_from_secs_f64` and saturates to `Duration::MAX`
+  ("effectively never"). The running server only calls `try_acquire`, so this
+  was a latent panic in the public library API rather than a live crash.
+  Regression-tested by `time_until_available_saturates_on_tiny_refill_rate`.
+- **A negative `refill_rate` drained the token bucket instead of being inert.**
+  `RateLimiter::refill` multiplied elapsed time by `refill_rate`
+  unconditionally, so a negative rate subtracted tokens on every call.
+  `Config::validate` rejects negative rates, but the public `RateLimiter::new`
+  does not, so a direct library caller hit this. `refill` now returns early for
+  non-positive rates — matching `time_until_available`'s "rate of zero or less
+  means never available" contract — and as a bonus no longer locks the tokens
+  mutex in the supported `0.0` "burst once, never refill" mode.
+  Regression-tested by `refill_does_not_drain_tokens_with_negative_rate`.
+- **`RateLimiterStats::block_rate` used an unchecked addition.**
+  `total_allowed + total_blocked` would panic on overflow in debug builds — only
+  after roughly `1.8e19` lifetime operations, but free to make correct with
+  `saturating_add`.
 - **`create_tar_from_tree` silently dropped files whose path was too long for
   a tar header.** The tar builder set the entry path via `tar::Header::set_path`
   and then `append`, but `set_path` fails for any path that doesn't fit the

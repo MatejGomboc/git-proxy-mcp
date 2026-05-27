@@ -93,10 +93,13 @@ impl Config {
     ///   immediately;
     /// - `rate_limits.max_burst` of zero — the token bucket can then never hand
     ///   out a token, blocking every operation forever;
-    /// - a non-finite or negative `rate_limits.refill_rate_per_sec` — `NaN`
-    ///   panics in `RateLimiter::time_until_available` (`Duration::from_secs_f64`
-    ///   rejects non-finite input), and the infinities/negatives break the
-    ///   token-bucket maths (permanent block, or effectively no throttling).
+    /// - a non-finite or negative `rate_limits.refill_rate_per_sec` — such a
+    ///   rate has no sensible meaning (negatives would drain the bucket,
+    ///   `NaN`/infinities make the refill maths nonsensical), so it is rejected
+    ///   early with a clear error. `RateLimiter` is itself hardened against
+    ///   these (`refill` skips non-positive rates; `time_until_available`
+    ///   saturates rather than calling `Duration::from_secs_f64`, which panics
+    ///   on overflow), but the config layer still refuses them up front.
     ///   `0.0` stays allowed — the supported "burst once, never refill" mode;
     /// - zero session limits (`sessions.timeout_secs`,
     ///   `sessions.max_streaming_sessions`, `sessions.max_repo_sessions`) —

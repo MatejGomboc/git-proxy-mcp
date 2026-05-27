@@ -163,7 +163,10 @@ impl RateLimiter {
 
     /// Returns time until the next token is available.
     ///
-    /// Returns `Duration::ZERO` if tokens are currently available.
+    /// Returns `Duration::ZERO` if tokens are currently available, and
+    /// `Duration::MAX` ("effectively never") when the bucket cannot refill — a
+    /// `refill_rate` of zero or less, or a rate so small that the computed wait
+    /// would overflow `Duration`.
     ///
     /// # Mutex Poisoning
     ///
@@ -184,7 +187,11 @@ impl RateLimiter {
         } else {
             let tokens_needed = 1.0 - current_tokens;
             let seconds = tokens_needed / self.refill_rate;
-            Duration::from_secs_f64(seconds)
+            // A minuscule (but config-valid: finite and positive) refill_rate
+            // makes `seconds` exceed Duration's range, and `from_secs_f64`
+            // panics on overflow/non-finite input. Saturate to `Duration::MAX`
+            // — semantically "effectively never" — instead of crashing.
+            Duration::try_from_secs_f64(seconds).unwrap_or(Duration::MAX)
         }
     }
 
@@ -192,6 +199,16 @@ impl RateLimiter {
     #[allow(clippy::significant_drop_tightening)] // Lock ordering is intentional
     #[allow(clippy::cast_precision_loss)] // max_burst as f64 is acceptable
     fn refill(&self) {
+        // A non-positive refill rate means the bucket never refills: 0.0 is the
+        // supported "burst once" mode, and a negative rate (rejected by config
+        // but accepted by the public constructor) would otherwise *drain*
+        // tokens, since `elapsed * negative` is negative. Skip entirely — this
+        // matches `time_until_available`'s "rate <= 0 means never available"
+        // contract and avoids locking the tokens mutex in the 0.0 mode.
+        if self.refill_rate <= 0.0 {
+            return;
+        }
+
         let now = Instant::now();
 
         let mut last_refill = self.lock_last_refill();
@@ -274,7 +291,9 @@ impl RateLimiterStats {
     #[must_use]
     #[allow(clippy::cast_precision_loss)] // Percentage calculation is acceptable
     pub fn block_rate(&self) -> f64 {
-        let total = self.total_allowed + self.total_blocked;
+        // saturating_add: the sum only overflows after ~1.8e19 lifetime
+        // operations, but an unchecked add would panic there in debug builds.
+        let total = self.total_allowed.saturating_add(self.total_blocked);
         if total == 0 {
             0.0
         } else {
@@ -413,6 +432,14 @@ mod tests {
     }
 
     #[test]
+    fn rate_limiter_default_impl_delegates_to_ai_defaults() {
+        // The Default impl just forwards to default_for_ai().
+        let limiter = RateLimiter::default();
+        assert_eq!(limiter.max_burst, 20);
+        assert!((limiter.refill_rate - 5.0).abs() < 0.01);
+    }
+
+    #[test]
     fn block_rate_with_no_operations() {
         let limiter = RateLimiter::new(10, 1.0);
         let stats = limiter.stats();
@@ -432,5 +459,64 @@ mod tests {
 
         // With zero refill rate, should return Duration::MAX
         assert_eq!(limiter.time_until_available(), Duration::MAX);
+    }
+
+    #[test]
+    fn time_until_available_saturates_on_tiny_refill_rate() {
+        // A finite, positive but minuscule refill_rate passes config validation
+        // (`Config::validate` only rejects non-finite/negative), yet makes
+        // `seconds = 1.0 / refill_rate` overflow Duration's range. The method
+        // must saturate to Duration::MAX rather than panic in from_secs_f64.
+        let limiter = RateLimiter::new(1, f64::MIN_POSITIVE);
+
+        // Drain the single token so the else-branch (refill_rate > 0) is taken.
+        assert!(limiter.try_acquire());
+
+        assert_eq!(limiter.time_until_available(), Duration::MAX);
+    }
+
+    #[test]
+    fn refill_does_not_drain_tokens_with_negative_rate() {
+        // A negative refill_rate is rejected by Config::validate, but the public
+        // RateLimiter::new accepts it. refill() must not *remove* tokens
+        // (`elapsed * negative` is negative); it no-ops for non-positive rates.
+        let limiter = RateLimiter::new(3, -100.0);
+
+        thread::sleep(Duration::from_millis(20));
+
+        // Tokens stay at the full burst rather than draining below 3.
+        assert!((limiter.available_tokens() - 3.0).abs() < f64::EPSILON);
+        assert!(limiter.would_allow());
+    }
+
+    #[test]
+    fn try_acquire_recovers_from_poisoned_tokens_mutex() {
+        let limiter = RateLimiter::new(5, 1.0);
+
+        // Poison the tokens mutex by panicking while holding it. catch_unwind
+        // keeps the deliberate panic on this (output-captured) test thread.
+        let poisoned = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = limiter.tokens.lock().unwrap();
+            panic!("intentionally poisoning the tokens mutex");
+        }));
+        assert!(poisoned.is_err());
+
+        // lock_tokens() must recover via into_inner() rather than propagating
+        // the poison (which would panic on .unwrap()).
+        assert!(limiter.try_acquire());
+    }
+
+    #[test]
+    fn refill_recovers_from_poisoned_last_refill_mutex() {
+        let limiter = RateLimiter::new(5, 10.0);
+
+        let poisoned = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = limiter.last_refill.lock().unwrap();
+            panic!("intentionally poisoning the last_refill mutex");
+        }));
+        assert!(poisoned.is_err());
+
+        // refill() (invoked by try_acquire) must recover the last_refill lock.
+        assert!(limiter.try_acquire());
     }
 }
