@@ -163,7 +163,10 @@ impl RateLimiter {
 
     /// Returns time until the next token is available.
     ///
-    /// Returns `Duration::ZERO` if tokens are currently available.
+    /// Returns `Duration::ZERO` if tokens are currently available, and
+    /// `Duration::MAX` ("effectively never") when the bucket cannot refill — a
+    /// `refill_rate` of zero or less, or a rate so small that the computed wait
+    /// would overflow `Duration`.
     ///
     /// # Mutex Poisoning
     ///
