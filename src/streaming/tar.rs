@@ -759,6 +759,86 @@ mod tests {
     }
 
     #[test]
+    fn write_submodules_to_tar_writes_submodule_files() {
+        // Exercises `write_submodules_to_tar` (including its
+        // `let Ok(name) = entry.name()` walk branch) without a network fetch,
+        // by building a `FetchedSubmodule` around a locally-created bare repo.
+        use crate::git2_ops::clone::FetchResult;
+        use crate::git2_ops::submodule::SubmoduleEntry;
+
+        let temp = tempfile::TempDir::new().unwrap();
+        let commit_oid = {
+            let repo = Repository::init_bare(temp.path()).unwrap();
+            let blob = repo.blob(b"submodule file contents\n").unwrap();
+            let mut tb = repo.treebuilder(None).unwrap();
+            tb.insert("README.md", blob, 0o100_644).unwrap();
+            let tree = repo.find_tree(tb.write().unwrap()).unwrap();
+            let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+            repo.commit(None, &sig, &sig, "submodule commit", &tree, &[])
+                .unwrap()
+        };
+        let repo = Repository::open_bare(temp.path()).unwrap();
+
+        let fetched = FetchedSubmodule {
+            entry: SubmoduleEntry {
+                path: "vendor/sub".to_string(),
+                commit: commit_oid,
+                url: "https://example.com/sub.git".to_string(),
+            },
+            fetch_result: FetchResult::from_parts_for_test(
+                repo,
+                commit_oid,
+                "main".to_string(),
+                temp,
+            ),
+            children: Vec::new(),
+        };
+
+        let mut archive = Vec::new();
+        {
+            let encoder = GzEncoder::new(&mut archive, Compression::fast());
+            let mut tar_builder = tar::Builder::new(encoder);
+
+            let mut file_count = 0usize;
+            let mut uncompressed_size = 0u64;
+            let mut skipped_by_filter = 0usize;
+            let mut skipped_binary = 0usize;
+            let mut skipped_too_large = 0usize;
+            let mut skipped_path_too_long = 0usize;
+            let mut submodules_included = 0usize;
+            let mut submodules_failed = 0usize;
+
+            write_submodules_to_tar(
+                std::slice::from_ref(&fetched),
+                "",
+                None,
+                false,
+                None,
+                &mut tar_builder,
+                &mut file_count,
+                &mut uncompressed_size,
+                &mut skipped_by_filter,
+                &mut skipped_binary,
+                &mut skipped_too_large,
+                &mut skipped_path_too_long,
+                &mut submodules_included,
+                &mut submodules_failed,
+                None,
+            );
+
+            tar_builder.finish().unwrap();
+
+            assert_eq!(file_count, 1, "the submodule's single file should be added");
+            assert_eq!(submodules_included, 1);
+            assert_eq!(submodules_failed, 0);
+            assert!(uncompressed_size > 0);
+        }
+
+        // The archive should contain the submodule file under its path prefix.
+        assert!(!archive.is_empty());
+    }
+
+    #[test]
     fn sparse_filter_empty_matches_all() {
         let filter = SparseFilter::new(&[]);
         assert!(filter.matches("any/path/file.rs"));
