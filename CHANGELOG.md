@@ -189,8 +189,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
        instantly), `sessions.max_streaming_sessions` and
        `sessions.max_repo_sessions` (no session can ever be created).
     5. **An unrecognised `logging.level`** — previously any unknown string
-       silently became `warn`; a typo (`"verbsoe"`, `"WARNING"`) is now rejected
-       with the list of valid levels.
+       silently became `warn`; a mistake such as `"verbose"` or `"warning"`
+       (the level is `warn`, not `warning`) is now rejected with the list of
+       valid levels.
   Values that the consuming code already handles are deliberately *not*
   rejected: `submodules.max_concurrent` (clamped to ≥ 1 by the fetcher),
   `submodules.max_failures` of 0, `lfs.retry_max_attempts` of 0 (the retry loop
