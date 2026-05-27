@@ -159,7 +159,8 @@ Stream a repository to the AI's workspace (small-to-medium repos).
 **Response:** Base64-encoded tar.gz `archive`, `commit` SHA, `branch`, `file_count`, `archive_size`
 (bytes, before base64), and a `hint` string pointing at `helper_script` for extraction.
 Optional counters appear only when non-zero: `skipped_by_filter`, `skipped_binary`,
-`skipped_too_large`, `lfs_resolved`, `lfs_failed`, `submodules_included`, `submodules_failed`.
+`skipped_too_large`, `skipped_path_too_long`, `lfs_resolved`, `lfs_failed`,
+`submodules_included`, `submodules_failed`.
 
 #### `repo_push`
 

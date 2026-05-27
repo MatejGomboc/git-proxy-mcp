@@ -528,6 +528,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   result counter — leaving the submodule progress percentage permanently short.
   The counter is now incremented once per submodule regardless of outcome;
   `submodules_included` / `submodules_failed` semantics are unchanged.
+- **`repo_clone` / `repo_clone_start` never surfaced the
+  `skipped_path_too_long` counter.** Every other skip counter
+  (`skipped_by_filter`, `skipped_binary`, `skipped_too_large`) is included in
+  the tool response when non-zero, but `skipped_path_too_long` was tracked in
+  `TarResult` and then dropped on the way out — so before the long-path fix
+  above, a file with an over-long path was silently omitted *and* the count
+  that would have revealed it never reached the client. `RepoCloneResult` and
+  `RepoCloneStartResult` now carry the field (same
+  `skip_serializing_if = "is_zero"` treatment as its siblings), and it is
+  listed in the README response fields.
 - **`repo_pull` never detected renames, so a renamed file was reported as a
   delete + an add with no `old_path`.** `pull_changes` ran `diff_tree_to_tree`
   but never called `Diff::find_similar`, which is what actually coalesces a

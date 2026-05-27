@@ -139,6 +139,12 @@ pub struct RepoCloneStartResult {
     #[serde(skip_serializing_if = "is_zero")]
     pub skipped_too_large: usize,
 
+    /// Number of files skipped because their path could not be encoded in a
+    /// tar header (rare; e.g. a path containing a NUL byte). Long paths are
+    /// archived via a GNU long-name entry, not skipped.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub skipped_path_too_long: usize,
+
     /// Number of LFS pointers resolved (when `resolve_lfs` is true)
     #[serde(skip_serializing_if = "is_zero")]
     pub lfs_resolved: usize,
@@ -334,6 +340,7 @@ pub fn handle_repo_clone_start(
         skipped_by_filter = tar_result.skipped_by_filter,
         skipped_binary = tar_result.skipped_binary,
         skipped_too_large = tar_result.skipped_too_large,
+        skipped_path_too_long = tar_result.skipped_path_too_long,
         lfs_resolved = tar_result.lfs_resolved,
         lfs_failed = tar_result.lfs_failed,
         submodules_included = tar_result.submodules_included,
@@ -370,6 +377,7 @@ pub fn handle_repo_clone_start(
         skipped_by_filter: tar_result.skipped_by_filter,
         skipped_binary: tar_result.skipped_binary,
         skipped_too_large: tar_result.skipped_too_large,
+        skipped_path_too_long: tar_result.skipped_path_too_long,
         lfs_resolved: tar_result.lfs_resolved,
         lfs_failed: tar_result.lfs_failed,
         submodules_included: tar_result.submodules_included,
@@ -441,6 +449,7 @@ mod tests {
             skipped_by_filter: 0,
             skipped_binary: 0,
             skipped_too_large: 0,
+            skipped_path_too_long: 0,
             lfs_resolved: 0,
             lfs_failed: 0,
             submodules_included: 0,
@@ -470,6 +479,7 @@ mod tests {
             skipped_by_filter: 5,
             skipped_binary: 3,
             skipped_too_large: 2,
+            skipped_path_too_long: 1,
             lfs_resolved: 4,
             lfs_failed: 1,
             submodules_included: 2,
@@ -480,6 +490,7 @@ mod tests {
         assert!(json.contains("\"skipped_by_filter\":5"));
         assert!(json.contains("\"skipped_binary\":3"));
         assert!(json.contains("\"skipped_too_large\":2"));
+        assert!(json.contains("\"skipped_path_too_long\":1"));
         assert!(json.contains("\"lfs_resolved\":4"));
         assert!(json.contains("\"lfs_failed\":1"));
         assert!(json.contains("\"submodules_included\":2"));
