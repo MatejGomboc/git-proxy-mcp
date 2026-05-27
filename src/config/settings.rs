@@ -1333,10 +1333,18 @@ mod tests {
 
     #[test]
     fn validate_rejects_unknown_log_level() {
-        let mut config: Config = serde_json::from_str("{}").unwrap();
-        config.logging.level = "verbose".to_string();
-        let err = config.validate().unwrap_err();
-        assert!(err.to_string().contains("logging.level"));
+        // "warning" (Python style) and "verbose" are common mistakes; the empty
+        // string is the degenerate case. All previously fell through to `warn`
+        // in get_log_level; now they are rejected.
+        for bad in ["verbose", "warning", ""] {
+            let mut config: Config = serde_json::from_str("{}").unwrap();
+            config.logging.level = bad.to_string();
+            let err = config.validate().unwrap_err();
+            assert!(
+                err.to_string().contains("logging.level"),
+                "log level {bad:?} should be rejected, got: {err}"
+            );
+        }
     }
 
     #[test]
@@ -1367,7 +1375,9 @@ mod tests {
     }
 
     #[test]
-    fn validate_allows_minimal_positive_values() {
+    fn validate_allows_minimal_valid_values() {
+        // Smallest value each field accepts: 1 for the counts/timeouts, and
+        // 0.0 for the refill rate (the burst-only mode).
         let mut config: Config = serde_json::from_str("{}").unwrap();
         config.timeouts.request_timeout_secs = 1;
         config.limits.max_output_bytes = 1;

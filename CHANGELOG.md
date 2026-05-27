@@ -195,9 +195,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rejected: `submodules.max_concurrent` (clamped to ≥ 1 by the fetcher),
   `submodules.max_failures` of 0, `lfs.retry_max_attempts` of 0 (the retry loop
   always makes one attempt), and `lfs.max_object_size` of 0 (every object kept
-  as a pointer). Seven new unit tests cover every rejected and every
-  deliberately-accepted case. `validate` is no longer `const fn` (it now builds
-  error strings); no other API change.
+  as a pointer). Eight new unit tests cover every rejected and every
+  deliberately-accepted case, and confirm `load_config` surfaces the
+  `ValidationError` (i.e. validation is wired into the load path). `validate` is
+  no longer `const fn` (it now builds error strings); no other API change.
 - **`git2` requirement bumped 0.20.4 → 0.21.0** (cargo-dependencies group).
   0.21 ships two breaking changes that touched this crate:
     1. **`default` features are now empty** (0.20 enabled `ssh` + `https`).

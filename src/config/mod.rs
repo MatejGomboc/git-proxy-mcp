@@ -179,6 +179,22 @@ mod tests {
     }
 
     #[test]
+    fn load_config_rejects_out_of_range_value() {
+        // A value that parses but fails Config::validate must surface as a
+        // ValidationError — proving validation is wired into the load path,
+        // not merely callable in isolation. (The per-field rules themselves are
+        // covered in settings.rs.)
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(temp.path(), r#"{"rate_limits": {"max_burst": 0}}"#).unwrap();
+        let err = load_config(Some(temp.path())).unwrap_err();
+        assert!(
+            matches!(err, ConfigError::ValidationError { .. }),
+            "expected ValidationError, got {err:?}"
+        );
+        assert!(err.to_string().contains("max_burst"));
+    }
+
+    #[test]
     fn load_config_with_directory_path_returns_read_error() {
         // `Path::exists()` is true for a directory, so the existence check
         // passes — but `read_to_string` cannot read a directory as a file.
