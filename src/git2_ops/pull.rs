@@ -127,7 +127,6 @@ pub struct PullResult {
 ///
 /// Credentials are handled via git2 callbacks and never stored or logged.
 /// The temporary bare repository is cleaned up after the operation.
-#[allow(clippy::too_many_lines)] // Complex operation with many steps
 pub fn pull_changes(
     url: &str,
     branch: &str,
@@ -144,6 +143,20 @@ pub fn pull_changes(
     // Validate URL
     validate_url(url)?;
 
+    pull_changes_inner(url, branch, since_commit, proxy_url)
+}
+
+/// Fetches `branch` and computes the delta since `since_commit` — the body of
+/// [`pull_changes`] after URL validation. Split out so tests can drive the
+/// fetch/diff/archive path against a local `file://` remote; [`pull_changes`]
+/// still rejects `file://` via [`validate_url`] before delegating here.
+#[allow(clippy::too_many_lines)] // Complex operation with many steps
+fn pull_changes_inner(
+    url: &str,
+    branch: &str,
+    since_commit: &str,
+    proxy_url: Option<&str>,
+) -> Result<PullResult, Git2Error> {
     // Create temp directory for bare repo
     let temp_dir = TempDir::new().map_err(Git2Error::TempDirFailed)?;
 
@@ -241,9 +254,16 @@ pub fn pull_changes(
     diff_opts.context_lines(3);
 
     // Generate diff
-    let diff = repo
+    let mut diff = repo
         .diff_tree_to_tree(Some(&base_tree), Some(&head_tree), Some(&mut diff_opts))
         .map_err(|e| Git2Error::Git2(format!("failed to generate diff: {e}")))?;
+
+    // Detect renames and copies so they're reported with their old path (and
+    // counted once) instead of as separate add+delete pairs. `diff_tree_to_tree`
+    // doesn't do this on its own, which left the `Renamed` arm below and
+    // `ChangedFile::old_path` dead.
+    diff.find_similar(None)
+        .map_err(|e| Git2Error::Git2(format!("failed to detect renames: {e}")))?;
 
     // Get diff statistics
     let git_stats = diff
@@ -643,5 +663,137 @@ mod tests {
             "expected near-empty archive, got {} bytes",
             archive.len()
         );
+    }
+
+    /// Builds a `file://` URL for a local path (Windows-friendly).
+    fn local_file_url(path: &std::path::Path) -> String {
+        let raw = path.display().to_string();
+        if cfg!(windows) {
+            format!("file:///{}", raw.replace('\\', "/"))
+        } else {
+            format!("file://{raw}")
+        }
+    }
+
+    /// Builds a bare source repo with a base commit and a head commit that
+    /// modifies `a.txt`, deletes `b.txt`, adds `c.txt`, and renames
+    /// `old.txt` -> `new.txt` (identical content). Returns the temp dir, the
+    /// branch name, and the (base, head) commit OIDs.
+    fn build_pull_source() -> (tempfile::TempDir, String, Oid, Oid) {
+        let temp = tempfile::TempDir::new().unwrap();
+        let (branch, base, head) = {
+            let repo = Repository::init_bare(temp.path()).unwrap();
+            let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+
+            let a = repo.blob(b"A\n").unwrap();
+            let b = repo.blob(b"B\n").unwrap();
+            let renamed_blob = repo.blob(b"rename me unchanged\n").unwrap();
+            let mut tb = repo.treebuilder(None).unwrap();
+            tb.insert("a.txt", a, 0o100_644).unwrap();
+            tb.insert("b.txt", b, 0o100_644).unwrap();
+            tb.insert("old.txt", renamed_blob, 0o100_644).unwrap();
+            let base_tree = repo.find_tree(tb.write().unwrap()).unwrap();
+            let base = repo
+                .commit(Some("HEAD"), &sig, &sig, "base", &base_tree, &[])
+                .unwrap();
+
+            let a2 = repo.blob(b"A modified\n").unwrap();
+            let c = repo.blob(b"C\n").unwrap();
+            let mut tb2 = repo.treebuilder(None).unwrap();
+            tb2.insert("a.txt", a2, 0o100_644).unwrap(); // modified
+                                                         // b.txt omitted -> deleted
+            tb2.insert("c.txt", c, 0o100_644).unwrap(); // added
+            tb2.insert("new.txt", renamed_blob, 0o100_644).unwrap(); // rename of old.txt
+            let head_tree = repo.find_tree(tb2.write().unwrap()).unwrap();
+            let base_obj = repo.find_commit(base).unwrap();
+            let head = repo
+                .commit(Some("HEAD"), &sig, &sig, "head", &head_tree, &[&base_obj])
+                .unwrap();
+
+            let branch = repo.head().unwrap().shorthand().unwrap().to_string();
+            (branch, base, head)
+        };
+        (temp, branch, base, head)
+    }
+
+    #[test]
+    fn pull_changes_inner_reports_changes_and_detects_rename() {
+        let (source, branch, base, head) = build_pull_source();
+        let result = pull_changes_inner(
+            &local_file_url(source.path()),
+            &branch,
+            &base.to_string(),
+            None,
+        )
+        .unwrap();
+
+        assert!(!result.up_to_date);
+        assert_eq!(result.base_commit, base.to_string());
+        assert_eq!(result.new_commit, head.to_string());
+
+        // b.txt was genuinely deleted; old.txt was renamed (not deleted).
+        assert!(result.deleted_files.contains(&"b.txt".to_string()));
+        assert!(!result.deleted_files.contains(&"old.txt".to_string()));
+
+        // The rename must be detected with its old path — this is the
+        // regression guard for the missing find_similar bug.
+        let renamed = result
+            .changed_files
+            .iter()
+            .find(|f| f.change_type == "renamed")
+            .unwrap_or_else(|| panic!("no renamed entry in {:?}", result.changed_files));
+        assert_eq!(renamed.path, "new.txt");
+        assert_eq!(renamed.old_path.as_deref(), Some("old.txt"));
+
+        // Added / modified are categorised too.
+        assert!(result
+            .changed_files
+            .iter()
+            .any(|f| f.path == "c.txt" && f.change_type == "added"));
+        assert!(result
+            .changed_files
+            .iter()
+            .any(|f| f.path == "a.txt" && f.change_type == "modified"));
+
+        assert!(result.stats.commits >= 1);
+        assert!(!result.files_archive.is_empty());
+        assert!(result.diff.contains("c.txt"), "diff: {}", result.diff);
+    }
+
+    #[test]
+    fn pull_changes_inner_up_to_date_when_since_equals_head() {
+        let (source, branch, _base, head) = build_pull_source();
+        let result = pull_changes_inner(
+            &local_file_url(source.path()),
+            &branch,
+            &head.to_string(),
+            None,
+        )
+        .unwrap();
+        assert!(result.up_to_date);
+        assert!(result.changed_files.is_empty());
+        assert!(result.diff.is_empty());
+        assert_eq!(result.base_commit, head.to_string());
+        assert_eq!(result.new_commit, head.to_string());
+    }
+
+    #[test]
+    fn pull_changes_inner_rejects_invalid_since_commit() {
+        let (source, branch, _, _) = build_pull_source();
+        let result = pull_changes_inner(&local_file_url(source.path()), &branch, "not-a-sha", None);
+        assert!(matches!(result, Err(Git2Error::RefNotFound(_))));
+    }
+
+    #[test]
+    fn pull_changes_inner_errors_on_missing_base_commit() {
+        let (source, branch, _, _) = build_pull_source();
+        // Well-formed but absent SHA: parses, but find_commit fails.
+        let result = pull_changes_inner(
+            &local_file_url(source.path()),
+            &branch,
+            "0000000000000000000000000000000000000000",
+            None,
+        );
+        assert!(matches!(result, Err(Git2Error::RefNotFound(_))));
     }
 }
