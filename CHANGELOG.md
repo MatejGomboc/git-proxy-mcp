@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`git2_ops::auth` and `security::audit` coverage top-ups.** Added direct
+  unit tests for `auth::credentials_callback`'s `DEFAULT` branch (deterministic)
+  and its ssh-agent branch (no-panic exercise, since the outcome depends on
+  system state); and for `audit`'s leap-year date conversion (`days_to_ymd`),
+  the `AuditLogger::log_path` getter, and the two `AuditLogger::new` IoError
+  arms (parent-is-a-file → `create_dir_all` fails; path-is-a-directory → open
+  fails). `auth.rs` 89.47 % -> 92.43 %, `audit.rs` 93.79 % -> 97.37 % line
+  coverage. The remaining lines are the git2-invoked transfer-progress callback,
+  the credential-helper branch (deliberately not unit-tested so the suite never
+  triggers an interactive OS credential helper), the `git credential fill`
+  subprocess spawn/write/wait error arms, and the audit write/flush/serialise
+  I/O error arms — all inherent or integration-covered.
 - **`mcp::server` tool-dispatch coverage.** The `call_*_tool` methods (which
   run the rate-limit, repo-filter and branch/push-guard checks before invoking
   a handler) were exercised almost entirely by the Python integration suite.

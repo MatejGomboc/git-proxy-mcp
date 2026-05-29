@@ -850,11 +850,37 @@ mod tests {
         let err = result
             .err()
             .expect("expected error when no credential type is allowed");
+        let msg = err.message();
         assert!(
-            err.message()
-                .contains("no suitable credential method available"),
-            "expected fallback message, got: {}",
-            err.message()
+            msg.contains("no suitable credential method available"),
+            "expected fallback message, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn credentials_callback_returns_default_cred_for_default_type() {
+        // `Cred::default()` never fails, so when only the DEFAULT credential
+        // type is allowed the callback returns it directly — exercising the
+        // DEFAULT branch deterministically, without touching ssh-agent or any
+        // credential helper.
+        let result = credentials_callback(
+            "https://example.com/repo.git",
+            None,
+            CredentialType::DEFAULT,
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn credentials_callback_attempts_ssh_agent_branch() {
+        // Exercises the SSH-agent branch. Whether it returns Ok (an agent with
+        // a usable key is present) or Err (none) depends on system state, so —
+        // unlike the existing fallback test — this only asserts the branch runs
+        // without panicking, never the outcome (keeping it non-flaky on CI).
+        let _ = credentials_callback(
+            "git@github.com:owner/repo.git",
+            Some("git"),
+            CredentialType::SSH_KEY,
         );
     }
 
