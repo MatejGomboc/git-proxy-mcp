@@ -1271,4 +1271,48 @@ mod tests {
         let result = fetch_all_submodules(&repo, commit, None, 1, 3, 4, &filter).unwrap();
         assert!(result.is_empty());
     }
+
+    #[test]
+    fn fetch_all_submodules_skips_duplicate_url_cycle() {
+        // Two submodules at different paths share one URL. In the filter phase
+        // the first inserts its URL into the visited set and becomes eligible
+        // (then fails fast against 127.0.0.1:1); the second's insert returns
+        // false, so it hits the cycle-detection warn-and-skip arm before any
+        // fetch is attempted. Net result: nothing fetched.
+        let temp = tempfile::TempDir::new().unwrap();
+        let url = "https://127.0.0.1:1/shared.git";
+        let commit = {
+            let repo = Repository::init_bare(temp.path()).unwrap();
+            let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+
+            // A commit to serve as the gitlink target for both submodules.
+            let blob = repo.blob(b"x\n").unwrap();
+            let mut leaf = repo.treebuilder(None).unwrap();
+            leaf.insert("f.txt", blob, 0o100_644).unwrap();
+            let leaf_tree = repo.find_tree(leaf.write().unwrap()).unwrap();
+            let target = repo
+                .commit(None, &sig, &sig, "sub commit", &leaf_tree, &[])
+                .unwrap();
+
+            let gm = format!(
+                "[submodule \"a\"]\n\tpath = a\n\turl = {url}\n\
+                 [submodule \"b\"]\n\tpath = b\n\turl = {url}\n"
+            );
+            let gm_blob = repo.blob(gm.as_bytes()).unwrap();
+
+            let mut root = repo.treebuilder(None).unwrap();
+            root.insert("a", target, SUBMODULE_MODE).unwrap();
+            root.insert("b", target, SUBMODULE_MODE).unwrap();
+            root.insert(".gitmodules", gm_blob, 0o100_644).unwrap();
+            let root_tree = repo.find_tree(root.write().unwrap()).unwrap();
+            repo.commit(None, &sig, &sig, "root", &root_tree, &[])
+                .unwrap()
+        };
+        let repo = Repository::open_bare(temp.path()).unwrap();
+        let filter = SubmoduleFilter::new(None, None);
+        // max_failures high enough that the one failed fetch doesn't abort the
+        // run before the second (duplicate) entry is considered.
+        let result = fetch_all_submodules(&repo, commit, None, 1, 3, 4, &filter).unwrap();
+        assert!(result.is_empty());
+    }
 }

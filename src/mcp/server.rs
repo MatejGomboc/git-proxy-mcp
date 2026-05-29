@@ -2644,4 +2644,64 @@ mod tests {
         // A blank line does not advance the lifecycle.
         assert_eq!(server.state(), ServerState::AwaitingInit);
     }
+
+    #[tokio::test]
+    async fn handle_transport_result_dispatches_request_and_continues() {
+        let mut server = create_test_server();
+        // A non-empty line carrying a valid `ping` request routes through
+        // handle_line -> handle_message -> handle_request -> the ping dispatch
+        // arm, and a response is written. `ping` needs no prior initialise, so
+        // the post-dispatch state check sees AwaitingInit and continues.
+        let line = r#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#.to_string();
+        let outcome = server
+            .handle_transport_result(Ok(Some(line)))
+            .await
+            .unwrap();
+        assert!(outcome.is_none());
+        assert_eq!(server.state(), ServerState::AwaitingInit);
+    }
+
+    #[tokio::test]
+    async fn handle_transport_result_writes_error_for_unknown_method() {
+        let mut server = create_test_server();
+        // A well-formed request for an unknown method parses successfully but
+        // hits the method-not-found dispatch arm, which writes a JSON-RPC error
+        // rather than a response.
+        let line = r#"{"jsonrpc":"2.0","id":2,"method":"no/such/method"}"#.to_string();
+        let outcome = server
+            .handle_transport_result(Ok(Some(line)))
+            .await
+            .unwrap();
+        assert!(outcome.is_none());
+        assert_eq!(server.state(), ServerState::AwaitingInit);
+    }
+
+    #[tokio::test]
+    async fn handle_transport_result_writes_error_for_malformed_json() {
+        let mut server = create_test_server();
+        // A non-empty line that is not valid JSON makes parse_message return
+        // Err, which handle_line writes back as a JSON-RPC parse error.
+        let line = "{ this is not valid json".to_string();
+        let outcome = server
+            .handle_transport_result(Ok(Some(line)))
+            .await
+            .unwrap();
+        assert!(outcome.is_none());
+        assert_eq!(server.state(), ServerState::AwaitingInit);
+    }
+
+    #[tokio::test]
+    async fn handle_transport_result_processes_notification() {
+        let mut server = create_test_server();
+        // A message with no `id` is a notification, routing through the
+        // Notification arm of handle_message. An unknown notification is
+        // ignored without changing state and without writing a response.
+        let line = r#"{"jsonrpc":"2.0","method":"some/notification"}"#.to_string();
+        let outcome = server
+            .handle_transport_result(Ok(Some(line)))
+            .await
+            .unwrap();
+        assert!(outcome.is_none());
+        assert_eq!(server.state(), ServerState::AwaitingInit);
+    }
 }

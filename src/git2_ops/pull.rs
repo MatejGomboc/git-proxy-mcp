@@ -665,6 +665,52 @@ mod tests {
         );
     }
 
+    #[test]
+    fn create_files_archive_includes_nested_file() {
+        // A file inside a subdirectory exercises the two branches the
+        // top-level-only tests miss: the non-blob (subtree) entry is skipped,
+        // and the matching blob's path is built via the `format!("{dir}{name}")`
+        // nested-path branch rather than the bare-name branch.
+        let temp = tempfile::TempDir::new().unwrap();
+        let tree_oid = {
+            let repo = Repository::init_bare(temp.path()).unwrap();
+            let blob = repo.blob(b"nested content\n").unwrap();
+            let sub_tree = {
+                let mut sub = repo.treebuilder(None).unwrap();
+                sub.insert("nested.txt", blob, 0o100_644).unwrap();
+                sub.write().unwrap()
+            };
+            let mut root = repo.treebuilder(None).unwrap();
+            root.insert("sub", sub_tree, 0o040_000).unwrap();
+            root.write().unwrap()
+        };
+        let repo = Repository::open_bare(temp.path()).unwrap();
+        let tree = repo.find_tree(tree_oid).unwrap();
+        let files = vec!["sub/nested.txt".to_string()];
+        let archive = create_files_archive(&repo, &tree, &files).unwrap();
+
+        // Decode the archive and confirm the nested file is present with its
+        // content. This proves the walk descended into the subtree and joined
+        // the nested path (rather than relying on a brittle compressed-size
+        // threshold).
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(&archive)
+            .unwrap();
+        let mut tar = tar::Archive::new(flate2::read::GzDecoder::new(&bytes[..]));
+        let mut found = false;
+        for entry in tar.entries().unwrap() {
+            let mut entry = entry.unwrap();
+            let path = entry.path().unwrap().to_string_lossy().into_owned();
+            if path == "sub/nested.txt" {
+                found = true;
+                let mut content = String::new();
+                std::io::Read::read_to_string(&mut entry, &mut content).unwrap();
+                assert_eq!(content, "nested content\n");
+            }
+        }
+        assert!(found, "the nested file should be present in the archive");
+    }
+
     /// Builds a `file://` URL for a local path (Windows-friendly).
     fn local_file_url(path: &std::path::Path) -> String {
         let raw = path.display().to_string();

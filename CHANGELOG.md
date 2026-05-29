@@ -9,6 +9,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Unit-coverage top-ups for the JSON-RPC dispatch loop and three
+  archive/submodule edge cases** (no production change). Added tests for
+  previously-unit-uncovered paths that need neither real network access nor
+  OS-failure injection:
+    - `mcp::server` — four `#[tokio::test]`s drive `handle_transport_result`
+      with a non-empty line carrying a `ping` request, an unknown-method
+      request, malformed JSON, and a notification. Together they cover the
+      `handle_line` / `handle_message` / `handle_request` dispatch plumbing
+      (request-versus-notification routing, the `ping` and method-not-found
+      arms, and both the response and error write paths) that was previously
+      exercised only by the Python integration suite. `server.rs` line
+      coverage rose from 91.27 % to 93.42 %.
+    - `git2_ops::pull` — `create_files_archive_includes_nested_file` archives a
+      file inside a subdirectory, covering the non-blob (subtree) skip and the
+      nested-path `format!("{dir}{name}")` branch that the top-level-only tests
+      miss.
+    - `streaming::tar` — `create_tar_keeps_unparseable_lfs_pointer_verbatim` (a
+      blob whose first line is the v1 version line but which has no `oid`/`size`,
+      so `is_lfs_pointer` is true yet `parse_lfs_pointer` is None — the blob is
+      archived verbatim with no Batch API call) and
+      `create_tar_skips_blob_with_missing_object` (a hand-written tree whose
+      blob entry points at a missing OID, so `find_blob` fails and the blob is
+      logged-and-skipped while the archive still finishes). `tar.rs` 97.46 % ->
+      97.83 %.
+    - `git2_ops::submodule` — `fetch_all_submodules_skips_duplicate_url_cycle`
+      gives two submodules at different paths the same URL, so the second hits
+      the visited-URL cycle-detection warn-and-skip arm in the recursive
+      fetcher (the existing test only exercised the pure `normalise_url_for_cycle_detection`
+      helper). `submodule.rs` 94.19 % -> 94.63 %.
+  Total local unit line coverage rose from 95.92 % to 96.36 %.
 - **`security::guards` coverage top-ups.** Added unit tests for the
   previously-untested pure-logic paths in the (security-critical) guards:
   `BranchGuard::unprotect` and `Default`; the `SecurityGuard::check` CLI-arg
