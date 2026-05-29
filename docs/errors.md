@@ -241,34 +241,10 @@ git ls-remote https://github.com/your-private-repo.git
 git ls-remote git@github.com:your-private-repo.git
 ```
 
-If prompted for credentials, configure a credential helper or SSH agent.
-
-### Credential Helper Setup
-
-Configure a credential helper to store your credentials:
-
-```bash
-# macOS
-git config --global credential.helper osxkeychain
-
-# Windows
-git config --global credential.helper manager
-
-# Linux
-git config --global credential.helper libsecret
-```
-
-### SSH Agent Setup
-
-For SSH authentication, ensure your SSH agent is running and has your key loaded:
-
-```bash
-# Start the agent (if not running)
-eval "$(ssh-agent -s)"
-
-# Add your key
-ssh-add ~/.ssh/id_ed25519
-```
+If prompted for credentials, you need to configure an OS credential helper
+(HTTPS) or load your key into ssh-agent (SSH). See the README's
+[Git authentication](../README.md#git-authentication) section for the
+per-platform setup commands.
 
 ---
 

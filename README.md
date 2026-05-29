@@ -370,6 +370,9 @@ For SSH, ensure your key is in ssh-agent:
 ```bash
 eval "$(ssh-agent -s)"
 ssh-add ~/.ssh/id_ed25519
+
+# macOS: also cache the key's passphrase in the Keychain
+ssh-add --apple-use-keychain ~/.ssh/id_ed25519
 ```
 
 ### Usage with Claude Desktop

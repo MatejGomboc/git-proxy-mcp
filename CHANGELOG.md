@@ -221,6 +221,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Credential-setup docs consolidated to a single source.** The
+  `git config --global credential.helper …` (osxkeychain / manager / libsecret)
+  and ssh-agent setup commands were duplicated verbatim in three places: the
+  README "Git authentication" section, the SECURITY.md "Git Configuration"
+  best-practices subsection, and the `docs/errors.md` troubleshooting section.
+  Per `STYLE.md`'s Single Source of Truth rule, the README is now the canonical
+  home (and absorbs SECURITY.md's macOS Keychain passphrase tip); SECURITY.md
+  and `docs/errors.md` cross-reference it instead of repeating the commands. Each
+  keeps its unique content — SECURITY.md's credential recommendations and
+  `docs/errors.md`'s `git ls-remote` connectivity test.
 - **`mcp::transport` line framing refactored for unit-testability; concurrency
   docs corrected** (no behaviour change):
     1. The `\n` / `\r\n` stripping and the read/write framing were extracted into
