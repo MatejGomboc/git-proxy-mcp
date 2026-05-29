@@ -553,6 +553,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **README licence statement now matches the SPDX expression.** The Licence
+  section read "GNU General Public License v3.0" while `Cargo.toml`'s `license`
+  field is `GPL-3.0-or-later`; the README now reads "v3.0 or later" so the two
+  agree (the bundled `LICENCE` file is the GPLv3 text).
 - **README "Git CLI" prerequisite named the wrong git subcommand.** It said the
   server invokes `git bundle unbundle` to apply a `repo_push` payload, but
   `git2_ops::push::unbundle` actually shells out to

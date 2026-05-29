@@ -508,7 +508,7 @@ Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 Copyright (C) 2026 Matej Gomboc <https://github.com/MatejGomboc/git-proxy-mcp>.
 
-GNU General Public License v3.0 — see [LICENCE](LICENCE).
+GNU General Public License v3.0 or later — see [LICENCE](LICENCE).
 
 ---
 
