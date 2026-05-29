@@ -2332,4 +2332,316 @@ mod tests {
         };
         assert!(id.is_partial());
     }
+
+    #[test]
+    fn git_identity_is_configured_requires_both_fields() {
+        assert!(!GitIdentity::default().is_configured());
+        assert!(!GitIdentity {
+            name: Some("n".into()),
+            email: None,
+        }
+        .is_configured());
+        assert!(!GitIdentity {
+            name: None,
+            email: Some("e@x".into()),
+        }
+        .is_configured());
+        assert!(GitIdentity {
+            name: Some("n".into()),
+            email: Some("e@x".into()),
+        }
+        .is_configured());
+    }
+
+    /// Build a server with a custom `SecurityConfig`, everything else default.
+    fn server_with_security(security: SecurityConfig) -> McpServer {
+        McpServer::new(
+            security,
+            GitIdentity::default(),
+            AuditLogger::disabled(),
+            ProxyConfig::default(),
+            &SessionConfig::default(),
+            LfsConfig::default(),
+            SubmoduleConfig::default(),
+        )
+    }
+
+    /// A minimal base64-encoded payload with a valid v2 bundle header. It is
+    /// not a real bundle, but it passes `validate_bundle`, so `repo_push`
+    /// proceeds to the push step (which then rejects the test's invalid URL).
+    fn valid_header_bundle() -> String {
+        crate::streaming::tar::encode_base64(b"# v2 bundle\nnot-a-real-bundle")
+    }
+
+    /// Extract the text of a (single-content) tool result.
+    fn result_text(result: &ToolCallResult) -> &str {
+        let ToolContent::Text { text } = &result.content[0];
+        text
+    }
+
+    #[test]
+    fn server_new_with_explicit_protected_branches_blocks_force_push() {
+        // A non-empty `protected_branches` takes the `BranchGuard::new` path;
+        // a force push to one of those branches is then blocked.
+        let mut server = server_with_security(SecurityConfig {
+            protected_branches: vec!["release".to_string()],
+            ..Default::default()
+        });
+        initialise_server(&mut server);
+        let result = server.call_repo_push_tool(&json!({
+            "bundle": valid_header_bundle(),
+            "url": "https://github.com/owner/repo.git",
+            "branch": "release",
+            "force": true,
+        }));
+        assert!(result.is_error);
+    }
+
+    #[test]
+    fn server_new_with_allowlist_blocks_non_listed_url() {
+        // A `repo_allowlist` takes the allowlist-mode construction path and the
+        // `allow()` loop; a URL not on the list is then blocked.
+        let mut server = server_with_security(SecurityConfig {
+            repo_allowlist: Some(vec!["github.com/allowed/*".to_string()]),
+            ..Default::default()
+        });
+        initialise_server(&mut server);
+        let result = server.call_repo_refs_tool(&json!({
+            "url": "https://github.com/other/repo.git",
+        }));
+        assert!(result.is_error);
+        let text = result_text(&result);
+        assert!(text.contains("not allowed"), "got: {text}");
+    }
+
+    #[test]
+    fn call_repo_clone_tool_with_invalid_url_reaches_handler_error() {
+        // Parses, passes the rate limit and the (empty) filter, then fails at
+        // the fetch's synchronous URL validation — no network access.
+        let mut server = create_test_server();
+        initialise_server(&mut server);
+        let result = server.call_repo_clone_tool(&json!({ "url": "not-a-url" }));
+        assert!(result.is_error);
+    }
+
+    #[test]
+    fn call_repo_clone_tool_with_blocked_url_returns_error() {
+        let mut server = server_with_security(SecurityConfig {
+            repo_blocklist: Some(vec!["github.com/blocked/*".to_string()]),
+            ..Default::default()
+        });
+        initialise_server(&mut server);
+        let result = server.call_repo_clone_tool(&json!({
+            "url": "https://github.com/blocked/repo.git",
+        }));
+        assert!(result.is_error);
+    }
+
+    #[test]
+    fn call_repo_clone_start_tool_with_invalid_url_reaches_handler_error() {
+        let mut server = create_test_server();
+        initialise_server(&mut server);
+        let result = server.call_repo_clone_start_tool(&json!({ "url": "not-a-url" }));
+        assert!(result.is_error);
+    }
+
+    #[test]
+    fn call_repo_clone_start_tool_with_blocked_url_returns_error() {
+        let mut server = server_with_security(SecurityConfig {
+            repo_blocklist: Some(vec!["github.com/blocked/*".to_string()]),
+            ..Default::default()
+        });
+        initialise_server(&mut server);
+        let result = server.call_repo_clone_start_tool(&json!({
+            "url": "https://github.com/blocked/repo.git",
+        }));
+        assert!(result.is_error);
+    }
+
+    #[test]
+    fn call_repo_push_tool_with_invalid_url_reaches_handler_error() {
+        // Non-force push to a non-protected branch: passes both guards and the
+        // filter, reaches `handle_repo_push`, which fails at the invalid URL.
+        let mut server = create_test_server();
+        initialise_server(&mut server);
+        let result = server.call_repo_push_tool(&json!({
+            "bundle": valid_header_bundle(),
+            "url": "not-a-url",
+            "branch": "feature/x",
+        }));
+        assert!(result.is_error);
+    }
+
+    #[test]
+    fn call_repo_push_tool_force_to_protected_branch_blocked() {
+        // The default protected set includes "main"; a force push to it is
+        // blocked by the branch guard before the bundle is even decoded.
+        let mut server = create_test_server();
+        initialise_server(&mut server);
+        let result = server.call_repo_push_tool(&json!({
+            "bundle": "ignored",
+            "url": "https://github.com/owner/repo.git",
+            "branch": "main",
+            "force": true,
+        }));
+        assert!(result.is_error);
+    }
+
+    #[test]
+    fn call_repo_push_tool_force_to_unprotected_branch_blocked_by_push_guard() {
+        // `allow_force_push` defaults to false, so a force push (even to a
+        // non-protected branch) is blocked by the push guard.
+        let mut server = create_test_server();
+        initialise_server(&mut server);
+        let result = server.call_repo_push_tool(&json!({
+            "bundle": "ignored",
+            "url": "https://github.com/owner/repo.git",
+            "branch": "feature/x",
+            "force": true,
+        }));
+        assert!(result.is_error);
+    }
+
+    #[test]
+    fn call_repo_push_tool_with_blocked_url_returns_error() {
+        let mut server = server_with_security(SecurityConfig {
+            repo_blocklist: Some(vec!["github.com/blocked/*".to_string()]),
+            ..Default::default()
+        });
+        initialise_server(&mut server);
+        let result = server.call_repo_push_tool(&json!({
+            "bundle": valid_header_bundle(),
+            "url": "https://github.com/blocked/repo.git",
+            "branch": "feature/x",
+        }));
+        assert!(result.is_error);
+    }
+
+    #[test]
+    fn call_repo_refs_tool_with_invalid_url_reaches_handler_error() {
+        let mut server = create_test_server();
+        initialise_server(&mut server);
+        let result = server.call_repo_refs_tool(&json!({ "url": "not-a-url" }));
+        assert!(result.is_error);
+    }
+
+    #[test]
+    fn call_repo_diff_tool_with_invalid_url_reaches_handler_error() {
+        let mut server = create_test_server();
+        initialise_server(&mut server);
+        let result = server.call_repo_diff_tool(&json!({
+            "url": "not-a-url",
+            "base_commit": "a",
+            "head_commit": "b",
+        }));
+        assert!(result.is_error);
+    }
+
+    #[test]
+    fn call_repo_pull_tool_with_invalid_url_reaches_handler_error() {
+        let mut server = create_test_server();
+        initialise_server(&mut server);
+        let result = server.call_repo_pull_tool(&json!({
+            "url": "not-a-url",
+            "branch": "main",
+            "since_commit": "abc123",
+        }));
+        assert!(result.is_error);
+    }
+
+    #[test]
+    fn call_repo_clone_chunk_tool_with_unknown_session_returns_error() {
+        let mut server = create_test_server();
+        initialise_server(&mut server);
+        let result = server.call_repo_clone_chunk_tool(&json!({
+            "session_id": "nonexistent",
+            "chunk_index": 0,
+        }));
+        assert!(result.is_error);
+    }
+
+    #[test]
+    fn call_repo_clone_cancel_tool_with_unknown_session_returns_success() {
+        // Cancelling a session that does not exist is NOT an error — it returns
+        // `cancelled: false` (exercises the cancel success/serialise path).
+        let mut server = create_test_server();
+        initialise_server(&mut server);
+        let result = server.call_repo_clone_cancel_tool(&json!({
+            "session_id": "nonexistent",
+        }));
+        assert!(!result.is_error);
+        assert!(result_text(&result).contains("cancelled"));
+        assert!(result_text(&result).contains("false"));
+    }
+
+    #[test]
+    fn rate_limit_blocks_clone_push_and_start() {
+        // A single-token bucket: the first call drains it, then the clone,
+        // push and clone_start rate-limit branches all reject.
+        let mut server = server_with_security(SecurityConfig {
+            rate_limit_max_burst: 1,
+            rate_limit_refill_rate: 0.0,
+            ..Default::default()
+        });
+        initialise_server(&mut server);
+        // Drain the only token (fails fast at the invalid URL, but the token
+        // is consumed before the network step).
+        let _ = server.call_repo_clone_tool(&json!({ "url": "not-a-url" }));
+
+        let blocked = [
+            server.call_repo_clone_tool(&json!({ "url": "not-a-url" })),
+            server.call_repo_push_tool(&json!({
+                "bundle": "x", "url": "not-a-url", "branch": "main",
+            })),
+            server.call_repo_clone_start_tool(&json!({ "url": "not-a-url" })),
+            server.call_repo_refs_tool(&json!({ "url": "not-a-url" })),
+        ];
+        for result in &blocked {
+            assert!(result.is_error);
+            let text = result_text(result);
+            assert!(
+                text.contains("Rate limit"),
+                "expected rate-limit error, got: {text}"
+            );
+        }
+    }
+
+    #[test]
+    fn call_repo_push_tool_force_allowed_falls_through_to_handler() {
+        // With force push enabled and a non-protected branch, both guards
+        // allow the push, so control falls through to `handle_repo_push`, which
+        // then fails at the invalid URL.
+        let mut server = server_with_security(SecurityConfig {
+            allow_force_push: true,
+            ..Default::default()
+        });
+        initialise_server(&mut server);
+        let result = server.call_repo_push_tool(&json!({
+            "bundle": valid_header_bundle(),
+            "url": "not-a-url",
+            "branch": "feature/x",
+            "force": true,
+        }));
+        assert!(result.is_error);
+    }
+
+    #[tokio::test]
+    async fn handle_transport_result_eof_signals_shutdown() {
+        let mut server = create_test_server();
+        let outcome = server.handle_transport_result(Ok(None)).await.unwrap();
+        assert!(matches!(outcome, Some(ShutdownReason::ClientDisconnected)));
+        assert_eq!(server.state(), ServerState::ShuttingDown);
+    }
+
+    #[tokio::test]
+    async fn handle_transport_result_blank_line_is_skipped() {
+        let mut server = create_test_server();
+        let outcome = server
+            .handle_transport_result(Ok(Some("   \t  ".to_string())))
+            .await
+            .unwrap();
+        assert!(outcome.is_none());
+        // A blank line does not advance the lifecycle.
+        assert_eq!(server.state(), ServerState::AwaitingInit);
+    }
 }
