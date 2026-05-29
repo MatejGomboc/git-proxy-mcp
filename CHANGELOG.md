@@ -1299,6 +1299,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **The credential callback logged the URL username verbatim, which can be a
+  token.** `credentials_callback` logged `username = ?username_from_url` in its
+  entry `debug!`. For HTTPS, a Personal Access Token is commonly supplied *as*
+  the username (e.g. `https://<PAT>@github.com/…`), so git2 hands the callback
+  `username_from_url = Some("<PAT>")` — and the debug line would print the token,
+  violating the "never log credentials" rule. It only fired at `debug` level (the
+  default is `warn`) and the URL itself was already sanitised, so the exposure
+  was limited, but it was a real latent leak. The callback now logs only
+  `username_present = <bool>` — enough to diagnose auth problems, never the
+  value. Regression-tested by `credentials_callback_never_logs_a_token_username`,
+  which runs the callback under a live DEBUG subscriber and asserts the token
+  never appears in the captured output, plus `sanitize_url_strips_token_used_as_username`
+  for the URL-sanitiser equivalent. (Audit scope: every credential-adjacent
+  logging site was reviewed — the password parser, the `git credential fill`
+  error arms, and the `from_fetch`/`from_push` error redaction are all clean;
+  this username log was the only leak.)
 - **Force pushes to protected branches were not blocked when force push was
   globally enabled.** `repo_push` called `BranchGuard::check("push", &[branch])`,
   but that CLI-arg form expects a full `git push` argument vector: given only a

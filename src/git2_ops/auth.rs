@@ -133,9 +133,13 @@ fn credentials_callback(
     username_from_url: Option<&str>,
     allowed_types: CredentialType,
 ) -> Result<Cred, git2::Error> {
+    // Log only whether a username was present, never its value. For HTTPS a
+    // token is commonly supplied as the username (e.g. `https://<PAT>@host`),
+    // so `username_from_url` can itself be a secret — logging it verbatim would
+    // leak the credential at debug level. The URL is sanitised the same way.
     debug!(
         url = %sanitize_url_for_logging(url),
-        username = ?username_from_url,
+        username_present = username_from_url.is_some(),
         allowed_types = ?allowed_types,
         "credential callback invoked"
     );
@@ -931,5 +935,76 @@ mod tests {
         let sanitized = sanitize_url_for_logging(url);
         assert!(!sanitized.contains("tok"));
         assert!(sanitized.contains("***@gitlab.example.com:8443/group/project.git"));
+    }
+
+    #[test]
+    fn sanitize_url_strips_token_used_as_username() {
+        // A GitHub PAT supplied as the username (no password) — a common
+        // pattern (`https://<PAT>@github.com/...`). The whole userinfo, token
+        // included, must be replaced with `***`.
+        let url = "https://ghp_REALLOOKINGSECRET1234567890@github.com/owner/repo.git";
+        let sanitized = sanitize_url_for_logging(url);
+        assert!(!sanitized.contains("ghp_REALLOOKINGSECRET1234567890"));
+        assert!(!sanitized.contains("REALLOOKINGSECRET"));
+        assert_eq!(sanitized, "https://***@github.com/owner/repo.git");
+    }
+
+    /// Minimal [`std::io::Write`] that appends to a shared buffer so a test can
+    /// capture `tracing` output and assert credentials never appear in it.
+    #[derive(Clone)]
+    struct CaptureWriter(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl std::io::Write for CaptureWriter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0
+                .lock()
+                .expect("capture buffer poisoned")
+                .extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn credentials_callback_never_logs_a_token_username() {
+        // Defence-in-depth regression: with a DEBUG subscriber active, the
+        // credential callback's entry log must NOT contain a token supplied as
+        // the URL username. `CredentialType::empty()` is used so no real
+        // credential method is attempted (no ssh-agent / credential-helper /
+        // network), isolating the test to the logging path.
+        let token = "ghp_REALLOOKINGSECRET1234567890";
+        let url = format!("https://{token}@github.com/owner/repo.git");
+
+        let buffer = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = buffer.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::DEBUG)
+            .with_writer(move || CaptureWriter(sink.clone()))
+            .finish();
+
+        let result = tracing::subscriber::with_default(subscriber, || {
+            credentials_callback(&url, Some(token), CredentialType::empty())
+        });
+        // No credential method was allowed, so the callback reports failure.
+        assert!(result.is_err());
+
+        let logged = String::from_utf8(buffer.lock().unwrap().clone()).unwrap();
+        assert!(
+            logged.contains("credential callback invoked"),
+            "entry log should have been emitted; got: {logged}"
+        );
+        assert!(
+            !logged.contains(token) && !logged.contains("REALLOOKINGSECRET"),
+            "token leaked into the credential-callback log: {logged}"
+        );
+        // The sanitised host is still logged for diagnostics.
+        assert!(logged.contains("github.com"));
+
+        // The fmt layer is line-buffered and may never call the writer's
+        // `flush`, so exercise it directly to confirm it is a clean no-op.
+        std::io::Write::flush(&mut CaptureWriter(buffer)).unwrap();
     }
 }
