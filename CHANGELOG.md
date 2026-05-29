@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-05-29
+
 ### Added
 
 - **End-to-end submodule include/exclude/depth filtering test.** New
@@ -1253,7 +1255,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`.github/ISSUE_TEMPLATE/bug_report.md` example version was a
   pre-1.0 placeholder.** The `git-proxy-mcp version: [e.g., 0.1.0]` hint
   predated the project's 1.0 release. Replaced with a pointer to
-  `git-proxy-mcp --version` and a current-tier example (1.1.0).
+  `git-proxy-mcp --version` and a current-tier example (1.2.0).
 - **`CONTRIBUTING.md` British-spelling reference table was a partial
   list.** It had 7 American/British pairs, missing the ones that came
   up repeatedly during this audit (`sanitize`, `authorize`, `finalize`,
