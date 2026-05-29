@@ -88,9 +88,14 @@ TEST_CONFIG = {
 class McpTestClient:
     """Manages an MCP server subprocess and sends JSON-RPC requests."""
 
-    def __init__(self, binary, config_path):
+    def __init__(self, binary, config_path, log_path=SERVER_LOG_PATH):
         self.binary = binary
         self.config_path = config_path
+        # Each client logs to its own file. The shared client uses the default
+        # SERVER_LOG_PATH; auxiliary servers (e.g. the repo-filter enforcement
+        # checks, which need a differently-configured server) pass a distinct
+        # path so they do not truncate or interleave with the shared log.
+        self.log_path = log_path
         self.process = None
         self.log_file = None
         self.request_id = 0
@@ -98,7 +103,7 @@ class McpTestClient:
     def start(self):
         """Start the MCP server subprocess."""
         os.makedirs(LOG_DIR, exist_ok=True)
-        self.log_file = open(SERVER_LOG_PATH, "w", encoding="utf-8")
+        self.log_file = open(self.log_path, "w", encoding="utf-8")
         try:
             self.process = subprocess.Popen(
                 [self.binary, "--config", self.config_path],
@@ -114,7 +119,7 @@ class McpTestClient:
 
         if self.process.poll() is not None:
             self.log_file.close()
-            with open(SERVER_LOG_PATH, encoding="utf-8") as f:
+            with open(self.log_path, encoding="utf-8") as f:
                 log_content = f.read()
             raise RuntimeError(f"Server failed to start:\n{log_content}")
 
@@ -1781,6 +1786,90 @@ def test_clone_without_lfs_keeps_pointer(client, runner):
     )
 
 
+def _clone_with_security(security_overrides, tag):
+    """Spawn a fresh server with the shared `TEST_CONFIG` plus the given
+    `security` overrides, complete the handshake, and attempt to clone the
+    fixture.
+
+    Returns the parsed `repo_clone` result: a dict on success, or the
+    ``{"_error": ..., "_isError": True}`` shape on a tool error. Used to
+    exercise repo allow/blocklist enforcement, which needs a server configured
+    differently from the shared one.
+    """
+    cfg = dict(TEST_CONFIG)
+    cfg["security"] = {**TEST_CONFIG["security"], **security_overrides}
+    cfg_path = os.path.join(LOG_DIR, f"config-{tag}.json")
+    with open(cfg_path, "w", newline="\n", encoding="utf-8") as f:
+        json.dump(cfg, f, indent=4)
+
+    client = McpTestClient(
+        BINARY, cfg_path, log_path=os.path.join(LOG_DIR, f"server-{tag}.log")
+    )
+    try:
+        client.start()
+        client.send(
+            "initialize",
+            {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {"name": "integration-test", "version": "1.0.0"},
+            },
+        )
+        client.notify("notifications/initialized")
+        time.sleep(0.5)
+        return client.call_tool(
+            "repo_clone", {"url": REPO_URL, "branch": "main", "depth": 1}
+        )
+    finally:
+        client.stop()
+
+
+def test_repo_filter_enforcement(runner):
+    """Repo allow/blocklist enforcement, end to end.
+
+    The shared server runs with both lists null (no filtering). These checks
+    spin up servers configured with a blocklist or an allowlist and confirm the
+    policy is enforced at the tool boundary — a path the unit tests cannot
+    reach, because it depends on the server wiring the filter into the clone
+    dispatch (the same wiring that once let `repo_diff` slip past the filter).
+    """
+    print()
+    print("=== Test: repo allow/blocklist enforcement ===")
+
+    host = urlsplit(REPO_URL).hostname
+
+    # Blocklist mode: a pattern matching the fixture's host refuses the clone
+    # before any network access.
+    blocked = _clone_with_security({"repo_blocklist": [f"{host}/*"]}, "blocklist")
+    runner.check(
+        blocked.get("_isError") is True
+        and "is not allowed by policy" in blocked.get("_error", ""),
+        "blocklisted repo is refused",
+        actual=blocked.get("_error", blocked),
+    )
+
+    # Allowlist mode with a non-matching pattern: the fixture is not on the
+    # allowlist, so it is refused (deny by default).
+    denied = _clone_with_security(
+        {"repo_allowlist": ["example.invalid/*"]}, "allowlist-deny"
+    )
+    runner.check(
+        denied.get("_isError") is True
+        and "is not allowed by policy" in denied.get("_error", ""),
+        "repo absent from allowlist is refused",
+        actual=denied.get("_error", denied),
+    )
+
+    # Allowlist mode with a matching pattern: the fixture is permitted and the
+    # clone actually succeeds.
+    allowed = _clone_with_security({"repo_allowlist": [f"{host}/*"]}, "allowlist-permit")
+    runner.check(
+        not allowed.get("_isError", False) and "commit" in allowed,
+        "allowlisted repo is permitted and clones",
+        actual=allowed.get("_error", allowed.get("commit")),
+    )
+
+
 def main():
     """Run all integration tests against the MCP server."""
     if not REPO_URL:
@@ -1820,6 +1909,10 @@ def main():
         # Push tests.
         test_repo_push(client, runner, refs_content)
         test_push_protected_branch(client, runner, refs_content)
+
+        # Security-policy tests (each spins up its own differently-configured
+        # server, so they take only `runner`).
+        test_repo_filter_enforcement(runner)
 
         # Advanced feature tests.
         test_multi_chunk_streaming(client, runner)
