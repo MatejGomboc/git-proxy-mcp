@@ -482,8 +482,8 @@ with a `configuration validation failed: …` message naming the offending field
 The checks reject only values that would render a subsystem unusable: a zero
 `timeouts.request_timeout_secs` or any of the `lfs.*_timeout_secs` (every request
 would time out immediately), a zero `limits.max_output_bytes` (every command's
-output would be truncated to nothing), `rate_limits.max_burst` of `0` (every
-operation blocked forever), a non-finite or negative
+combined stdout+stderr would be truncated to nothing), `rate_limits.max_burst`
+of `0` (every operation blocked forever), a non-finite or negative
 `rate_limits.refill_rate_per_sec`
 (`0.0` is allowed — it means "burst once, never refill"), a zero
 `sessions.timeout_secs` / `sessions.max_streaming_sessions` /
