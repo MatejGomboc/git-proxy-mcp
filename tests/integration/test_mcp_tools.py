@@ -999,6 +999,77 @@ def test_clone_without_submodules(client, runner):
     )
 
 
+def test_clone_submodule_filtering(client, runner):
+    """Submodule include/exclude/depth filtering, end to end.
+
+    Submodule detection in the bare-repo clone path is environment-dependent
+    (see test_clone_with_submodules — some git2/libgit2 builds report no
+    submodules at all). So this first clones with no filter to learn whether
+    the fixture's `vendor/mustache` submodule is attempted. If it is, each
+    filter must drive the attempt count back to zero; if detection finds none,
+    the filter checks are skipped with a NOTE rather than asserting vacuously.
+
+    The nested child-submodule recursion arm is intentionally not covered here:
+    it needs a submodule whose own repository contains a submodule, which the
+    fixture's external, uncontrolled submodule target cannot provide.
+    """
+    print()
+    print("=== Test: submodule include/exclude/depth filtering ===")
+
+    def attempted(**extra):
+        """Clone main with submodules enabled plus `extra` args; return the
+        number of submodules attempted (included + failed), or None on error."""
+        args = {
+            "url": REPO_URL,
+            "branch": "main",
+            "depth": 1,
+            "include_submodules": True,
+        }
+        args.update(extra)
+        content = client.call_tool("repo_clone", args)
+        if content.get("_isError"):
+            return None
+        return content.get("submodules_included", 0) + content.get(
+            "submodules_failed", 0
+        )
+
+    baseline = attempted()
+    if baseline is None:
+        runner.check(False, "baseline submodule clone succeeded", actual="error")
+        return
+    if baseline == 0:
+        print("  NOTE: no submodules detected in clone path — filter checks skipped")
+        runner.check(True, "submodule detection unavailable; filter checks skipped")
+        return
+
+    # Exclude the matching submodule -> nothing attempted.
+    excl = attempted(submodule_exclude=["vendor/mustache"])
+    runner.check(
+        excl == 0,
+        "submodule_exclude removes the matching submodule",
+        actual=excl,
+        expected=0,
+    )
+
+    # An allowlist that does not match the submodule path -> nothing attempted.
+    inc = attempted(submodule_include=["nonexistent/*"])
+    runner.check(
+        inc == 0,
+        "non-matching submodule_include removes the submodule",
+        actual=inc,
+        expected=0,
+    )
+
+    # submodule_depth=0 skips submodule processing entirely.
+    depth0 = attempted(submodule_depth=0)
+    runner.check(
+        depth0 == 0,
+        "submodule_depth=0 skips submodules",
+        actual=depth0,
+        expected=0,
+    )
+
+
 def test_force_push(client, runner, refs_content):
     """Test that force push is rejected when allow_force_push=false."""
     print()
@@ -1918,6 +1989,7 @@ def main():
         test_multi_chunk_streaming(client, runner)
         test_clone_with_submodules(client, runner)
         test_clone_without_submodules(client, runner)
+        test_clone_submodule_filtering(client, runner)
         test_force_push(client, runner, refs_content)
         test_clone_exclude_binary(client, runner)
         test_concurrent_sessions(client, runner)
