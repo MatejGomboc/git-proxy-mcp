@@ -230,6 +230,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Clone-tool handlers refactored for unit-testability and de-duplicated**
+  (no behaviour change). `handle_repo_clone` and `handle_repo_clone_start` each
+  had their entire post-fetch body — LFS credential retrieval, submodule-config
+  merge, in-memory tar creation, result assembly — reachable only through a
+  real network fetch, so it was exercised only by the Python integration suite.
+  That logic is now a private `build_clone_result` / `build_clone_start_result`
+  helper that unit tests drive against a locally-created bare repo (via the
+  existing test-only `FetchResult::from_parts_for_test`);
+  `handle_repo_clone_start`'s chunk-size clamping is a testable
+  `resolve_chunk_size` helper; and the per-request submodule include/exclude
+  merge — previously copy-pasted identically into both handlers — is now a
+  shared `SubmoduleConfig::with_request_overrides` method so the two cannot
+  drift. As part of the de-duplication, `repo_clone` now populates
+  `TarOptions.repo_url` only when `resolve_lfs` is enabled, matching
+  `repo_clone_start` (`repo_url` is consumed only on the LFS path, so this is
+  behaviour-neutral). `repo_clone.rs` 80.61 % -> 98.48 %, `repo_clone_chunk.rs`
+  72.73 % -> 100 %, `repo_clone_start.rs` 72.98 % -> 98.44 % line coverage; the
+  residual lines are the outer handlers' one-statement delegation calls,
+  reachable only after a successful network fetch (integration-covered).
 - **Credential-setup docs consolidated to a single source.** The
   `git config --global credential.helper …` (osxkeychain / manager / libsecret)
   and ssh-agent setup commands were duplicated verbatim in three places: the

@@ -25,7 +25,7 @@ use tracing::{debug, info};
 
 use crate::config::{LfsConfig, ProxyConfig, SubmoduleConfig};
 use crate::git2_ops::auth::{get_credentials_for_url, sanitize_url_for_logging};
-use crate::git2_ops::clone::{fetch_bare, FetchOptions2};
+use crate::git2_ops::clone::{fetch_bare, FetchOptions2, FetchResult};
 use crate::git2_ops::error::Git2Error;
 use crate::mcp::ProgressSender;
 use crate::streaming::tar::{create_tar_from_tree_with_options, encode_base64, TarOptions};
@@ -226,7 +226,6 @@ pub fn handle_repo_clone(
 /// - URL validation fails
 /// - Fetch operation fails (auth, network, etc.)
 /// - Tar creation fails
-#[allow(clippy::too_many_lines)] // Complex setup with many optional features
 pub fn handle_repo_clone_with_progress(
     args: RepoCloneArgs,
     proxy_config: &ProxyConfig,
@@ -238,6 +237,46 @@ pub fn handle_repo_clone_with_progress(
         url = %sanitize_url_for_logging(&args.url),
         branch = ?args.branch,
         "repo_clone tool called"
+    );
+
+    // Fetch into bare repository
+    let fetch_opts = FetchOptions2 {
+        branch: args.branch.clone(),
+        depth: args.depth,
+        progress: progress.clone(),
+        proxy_url: proxy_config.url.clone(),
+    };
+
+    let fetch_result = fetch_bare(&args.url, Some(fetch_opts))?;
+
+    build_clone_result(
+        &fetch_result,
+        args,
+        proxy_config,
+        lfs_config,
+        submodule_config,
+        progress,
+    )
+}
+
+/// Build the [`RepoCloneResult`] from an already-fetched bare repository.
+///
+/// Split out from [`handle_repo_clone_with_progress`] so the post-fetch path
+/// (LFS credential retrieval, submodule-config merge, in-memory tar creation,
+/// base64 encoding and result assembly) can be exercised by unit tests against
+/// a locally-created bare repo, without a real network fetch.
+fn build_clone_result(
+    fetch_result: &FetchResult,
+    args: RepoCloneArgs,
+    proxy_config: &ProxyConfig,
+    lfs_config: &LfsConfig,
+    submodule_config: &SubmoduleConfig,
+    progress: Option<ProgressSender>,
+) -> Result<RepoCloneResult, RepoCloneError> {
+    debug!(
+        commit = %fetch_result.head_commit,
+        branch = %fetch_result.branch,
+        "fetch complete, creating tar"
     );
 
     // Log info about optional features
@@ -253,58 +292,34 @@ pub fn handle_repo_clone_with_progress(
     if let Some(max_size) = args.max_file_size {
         debug!(max_size = max_size, "max file size limit set");
     }
-    if args.resolve_lfs == Some(true) {
-        debug!("LFS resolution enabled");
-    }
     if args.include_submodules == Some(true) {
         debug!("submodule inclusion enabled");
     }
 
-    // Fetch into bare repository
-    let fetch_opts = FetchOptions2 {
-        branch: args.branch.clone(),
-        depth: args.depth,
-        progress: progress.clone(),
-        proxy_url: proxy_config.url.clone(),
-    };
-
-    let fetch_result = fetch_bare(&args.url, Some(fetch_opts))?;
-
-    debug!(
-        commit = %fetch_result.head_commit,
-        branch = %fetch_result.branch,
-        "fetch complete, creating tar"
-    );
-
     // Get LFS credentials from git credential helper if LFS resolution is enabled
     // Credentials are retrieved on-demand from OS credential stores (macOS Keychain,
     // Windows Credential Manager, etc.) and NEVER sent to AI - they stay on user's PC.
-    let lfs_credentials = if args.resolve_lfs == Some(true) {
+    let resolve_lfs = args.resolve_lfs == Some(true);
+    let lfs_credentials = if resolve_lfs {
         debug!("LFS enabled, retrieving credentials from OS credential store");
         get_credentials_for_url(&args.url)
     } else {
         None
     };
 
-    // Build effective submodule config: merge per-request overrides with server defaults
-    let effective_sub_config = SubmoduleConfig {
-        max_concurrent: submodule_config.max_concurrent,
-        max_failures: submodule_config.max_failures,
-        include_patterns: args
-            .submodule_include
-            .or_else(|| submodule_config.include_patterns.clone()),
-        exclude_patterns: args
-            .submodule_exclude
-            .or_else(|| submodule_config.exclude_patterns.clone()),
-    };
+    // Build effective submodule config: merge per-request overrides with server defaults.
+    let effective_sub_config =
+        submodule_config.with_request_overrides(args.submodule_include, args.submodule_exclude);
 
-    // Create tar.gz from tree (in memory), with optional filtering
+    // Create tar.gz from tree (in memory), with optional filtering.
+    // `repo_url` is only consumed when LFS resolution is enabled, so only set
+    // it then (matching `repo_clone_start`).
     let tar_opts = TarOptions {
         sparse_patterns: args.sparse,
         exclude_binary: args.exclude_binary,
         max_file_size: args.max_file_size,
         resolve_lfs: args.resolve_lfs,
-        repo_url: Some(args.url),
+        repo_url: if resolve_lfs { Some(args.url) } else { None },
         lfs_credentials, // From OS credential store, NEVER sent to AI
         include_submodules: args.include_submodules,
         proxy_url: proxy_config.url.clone(),
@@ -350,7 +365,7 @@ pub fn handle_repo_clone_with_progress(
     Ok(RepoCloneResult {
         archive: archive_base64,
         commit: fetch_result.head_commit.to_string(),
-        branch: fetch_result.branch,
+        branch: fetch_result.branch.clone(),
         file_count: tar_result.file_count,
         archive_size: tar_result.data.len(),
         skipped_by_filter: tar_result.skipped_by_filter,
@@ -623,5 +638,183 @@ mod tests {
         assert!(is_zero(&0));
         assert!(!is_zero(&1));
         assert!(!is_zero(&100));
+    }
+
+    /// Run a closure with a DEBUG-level `tracing` subscriber active (output
+    /// discarded), so the `debug!`/`info!` field expressions in the handlers
+    /// are actually evaluated and counted as covered. Without an active
+    /// subscriber, `tracing` skips evaluating the field values entirely.
+    fn run_with_debug_logs<T>(f: impl FnOnce() -> T) -> T {
+        let subscriber = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::DEBUG)
+            .with_writer(std::io::sink)
+            .finish();
+        tracing::subscriber::with_default(subscriber, f)
+    }
+
+    /// Build a `FetchResult` around a locally-created bare repo (no network)
+    /// so the post-fetch `build_clone_result` path can be exercised directly.
+    /// The repo has two files: `README.md` and `src/main.rs`.
+    fn local_fetch_result() -> FetchResult {
+        use git2::Repository;
+        let temp = tempfile::TempDir::new().unwrap();
+        let commit = {
+            let repo = Repository::init_bare(temp.path()).unwrap();
+            let readme = repo.blob(b"# Test Repo\n").unwrap();
+            let main_rs = repo.blob(b"fn main() {}\n").unwrap();
+            let mut tb = repo.treebuilder(None).unwrap();
+            tb.insert("README.md", readme, 0o100_644).unwrap();
+            let src = {
+                let mut sb = repo.treebuilder(None).unwrap();
+                sb.insert("main.rs", main_rs, 0o100_644).unwrap();
+                sb.write().unwrap()
+            };
+            tb.insert("src", src, 0o040_000).unwrap();
+            let tree_oid = tb.write().unwrap();
+            let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+            let tree = repo.find_tree(tree_oid).unwrap();
+            repo.commit(Some("HEAD"), &sig, &sig, "test", &tree, &[])
+                .unwrap()
+        };
+        let repo = Repository::open_bare(temp.path()).unwrap();
+        FetchResult::from_parts_for_test(repo, commit, "main".to_string(), temp)
+    }
+
+    fn clone_args(url: &str) -> RepoCloneArgs {
+        RepoCloneArgs {
+            url: url.to_string(),
+            branch: None,
+            depth: None,
+            sparse: None,
+            exclude_binary: None,
+            max_file_size: None,
+            resolve_lfs: None,
+            include_submodules: None,
+            submodule_depth: None,
+            submodule_include: None,
+            submodule_exclude: None,
+        }
+    }
+
+    #[test]
+    fn build_clone_result_archives_local_repo() {
+        let fetch = local_fetch_result();
+        let expected_commit = fetch.head_commit.to_string();
+        let result = build_clone_result(
+            &fetch,
+            clone_args("https://github.com/owner/repo.git"),
+            &ProxyConfig::default(),
+            &LfsConfig::default(),
+            &SubmoduleConfig::default(),
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(result.commit, expected_commit);
+        assert_eq!(result.branch, "main");
+        assert_eq!(result.file_count, 2); // README.md + src/main.rs
+        assert!(!result.archive.is_empty());
+        assert!(result.archive_size > 0);
+        assert_eq!(result.skipped_by_filter, 0);
+    }
+
+    #[test]
+    fn build_clone_result_applies_sparse_and_logs_options() {
+        // Exercises the optional-feature debug branches (depth, sparse,
+        // exclude_binary, max_file_size, include_submodules) and the sparse
+        // filter: only `src/main.rs` matches `**/*.rs`, so `README.md` is
+        // counted as skipped.
+        let fetch = local_fetch_result();
+        let mut args = clone_args("https://github.com/owner/repo.git");
+        args.depth = Some(1);
+        args.sparse = Some(vec!["**/*.rs".to_string()]);
+        args.exclude_binary = Some(true);
+        args.max_file_size = Some(1_048_576);
+        args.include_submodules = Some(true);
+        args.submodule_include = Some(vec!["lib/*".to_string()]);
+
+        // Run under a live subscriber so the per-feature `debug!` lines and the
+        // completion `info!` are evaluated.
+        let result = run_with_debug_logs(|| {
+            build_clone_result(
+                &fetch,
+                args,
+                &ProxyConfig::default(),
+                &LfsConfig::default(),
+                &SubmoduleConfig::default(),
+                None,
+            )
+        })
+        .unwrap();
+
+        assert_eq!(result.file_count, 1);
+        assert_eq!(result.skipped_by_filter, 1);
+        assert_eq!(result.submodules_included, 0); // repo has no submodules
+    }
+
+    #[test]
+    fn handle_repo_clone_emits_entry_log_then_fails_on_invalid_url() {
+        // Drives the outer handler under a live subscriber so its entry
+        // `info!` (which formats the sanitised URL) is evaluated; the invalid
+        // URL then fails fast at the fetch with no network access.
+        let result = run_with_debug_logs(|| {
+            handle_repo_clone(
+                clone_args("not-a-url"),
+                &ProxyConfig::default(),
+                &LfsConfig::default(),
+                &SubmoduleConfig::default(),
+            )
+        });
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn build_clone_result_with_lfs_resolution_archives_non_pointer_files() {
+        // Exercises the `resolve_lfs == Some(true)` branch: credentials are
+        // retrieved (gracefully None when no helper is configured — and the
+        // call degrades cleanly if git is absent), `repo_url` is set, and an
+        // LFS client is created. The repo has no LFS pointers, so no network
+        // request is made and the files are archived verbatim.
+        let fetch = local_fetch_result();
+        let mut args = clone_args("https://github.com/owner/repo.git");
+        args.resolve_lfs = Some(true);
+
+        let result = build_clone_result(
+            &fetch,
+            args,
+            &ProxyConfig::default(),
+            &LfsConfig::default(),
+            &SubmoduleConfig::default(),
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(result.file_count, 2);
+        assert_eq!(result.lfs_resolved, 0);
+        assert_eq!(result.lfs_failed, 0);
+    }
+
+    #[test]
+    fn build_clone_result_propagates_tar_error_for_unknown_commit() {
+        // A `FetchResult` pointing at a commit that does not exist in the repo
+        // makes `create_tar_from_tree_with_options` fail; the error must
+        // propagate as a `RepoCloneError` (covers the `?` error path and the
+        // `Git2Error -> RepoCloneError` conversion).
+        use git2::Repository;
+        let temp = tempfile::TempDir::new().unwrap();
+        Repository::init_bare(temp.path()).unwrap();
+        let repo = Repository::open_bare(temp.path()).unwrap();
+        let bogus = git2::Oid::from_str("dead00000000000000000000000000000000beef").unwrap();
+        let fetch = FetchResult::from_parts_for_test(repo, bogus, "main".to_string(), temp);
+
+        let result = build_clone_result(
+            &fetch,
+            clone_args("https://github.com/owner/repo.git"),
+            &ProxyConfig::default(),
+            &LfsConfig::default(),
+            &SubmoduleConfig::default(),
+            None,
+        );
+        assert!(result.is_err());
     }
 }

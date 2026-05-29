@@ -332,4 +332,164 @@ mod tests {
         assert!(json.contains("\"is_complete\":true"));
         assert!(json.contains("\"next_missing_chunk\":null"));
     }
+
+    #[test]
+    fn repo_clone_cancel_result_serializes() {
+        let json = serde_json::to_string(&RepoCloneCancelResult { cancelled: true }).unwrap();
+        assert!(json.contains("\"cancelled\":true"));
+    }
+
+    #[test]
+    fn repo_clone_chunk_error_displays_and_converts() {
+        let err = RepoCloneChunkError {
+            message: "boom".to_string(),
+        };
+        assert_eq!(format!("{err}"), "boom");
+
+        // From<StreamingError> is used by the `?` operator in the handlers.
+        let converted: RepoCloneChunkError =
+            StreamingError::SessionNotFound("xyz".to_string()).into();
+        assert!(converted.message.contains("xyz"));
+    }
+
+    /// Run a closure with a DEBUG-level `tracing` subscriber active (output
+    /// discarded), so the `debug!`/`info!` field expressions in the handlers
+    /// are actually evaluated and counted as covered.
+    fn run_with_debug_logs<T>(f: impl FnOnce() -> T) -> T {
+        let subscriber = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::DEBUG)
+            .with_writer(std::io::sink)
+            .finish();
+        tracing::subscriber::with_default(subscriber, f)
+    }
+
+    /// Create an in-memory streaming session and return the manager, its
+    /// session ID, and its total chunk count.
+    fn manager_with_session(
+        data: Vec<u8>,
+        chunk_size: usize,
+    ) -> (StreamingSessionManager, String, usize) {
+        let manager = StreamingSessionManager::default();
+        let info = manager
+            .create_session(
+                "https://github.com/owner/repo.git",
+                "main",
+                "abc123",
+                data,
+                chunk_size,
+            )
+            .unwrap();
+        (manager, info.session_id, info.total_chunks)
+    }
+
+    #[test]
+    fn handle_chunk_returns_data_and_resume_hint() {
+        // Chunk size is clamped to a 1 KiB minimum by the session, so use a
+        // >1 KiB payload to get multiple chunks.
+        let data: Vec<u8> = (0u8..=255).cycle().take(3000).collect();
+        let (manager, id, total) = manager_with_session(data, 1024);
+        assert!(total >= 2);
+
+        // Run under a live subscriber so the completion `info!` field
+        // expressions (including `chunk.data.len()`) are evaluated.
+        let first = run_with_debug_logs(|| {
+            handle_repo_clone_chunk(
+                RepoCloneChunkArgs {
+                    session_id: id.clone(),
+                    chunk_index: 0,
+                },
+                &manager,
+            )
+        })
+        .unwrap();
+        assert_eq!(first.chunk_index, 0);
+        assert_eq!(first.chunk_size, 1024);
+        assert!(!first.is_last);
+        assert_eq!(first.next_missing_chunk, Some(1));
+        assert!(!first.data.is_empty());
+
+        // The final chunk reports is_last and no further missing chunk.
+        let last = handle_repo_clone_chunk(
+            RepoCloneChunkArgs {
+                session_id: id,
+                chunk_index: total - 1,
+            },
+            &manager,
+        )
+        .unwrap();
+        assert!(last.is_last);
+    }
+
+    #[test]
+    fn handle_chunk_errors_for_unknown_session() {
+        let manager = StreamingSessionManager::default();
+        let result = handle_repo_clone_chunk(
+            RepoCloneChunkArgs {
+                session_id: "does-not-exist".to_string(),
+                chunk_index: 0,
+            },
+            &manager,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn handle_status_reports_progress() {
+        let data: Vec<u8> = (0u8..=255).cycle().take(3000).collect();
+        let (manager, id, total) = manager_with_session(data, 1024);
+
+        // Retrieve one chunk so progress is non-zero but incomplete.
+        let _ = handle_repo_clone_chunk(
+            RepoCloneChunkArgs {
+                session_id: id.clone(),
+                chunk_index: 0,
+            },
+            &manager,
+        )
+        .unwrap();
+
+        let status = handle_repo_clone_status(
+            RepoCloneStatusArgs {
+                session_id: id.clone(),
+            },
+            &manager,
+        )
+        .unwrap();
+        assert_eq!(status.session_id, id);
+        assert_eq!(status.total_chunks, total);
+        assert_eq!(status.delivered_chunks, 1);
+        assert!(!status.is_complete);
+        assert!(status.progress_percent > 0.0);
+    }
+
+    #[test]
+    fn handle_status_errors_for_unknown_session() {
+        let manager = StreamingSessionManager::default();
+        let result = handle_repo_clone_status(
+            RepoCloneStatusArgs {
+                session_id: "does-not-exist".to_string(),
+            },
+            &manager,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn handle_cancel_removes_existing_then_reports_missing() {
+        let (manager, id, _) = manager_with_session(vec![1u8; 100], 64);
+
+        let cancelled = handle_repo_clone_cancel(
+            RepoCloneCancelArgs {
+                session_id: id.clone(),
+            },
+            &manager,
+        )
+        .unwrap();
+        assert!(cancelled.cancelled);
+
+        // A second cancel finds nothing — `cancelled` is false, not an error.
+        let again =
+            handle_repo_clone_cancel(RepoCloneCancelArgs { session_id: id }, &manager).unwrap();
+        assert!(!again.cancelled);
+    }
 }
