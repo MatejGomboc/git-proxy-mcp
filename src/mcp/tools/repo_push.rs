@@ -25,7 +25,7 @@ use tracing::{debug, info};
 use crate::config::ProxyConfig;
 use crate::git2_ops::auth::sanitize_url_for_logging;
 use crate::git2_ops::error::Git2Error;
-use crate::git2_ops::push::{push_bundle, PushOptions2};
+use crate::git2_ops::push::{push_bundle, PushOptions2, PushResult};
 use crate::streaming::bundle::{decode_bundle, validate_bundle};
 
 /// Arguments for the `repo_push` tool.
@@ -163,24 +163,34 @@ pub fn handle_repo_push(
         proxy_config.url.as_deref(),
     )?;
 
+    Ok(build_push_result(result, args.force, &args.url))
+}
+
+/// Assemble the [`RepoPushResult`] from a completed push.
+///
+/// Split out from [`handle_repo_push`] so the success-path logging and result
+/// shaping can be unit-tested without a real network push.
+fn build_push_result(result: PushResult, force: bool, url: &str) -> RepoPushResult {
     info!(
         commit = %result.commit,
         branch = %result.branch,
         "repo_push complete"
     );
 
-    Ok(RepoPushResult {
+    RepoPushResult {
         branch: result.branch,
         commit: result.commit,
-        force: args.force,
-        remote_url: sanitize_url_for_logging(&args.url),
+        force,
+        remote_url: sanitize_url_for_logging(url),
         hint: "To create a bundle: use helper_script tool, then: python git_proxy_helper.py bundle <repo_dir> <since_commit>".to_string(),
-    })
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mcp::tools::run_with_debug_logs;
+    use crate::streaming::tar::encode_base64;
 
     #[test]
     fn repo_push_args_defaults() {
@@ -300,5 +310,43 @@ mod tests {
         };
         let proxy = ProxyConfig::default();
         assert!(handle_repo_push(args, &proxy).is_err());
+    }
+
+    #[test]
+    fn handle_repo_push_reaches_push_with_valid_header_bundle() {
+        // A minimal valid-header bundle passes `validate_bundle`, so the handler
+        // proceeds to build the push options and call `push_bundle`, which then
+        // rejects the invalid URL. This exercises the push-options construction
+        // and the push invocation (the success path beyond is integration-only).
+        let args = RepoPushArgs {
+            bundle: encode_base64(b"# v2 bundle\nnot-a-real-bundle"),
+            url: "not-a-url".to_string(),
+            branch: "main".to_string(),
+            force: false,
+        };
+        let result = run_with_debug_logs(|| handle_repo_push(args, &ProxyConfig::default()));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn build_push_result_maps_fields_and_sanitises_url() {
+        let pushed = PushResult {
+            branch: "feature".to_string(),
+            commit: "abc123".to_string(),
+            remote_url: "https://github.com/owner/repo.git".to_string(),
+        };
+        let result = run_with_debug_logs(|| {
+            build_push_result(
+                pushed,
+                true,
+                "https://user:s3cr3t@github.com/owner/repo.git",
+            )
+        });
+        assert_eq!(result.branch, "feature");
+        assert_eq!(result.commit, "abc123");
+        assert!(result.force);
+        assert!(!result.remote_url.contains("s3cr3t"), "URL not sanitised");
+        assert!(result.remote_url.contains("github.com"));
+        assert!(result.hint.contains("bundle"));
     }
 }

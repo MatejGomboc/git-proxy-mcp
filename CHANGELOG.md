@@ -230,6 +230,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`repo_push` / `repo_pull` / `repo_diff` / `repo_refs` handlers refactored
+  for unit-testability** (no behaviour change). Each had its success path — the
+  completion `info!` and result-struct assembly — reachable only through a real
+  network operation, so it was exercised only by the Python integration suite.
+  That logic is now a private `build_push_result` / `build_pull_result` /
+  `build_diff_result` / `build_refs_result` helper that unit tests drive by
+  constructing the underlying `git2_ops` result type directly (`PushResult`,
+  `PullResult`, `DiffResult`, `RefsResult` — all already had public fields).
+  `repo_pull`'s up-to-date-vs-changed branch is now covered for both arms, and
+  a minimal valid-header bundle lets a unit test drive `repo_push` through to
+  the `push_bundle` invocation. The `run_with_debug_logs` test helper that
+  forces `tracing` field evaluation (previously copy-pasted into three
+  clone-handler test modules) is consolidated into one `#[cfg(test)]` function
+  in `mcp::tools`. Coverage: `repo_push.rs` 85.92 % -> 99.43 %, `repo_pull.rs`
+  89.29 % -> 99.49 %, `repo_diff.rs` 92.08 % -> 99.27 %, `repo_refs.rs`
+  89.25 % -> 99.22 %; the single residual line in each is the success-path
+  delegation call, reachable only after a successful network operation.
 - **Clone-tool handlers refactored for unit-testability and de-duplicated**
   (no behaviour change). `handle_repo_clone` and `handle_repo_clone_start` each
   had their entire post-fetch body — LFS credential retrieval, submodule-config

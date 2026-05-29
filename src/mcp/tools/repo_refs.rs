@@ -24,7 +24,7 @@ use tracing::info;
 use crate::config::ProxyConfig;
 use crate::git2_ops::auth::sanitize_url_for_logging;
 use crate::git2_ops::error::Git2Error;
-use crate::git2_ops::refs::{list_remote_refs, RefInfo};
+use crate::git2_ops::refs::{list_remote_refs, RefInfo, RefsResult};
 
 /// Arguments for the `repo_refs` tool.
 #[derive(Debug, Clone, Deserialize)]
@@ -109,6 +109,14 @@ pub fn handle_repo_refs(
 
     let refs_result = list_remote_refs(&args.url, proxy_config.url.as_deref())?;
 
+    Ok(build_refs_result(refs_result))
+}
+
+/// Assemble the [`RepoRefsResult`] from listed remote refs.
+///
+/// Split out from [`handle_repo_refs`] so the success-path logging and result
+/// shaping can be unit-tested without a real network connection.
+fn build_refs_result(refs_result: RefsResult) -> RepoRefsResult {
     info!(
         branches = refs_result.branches.len(),
         tags = refs_result.tags.len(),
@@ -116,17 +124,18 @@ pub fn handle_repo_refs(
         "repo_refs complete"
     );
 
-    Ok(RepoRefsResult {
+    RepoRefsResult {
         branches: refs_result.branches,
         tags: refs_result.tags,
         default_branch: refs_result.default_branch,
         total_refs: refs_result.total_refs,
-    })
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mcp::tools::run_with_debug_logs;
 
     #[test]
     fn repo_refs_args_parses() {
@@ -211,6 +220,42 @@ mod tests {
         };
         let proxy = ProxyConfig::default();
         let result = handle_repo_refs(args, &proxy);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn build_refs_result_maps_fields() {
+        let refs_result = RefsResult {
+            branches: vec![RefInfo {
+                name: "refs/heads/main".to_string(),
+                short_name: "main".to_string(),
+                commit: "abc123".to_string(),
+            }],
+            tags: vec![RefInfo {
+                name: "refs/tags/v1.0.0".to_string(),
+                short_name: "v1.0.0".to_string(),
+                commit: "def456".to_string(),
+            }],
+            default_branch: "main".to_string(),
+            total_refs: 2,
+        };
+        let result = run_with_debug_logs(|| build_refs_result(refs_result));
+        assert_eq!(result.branches.len(), 1);
+        assert_eq!(result.tags.len(), 1);
+        assert_eq!(result.default_branch, "main");
+        assert_eq!(result.total_refs, 2);
+    }
+
+    #[test]
+    fn handle_repo_refs_emits_entry_log_then_fails_on_invalid_url() {
+        let result = run_with_debug_logs(|| {
+            handle_repo_refs(
+                RepoRefsArgs {
+                    url: "not-a-url".to_string(),
+                },
+                &ProxyConfig::default(),
+            )
+        });
         assert!(result.is_err());
     }
 }

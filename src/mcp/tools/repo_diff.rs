@@ -25,7 +25,7 @@ use tracing::info;
 
 use crate::config::ProxyConfig;
 use crate::git2_ops::auth::sanitize_url_for_logging;
-use crate::git2_ops::diff::{generate_diff, DiffStats};
+use crate::git2_ops::diff::{generate_diff, DiffResult, DiffStats};
 use crate::git2_ops::error::Git2Error;
 
 /// Arguments for the `repo_diff` tool.
@@ -127,6 +127,14 @@ pub fn handle_repo_diff(
         proxy_config.url.as_deref(),
     )?;
 
+    Ok(build_diff_result(diff_result))
+}
+
+/// Assemble the [`RepoDiffResult`] from a completed diff.
+///
+/// Split out from [`handle_repo_diff`] so the success-path logging and result
+/// shaping can be unit-tested without a real network fetch.
+fn build_diff_result(diff_result: DiffResult) -> RepoDiffResult {
     info!(
         files = diff_result.stats.files_changed,
         insertions = diff_result.stats.insertions,
@@ -134,17 +142,18 @@ pub fn handle_repo_diff(
         "repo_diff complete"
     );
 
-    Ok(RepoDiffResult {
+    RepoDiffResult {
         diff: diff_result.diff,
         stats: diff_result.stats,
         base_commit: diff_result.base_commit,
         head_commit: diff_result.head_commit,
-    })
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mcp::tools::run_with_debug_logs;
 
     #[test]
     fn repo_diff_args_parses() {
@@ -235,5 +244,41 @@ mod tests {
         };
         let proxy = ProxyConfig::default();
         assert!(handle_repo_diff(args, &proxy).is_err());
+    }
+
+    #[test]
+    fn build_diff_result_maps_fields() {
+        let diff_result = DiffResult {
+            diff: "a unified diff".to_string(),
+            stats: DiffStats {
+                files_changed: 2,
+                insertions: 5,
+                deletions: 3,
+            },
+            base_commit: "abc123".to_string(),
+            head_commit: "def456".to_string(),
+        };
+        let result = run_with_debug_logs(|| build_diff_result(diff_result));
+        assert_eq!(result.diff, "a unified diff");
+        assert_eq!(result.stats.files_changed, 2);
+        assert_eq!(result.stats.insertions, 5);
+        assert_eq!(result.stats.deletions, 3);
+        assert_eq!(result.base_commit, "abc123");
+        assert_eq!(result.head_commit, "def456");
+    }
+
+    #[test]
+    fn handle_repo_diff_emits_entry_log_then_fails_on_invalid_url() {
+        let result = run_with_debug_logs(|| {
+            handle_repo_diff(
+                RepoDiffArgs {
+                    url: "not-a-url".to_string(),
+                    base_commit: "a".to_string(),
+                    head_commit: "b".to_string(),
+                },
+                &ProxyConfig::default(),
+            )
+        });
+        assert!(result.is_err());
     }
 }
