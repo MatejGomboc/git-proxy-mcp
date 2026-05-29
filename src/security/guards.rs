@@ -905,4 +905,144 @@ mod tests {
         // A genuinely different repo is unaffected.
         assert!(filter.is_allowed("https://github.com/public/repo.git"));
     }
+
+    #[test]
+    fn branch_guard_unprotect_removes_branch() {
+        let mut guard = BranchGuard::new(["main", "release"]);
+        assert!(guard.is_protected("release"));
+        guard.unprotect("release");
+        assert!(!guard.is_protected("release"));
+        assert!(guard.is_protected("main")); // others unaffected
+    }
+
+    #[test]
+    fn branch_guard_check_allows_non_modifying_command() {
+        // A command that cannot modify branches is allowed without inspection.
+        let guard = BranchGuard::with_defaults();
+        assert!(guard.check("status", &[]).is_allowed());
+        assert!(guard.check("log", &["--oneline".to_string()]).is_allowed());
+    }
+
+    #[test]
+    fn branch_guard_check_push_parses_refspec_target() {
+        // A `local:remote` refspec resolves to the remote-side ref; a force push
+        // to a protected target is blocked, a non-force push is allowed.
+        let guard = BranchGuard::with_defaults();
+        let blocked = guard.check(
+            "push",
+            &[
+                "--force".to_string(),
+                "origin".to_string(),
+                "local:main".to_string(),
+            ],
+        );
+        assert!(blocked.is_blocked());
+
+        let allowed = guard.check("push", &["origin".to_string(), "local:main".to_string()]);
+        assert!(allowed.is_allowed()); // not a force push
+    }
+
+    #[test]
+    fn extract_branch_from_args_handles_all_command_shapes() {
+        use BranchGuard as BG;
+        // push: plain `remote branch` takes the second non-flag arg.
+        assert_eq!(
+            BG::extract_branch_from_args("push", &["origin".to_string(), "main".to_string()]),
+            Some("main".to_string())
+        );
+        // push: a `local:remote` refspec resolves to the remote ref (with `+`).
+        assert_eq!(
+            BG::extract_branch_from_args("push", &["origin".to_string(), "+feat:main".to_string()]),
+            Some("main".to_string())
+        );
+        // branch / checkout: first non-flag arg.
+        assert_eq!(
+            BG::extract_branch_from_args("branch", &["-d".to_string(), "old".to_string()]),
+            Some("old".to_string())
+        );
+        assert_eq!(
+            BG::extract_branch_from_args("checkout", &["feature".to_string()]),
+            Some("feature".to_string())
+        );
+        // merge / rebase: first non-flag arg.
+        assert_eq!(
+            BG::extract_branch_from_args("merge", &["topic".to_string()]),
+            Some("topic".to_string())
+        );
+        assert_eq!(
+            BG::extract_branch_from_args("rebase", &["upstream".to_string()]),
+            Some("upstream".to_string())
+        );
+        // Unknown command: nothing to extract.
+        assert_eq!(
+            BG::extract_branch_from_args("status", &["x".to_string()]),
+            None
+        );
+    }
+
+    #[test]
+    fn push_guard_check_allows_non_push_command() {
+        let guard = PushGuard::block_force_push();
+        assert!(guard.check("clone", &["--force".to_string()]).is_allowed());
+    }
+
+    #[test]
+    fn repo_filter_new_starts_empty_blocklist_mode() {
+        // `new()` (distinct from the `*_mode` constructors) is blocklist mode
+        // with empty lists, so everything is allowed.
+        let filter = RepoFilter::new();
+        assert!(filter.is_allowed("https://github.com/any/repo.git"));
+        assert!(RepoFilter::default().is_allowed("https://github.com/any/repo.git"));
+    }
+
+    #[test]
+    fn repo_filter_check_allows_non_remote_command() {
+        let filter = RepoFilter::blocklist_mode();
+        assert!(filter.check("status", &[]).is_allowed());
+    }
+
+    #[test]
+    fn repo_filter_check_extracts_url_from_remote_add() {
+        let mut filter = RepoFilter::blocklist_mode();
+        filter.block("github.com/blocked/*");
+        // `remote add <name> <url>` — the URL is the third argument.
+        let blocked = filter.check(
+            "remote",
+            &[
+                "add".to_string(),
+                "origin".to_string(),
+                "https://github.com/blocked/repo.git".to_string(),
+            ],
+        );
+        assert!(blocked.is_blocked());
+        // A non-`add` remote subcommand exposes no URL and is allowed.
+        let allowed = filter.check("remote", &["remove".to_string(), "origin".to_string()]);
+        assert!(allowed.is_allowed());
+    }
+
+    #[test]
+    fn repo_filter_normalises_trailing_slash_in_pattern() {
+        // A blocklist pattern with a trailing slash is normalised (slash
+        // stripped) before matching, so a repo under it is still blocked.
+        let mut filter = RepoFilter::blocklist_mode();
+        filter.block("github.com/blocked/");
+        assert!(!filter.is_allowed("https://github.com/blocked/repo.git"));
+    }
+
+    #[test]
+    fn branch_guard_default_uses_built_in_protections() {
+        // `Default` delegates to `with_defaults`.
+        let guard = BranchGuard::default();
+        assert!(guard.is_protected("main"));
+        assert!(!guard.is_protected("feature/x"));
+    }
+
+    #[test]
+    fn branch_guard_check_push_without_a_branch_is_allowed() {
+        // A push with no extractable branch falls through to Allowed.
+        let guard = BranchGuard::with_defaults();
+        assert!(guard.check("push", &[]).is_allowed());
+        // A force push whose only arg is the flag also has no branch to check.
+        assert!(guard.check("push", &["--force".to_string()]).is_allowed());
+    }
 }
