@@ -325,6 +325,7 @@ When adding or modifying code that handles credentials:
 |----------|--------|
 | `README.md` | User-facing overview and quick start |
 | `CONTRIBUTING.md` | This file — contributor guidelines |
+| `CODE_OF_CONDUCT.md` | Contributor Covenant code of conduct |
 | `STYLE.md` | Style conventions for Rust, YAML, JSON, TOML, Python, Markdown |
 | `SECURITY.md` | Security policy and vulnerability reporting (root) |
 | `docs/SECURITY.md` | Technical threat model and security controls |

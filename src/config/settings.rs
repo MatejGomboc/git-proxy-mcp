@@ -91,6 +91,8 @@ impl Config {
     /// - zero timeouts (`timeouts.request_timeout_secs` and the three
     ///   `lfs.*_timeout_secs`) — a `Duration` of zero makes every request fail
     ///   immediately;
+    /// - a zero `limits.max_output_bytes` — every command's combined
+    ///   stdout+stderr would then be truncated to nothing;
     /// - `rate_limits.max_burst` of zero — the token bucket can then never hand
     ///   out a token, blocking every operation forever;
     /// - a non-finite or negative `rate_limits.refill_rate_per_sec` — such a

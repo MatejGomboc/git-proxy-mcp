@@ -221,6 +221,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Credential-setup docs consolidated to a single source.** The
+  `git config --global credential.helper …` (osxkeychain / manager / libsecret)
+  and ssh-agent setup commands were duplicated verbatim in three places: the
+  README "Git authentication" section, the SECURITY.md "Git Configuration"
+  best-practices subsection, and the `docs/errors.md` troubleshooting section.
+  Per `STYLE.md`'s Single Source of Truth rule, the README is now the canonical
+  home (and absorbs SECURITY.md's macOS Keychain passphrase tip); SECURITY.md
+  and `docs/errors.md` cross-reference it instead of repeating the commands. Each
+  keeps its unique content — SECURITY.md's credential recommendations and
+  `docs/errors.md`'s `git ls-remote` connectivity test.
 - **`mcp::transport` line framing refactored for unit-testability; concurrency
   docs corrected** (no behaviour change):
     1. The `\n` / `\r\n` stripping and the read/write framing were extracted into
@@ -543,6 +553,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **README licence statement now matches the SPDX expression.** The Licence
+  section read "GNU General Public License v3.0" while `Cargo.toml`'s `license`
+  field is `GPL-3.0-or-later`; the README now reads "v3.0 or later" so the two
+  agree (the bundled `LICENCE` file is the GPLv3 text).
+- **`docs/SECURITY.md`'s `sanitize_url_for_logging` snippet had drifted from the
+  code.** The shown implementation found the first `@` anywhere in the URL; the
+  real function (`src/git2_ops/auth.rs`) scans only the authority component for
+  the userinfo `@` per RFC 3986 — the fix that stopped it mangling URLs with an
+  `@` in the path or query. Replaced the snippet and prose with the
+  authority-scoped logic. Also softened the adjacent "temp directory permissions
+  are 0700" claim: the code sets no explicit mode and relies on the `tempfile`
+  crate's owner-only default (0700 on Unix; the user's profile ACL on Windows).
+- **Source-tree diagrams omitted `src/util.rs`.** The shared `sanitize_for_log`
+  helper module was missing from the trees in both `docs/ARCHITECTURE.md` and
+  `.claude/CLAUDE.md`; added it. Also added a `CODE_OF_CONDUCT.md` row to
+  `CONTRIBUTING.md`'s "Types of Documentation" table, tightened
+  `docs/ARCHITECTURE.md`'s Tier 2 disk-threshold wording from "≥ 10 MiB" to
+  "larger than 10 MiB" (the code uses a strict `>`), and refreshed
+  `docs/errors.md`'s "Last updated" date.
+- **`limits.max_output_bytes` validation was undocumented.** `Config::validate`
+  rejects a zero `limits.max_output_bytes` (it sits in the same `nonzero_usize`
+  check as the session limits — see `src/config/settings.rs`), but the field was
+  missing from every narrative description of the validation rules: the
+  `validate` rustdoc, the README "Validation" prose, and the `docs/errors.md`
+  validation-rules table each listed the timeout, rate-limit, session, and
+  log-level checks but not this one. A user setting `max_output_bytes: 0` would
+  hit a `configuration validation failed` abort that none of the docs predicted.
+  Added it to all three.
+- **`docs/AI_WORKFLOW.md` workflow diagram showed a `repo_push` response shape
+  the server never returns.** The "Complete Workflow" ASCII diagram's PUSH step
+  said `Receives: { success: true, url: "…/commit/…" }`, but `RepoPushResult`
+  (see `src/mcp/tools/repo_push.rs`) has no `success` or `url` field — it returns
+  `branch`, `commit`, `force`, `remote_url`, and `hint`, exactly as the detailed
+  example later in the same document already shows. Updated the diagram to list
+  the real fields.
 - **`RateLimiter::time_until_available` could panic on a config-valid input.**
   It computed `Duration::from_secs_f64(1.0 / refill_rate)`, which panics when the
   result overflows `Duration`. A finite, positive but minuscule
@@ -892,7 +937,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   HTTP standard).
 - **`README.md` Prerequisites omitted the runtime Git CLI requirement.**
   The server shells out to `git credential fill` (in
-  `src/git2_ops/auth.rs`) and `git bundle unbundle` (in
+  `src/git2_ops/auth.rs`) and `git fetch` from a bundle file (in
   `src/git2_ops/push.rs`); a user installing only the prebuilt binary
   without git on `PATH` would have hit the credential helper failing to
   return anything and `repo_push` failing to apply the bundle. Added a
@@ -956,7 +1001,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`README.md` configuration table omitted defaults for half the
   options.** `git_identity.{name,email}`, `security.{protected_branches,
   repo_allowlist, repo_blocklist}`, `logging.{level, audit_log_path}`,
-  `proxy.{url, no_proxy}`, `lfs.{max_object_size, max_total_size}`, and
+  `proxy.{url, no_proxy}`, `lfs.max_object_size`, and
   `submodules.{include_patterns, exclude_patterns}` had no default
   documented. Added the actual defaults from `src/config/settings.rs`
   (mostly `null`/empty/`warn`) so users no longer have to guess what

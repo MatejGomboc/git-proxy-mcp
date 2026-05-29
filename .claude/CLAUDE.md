@@ -75,6 +75,7 @@ src/
 ├── main.rs             # CLI entry point
 ├── error.rs            # Top-level error types
 ├── session.rs          # Session tracking
+├── util.rs             # Shared helpers (sanitise_for_log)
 ├── config/             # Configuration
 │   ├── mod.rs          # Module exports
 │   └── settings.rs     # Config file parsing

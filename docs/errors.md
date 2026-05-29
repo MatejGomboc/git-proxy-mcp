@@ -98,6 +98,7 @@ accepted as-is.
 | Field(s) | Rule | Why |
 |----------|------|-----|
 | `timeouts.request_timeout_secs`, `lfs.request_timeout_secs`, `lfs.connect_timeout_secs`, `lfs.download_timeout_secs` | must be > 0 | a zero `Duration` makes every request time out immediately |
+| `limits.max_output_bytes` | must be > 0 | a zero limit would truncate every command's combined stdout+stderr to nothing |
 | `rate_limits.max_burst` | must be > 0 | the token bucket would never hand out a token, blocking every operation |
 | `rate_limits.refill_rate_per_sec` | finite and ≥ 0 | `NaN` panics in `time_until_available`; `±∞`/negatives break the token-bucket maths; `0.0` is allowed ("burst once, never refill") |
 | `sessions.timeout_secs`, `sessions.max_streaming_sessions`, `sessions.max_repo_sessions` | must be > 0 | sessions would expire instantly or never be creatable |
@@ -240,35 +241,11 @@ git ls-remote https://github.com/your-private-repo.git
 git ls-remote git@github.com:your-private-repo.git
 ```
 
-If prompted for credentials, configure a credential helper or SSH agent.
-
-### Credential Helper Setup
-
-Configure a credential helper to store your credentials:
-
-```bash
-# macOS
-git config --global credential.helper osxkeychain
-
-# Windows
-git config --global credential.helper manager
-
-# Linux
-git config --global credential.helper libsecret
-```
-
-### SSH Agent Setup
-
-For SSH authentication, ensure your SSH agent is running and has your key loaded:
-
-```bash
-# Start the agent (if not running)
-eval "$(ssh-agent -s)"
-
-# Add your key
-ssh-add ~/.ssh/id_ed25519
-```
+If prompted for credentials, you need to configure an OS credential helper
+(HTTPS) or load your key into ssh-agent (SSH). See the README's
+[Git authentication](../README.md#git-authentication) section for the
+per-platform setup commands.
 
 ---
 
-*Last updated: 2026-05-01*
+*Last updated: 2026-05-29*
