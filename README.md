@@ -344,11 +344,14 @@ Get a Python helper script for processing results (decoding base64, extracting t
 
 #### Git CLI
 
-The server invokes `git` for two operations: `git credential fill` (to read your stored
-credentials via the OS credential helper — see `src/git2_ops/auth.rs`) and `git fetch` from a
-bundle file (to apply a `repo_push` payload before the authenticated push — see
-`src/git2_ops/push.rs`). Any reasonably modern git (2.x) on `PATH` works; bundles produced by
-git ≥ 2.53 (with the `# v3 git bundle` header) are also accepted.
+Most of the server's Git operations (clone, push, pull, diff, refs) authenticate in-process
+via libgit2's credential callbacks and never shell out to `git` (see `src/git2_ops/auth.rs`).
+The `git` CLI is required nonetheless, because the server invokes it for two narrower tasks:
+`git credential fill` (to read your stored credentials via the OS credential helper, used for
+Git LFS object downloads) and `git fetch` from a bundle file (to apply a `repo_push` payload
+before the authenticated push — see `src/git2_ops/push.rs`). Any reasonably modern git (2.x)
+on `PATH` works; bundles produced by git ≥ 2.53 (with the `# v3 git bundle` header) are also
+accepted.
 
 #### Git authentication
 
