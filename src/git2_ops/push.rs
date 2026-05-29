@@ -425,12 +425,10 @@ mod tests {
             opts,
             None,
         );
-        match result {
-            Err(Git2Error::RefNotFound(name)) => {
-                assert_eq!(name, "feature/missing");
-            }
-            other => panic!("expected RefNotFound, got: {other:?}"),
-        }
+        assert!(
+            matches!(&result, Err(Git2Error::RefNotFound(name)) if name == "feature/missing"),
+            "expected RefNotFound(feature/missing), got: {result:?}"
+        );
     }
 
     #[test]
