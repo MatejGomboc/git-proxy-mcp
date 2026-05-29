@@ -383,10 +383,21 @@ mod tests {
                 )
                 .unwrap();
 
-            // Tag the second commit
+            // Tag the second commit (lightweight: a direct ref to the commit).
             repo.tag_lightweight(
                 "v1.0",
                 &repo.find_commit(commit2).unwrap().into_object(),
+                false,
+            )
+            .unwrap();
+
+            // Annotated tag (a tag *object*, not a direct ref) so
+            // `resolve_commit`'s peel-to-commit path can be exercised.
+            repo.tag(
+                "v2.0",
+                &repo.find_commit(commit2).unwrap().into_object(),
+                &signature,
+                "release 2.0",
                 false,
             )
             .unwrap();
@@ -421,6 +432,16 @@ mod tests {
         let (temp, _, oid2) = build_test_repo_with_two_commits();
         let repo = Repository::open_bare(temp.path()).unwrap();
         let resolved = resolve_commit(&repo, "v1.0").unwrap();
+        assert_eq!(resolved, oid2);
+    }
+
+    #[test]
+    fn resolve_commit_annotated_tag() {
+        // An annotated tag resolves via `revparse_single` to a Tag *object*,
+        // which `resolve_commit` then peels to the underlying commit.
+        let (temp, _, oid2) = build_test_repo_with_two_commits();
+        let repo = Repository::open_bare(temp.path()).unwrap();
+        let resolved = resolve_commit(&repo, "v2.0").unwrap();
         assert_eq!(resolved, oid2);
     }
 

@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`git2_ops` coverage top-ups.** Reworked the `Git2Error` mapping tests
+  (`error.rs`, taking it to 100 % line coverage) and the `push_bundle`
+  ref-not-found test from `match { _ => panic! }` shapes — whose unreachable
+  panic arms showed as uncovered — into `assert!(matches!(…))` forms. Added a
+  `resolve_commit` test for an **annotated** tag (a tag object that
+  `revparse_single` returns and `resolve_commit` peels to its commit), distinct
+  from the existing lightweight-tag test. The remaining `git2_ops` gaps are the
+  network success/error arms (covered end-to-end by the Python integration
+  suite via the `*_inner` helpers), defensive ref-resolution fallbacks that
+  `revparse_single` makes redundant, the submodule child-recursion path (needs a
+  working remote), and OS-level I/O failure arms — all integration-covered or
+  inherent.
 - **`streaming::tar` and `streaming::chunked` coverage top-ups.** For `tar.rs`,
   a test drives the LFS-resolution path with an unreachable LFS server
   (`127.0.0.1:1`, `retry_max_attempts: 0`) so the pointer is parsed, a fetch is

@@ -272,10 +272,10 @@ mod tests {
             "repository not found",
         );
         let mapped = Git2Error::from(raw_err);
-        match mapped {
-            Git2Error::Git2(msg) => assert!(msg.contains("repository not found")),
-            other => panic!("expected Git2 variant, got {other:?}"),
-        }
+        assert!(
+            matches!(&mapped, Git2Error::Git2(msg) if msg.contains("repository not found")),
+            "expected Git2 variant, got {mapped:?}"
+        );
     }
 
     #[test]
@@ -319,12 +319,10 @@ mod tests {
     fn from_io_error_maps_to_temp_dir_failed() {
         let io_err = io::Error::new(io::ErrorKind::PermissionDenied, "denied");
         let mapped = Git2Error::from(io_err);
-        match mapped {
-            Git2Error::TempDirFailed(inner) => {
-                assert_eq!(inner.kind(), io::ErrorKind::PermissionDenied);
-            }
-            other => panic!("expected TempDirFailed, got {other:?}"),
-        }
+        assert!(
+            matches!(&mapped, Git2Error::TempDirFailed(inner) if inner.kind() == io::ErrorKind::PermissionDenied),
+            "expected TempDirFailed(PermissionDenied), got {mapped:?}"
+        );
     }
 
     #[test]
@@ -389,10 +387,11 @@ mod tests {
             git2::ErrorClass::Net,
             "connection refused",
         );
-        match Git2Error::from_fetch(&err) {
-            Git2Error::FetchFailed(msg) => assert!(msg.contains("connection refused")),
-            other => panic!("expected FetchFailed, got {other:?}"),
-        }
+        let mapped = Git2Error::from_fetch(&err);
+        assert!(
+            matches!(&mapped, Git2Error::FetchFailed(msg) if msg.contains("connection refused")),
+            "expected FetchFailed, got {mapped:?}"
+        );
     }
 
     #[test]
@@ -402,13 +401,11 @@ mod tests {
             git2::ErrorClass::Net,
             "failed to resolve https://u:ghp_x@github.com/o/r.git",
         );
-        match Git2Error::from_fetch(&err) {
-            Git2Error::FetchFailed(msg) => {
-                assert!(!msg.contains("ghp_x"));
-                assert!(msg.contains("***@github.com"));
-            }
-            other => panic!("expected FetchFailed, got {other:?}"),
-        }
+        let mapped = Git2Error::from_fetch(&err);
+        assert!(
+            matches!(&mapped, Git2Error::FetchFailed(msg) if !msg.contains("ghp_x") && msg.contains("***@github.com")),
+            "expected redacted FetchFailed, got {mapped:?}"
+        );
     }
 
     #[test]
@@ -418,10 +415,11 @@ mod tests {
             git2::ErrorClass::Net,
             "remote rejected",
         );
-        match Git2Error::from_push(&err) {
-            Git2Error::PushFailed(msg) => assert!(msg.contains("remote rejected")),
-            other => panic!("expected PushFailed, got {other:?}"),
-        }
+        let mapped = Git2Error::from_push(&err);
+        assert!(
+            matches!(&mapped, Git2Error::PushFailed(msg) if msg.contains("remote rejected")),
+            "expected PushFailed, got {mapped:?}"
+        );
     }
 
     #[test]
