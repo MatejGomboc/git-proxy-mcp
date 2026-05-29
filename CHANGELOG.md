@@ -557,12 +557,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   section read "GNU General Public License v3.0" while `Cargo.toml`'s `license`
   field is `GPL-3.0-or-later`; the README now reads "v3.0 or later" so the two
   agree (the bundled `LICENCE` file is the GPLv3 text).
-- **README "Git CLI" prerequisite named the wrong git subcommand.** It said the
-  server invokes `git bundle unbundle` to apply a `repo_push` payload, but
-  `git2_ops::push::unbundle` actually shells out to
-  `git fetch --no-tags <bundle> refs/heads/*:refs/heads/*` (libgit2 cannot fetch
-  from bundle files reliably — see `src/git2_ops/push.rs`). Changed the prose to
-  "`git fetch` from a bundle file".
 - **`docs/SECURITY.md`'s `sanitize_url_for_logging` snippet had drifted from the
   code.** The shown implementation found the first `@` anywhere in the URL; the
   real function (`src/git2_ops/auth.rs`) scans only the authority component for
@@ -943,7 +937,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   HTTP standard).
 - **`README.md` Prerequisites omitted the runtime Git CLI requirement.**
   The server shells out to `git credential fill` (in
-  `src/git2_ops/auth.rs`) and `git bundle unbundle` (in
+  `src/git2_ops/auth.rs`) and `git fetch` from a bundle file (in
   `src/git2_ops/push.rs`); a user installing only the prebuilt binary
   without git on `PATH` would have hit the credential helper failing to
   return anything and `repo_push` failing to apply the bundle. Added a
