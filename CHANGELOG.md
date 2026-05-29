@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`security::guards` coverage top-ups.** Added unit tests for the
+  previously-untested pure-logic paths in the (security-critical) guards:
+  `BranchGuard::unprotect` and `Default`; the `SecurityGuard::check` CLI-arg
+  paths for `BranchGuard` (non-modifying command, `local:remote` push refspec
+  parsing, push with no extractable branch), `PushGuard` (non-push command) and
+  `RepoFilter` (non-remote command, `remote add <name> <url>` URL extraction,
+  trailing-slash pattern normalisation, `new`/`default`); and
+  `extract_branch_from_args` across all its command shapes. `guards.rs` line
+  coverage rose from 92.00 % to 99.15 % (the remainder is a defensive
+  `_ => None` arm `revparse`/`check` never reaches). No production change.
 - **`git2_ops` coverage top-ups.** Reworked the `Git2Error` mapping tests
   (`error.rs`, taking it to 100 % line coverage) and the `push_bundle`
   ref-not-found test from `match { _ => panic! }` shapes — whose unreachable
