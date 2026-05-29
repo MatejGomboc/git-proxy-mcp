@@ -123,9 +123,16 @@ impl SessionManager {
 
     /// Create or update a session after a clone operation.
     ///
+    /// Updating an existing session (same URL and branch) overwrites it in
+    /// place and is never rejected for capacity, because it does not grow the
+    /// session map. Only a genuinely new session is subject to the
+    /// `max_sessions` limit.
+    ///
     /// # Errors
     ///
-    /// Returns an error if the session limit is reached and cleanup fails.
+    /// Returns [`SessionError::TooManySessions`] if a *new* session would
+    /// exceed `max_sessions` and no expired sessions could be evicted to make
+    /// room, or [`SessionError::LockPoisoned`] if the session lock is poisoned.
     #[allow(clippy::significant_drop_tightening)]
     pub fn create_session(
         &self,
@@ -140,8 +147,12 @@ impl SessionManager {
             .write()
             .map_err(|_| SessionError::LockPoisoned)?;
 
-        // Clean up expired sessions if we're at capacity
-        if sessions.len() >= self.max_sessions {
+        // Enforce the capacity limit only when inserting a *new* session.
+        // Re-creating a session that already exists (same URL + branch)
+        // overwrites it in place and does not grow the map, so it must not be
+        // rejected just because we are at capacity.
+        if !sessions.contains_key(&session_id) && sessions.len() >= self.max_sessions {
+            // Try to make room by evicting expired sessions first.
             self.cleanup_expired_internal(&mut sessions);
 
             // Still at capacity after cleanup?
@@ -420,5 +431,216 @@ mod tests {
 
         let result = manager.update_session_commit("nonexistent", "abc123");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn repo_session_age_advances() {
+        // Coverage gap fix: `RepoSession::age()` had no caller in any test.
+        let session = RepoSession::new(
+            "https://github.com/owner/repo.git".to_string(),
+            "main".to_string(),
+            "abc123".to_string(),
+        );
+
+        let first = session.age();
+        std::thread::sleep(Duration::from_millis(5));
+        let second = session.age();
+
+        // Age is measured from creation, so it only ever grows.
+        assert!(second >= first);
+        assert!(second >= Duration::from_millis(5));
+    }
+
+    #[test]
+    fn default_manager_is_empty_and_usable() {
+        // Coverage gap fix: `SessionManager::default()` was never constructed.
+        let manager = SessionManager::default();
+        assert_eq!(manager.session_count().unwrap(), 0);
+
+        // The default (1 hour / 100 sessions) manager still works.
+        let id = manager
+            .create_session("https://github.com/owner/repo.git", "main", "abc123")
+            .unwrap();
+        assert!(manager.get_session(&id).unwrap().is_some());
+    }
+
+    #[test]
+    fn create_session_evicts_expired_to_make_room() {
+        // At capacity, expired sessions are evicted so a new session fits.
+        let manager = SessionManager::new(Duration::from_millis(1), 1);
+        manager
+            .create_session("https://github.com/owner/a.git", "main", "abc123")
+            .unwrap();
+
+        std::thread::sleep(Duration::from_millis(10));
+
+        // Capacity is 1 and we hold 1 (now-expired) session; the new session
+        // must succeed because cleanup evicts the expired one first.
+        let id = manager
+            .create_session("https://github.com/owner/b.git", "main", "def456")
+            .unwrap();
+        assert!(manager.get_session(&id).unwrap().is_some());
+        assert_eq!(manager.session_count().unwrap(), 1);
+    }
+
+    #[test]
+    fn create_session_rejects_when_full_of_live_sessions() {
+        // At capacity with only live sessions, a new session is rejected.
+        let manager = SessionManager::new(Duration::from_secs(3600), 1);
+        manager
+            .create_session("https://github.com/owner/a.git", "main", "abc123")
+            .unwrap();
+
+        let result = manager.create_session("https://github.com/owner/b.git", "main", "def456");
+        assert!(
+            matches!(result, Err(SessionError::TooManySessions { max }) if max == 1),
+            "expected TooManySessions {{ max: 1 }}, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn recreating_existing_session_at_capacity_succeeds() {
+        // Regression test: re-creating an *existing* session (same URL +
+        // branch) overwrites in place and must not be rejected for capacity,
+        // even when the manager is otherwise full. Previously the capacity
+        // check ran before the overwrite was recognised, so this returned
+        // `TooManySessions`.
+        let manager = SessionManager::new(Duration::from_secs(3600), 1);
+        let id = manager
+            .create_session("https://github.com/owner/a.git", "main", "abc123")
+            .unwrap();
+
+        // Same URL + branch -> same session ID -> in-place overwrite.
+        let id_again = manager
+            .create_session("https://github.com/owner/a.git", "main", "def456")
+            .expect("re-creating an existing session at capacity must succeed");
+
+        assert_eq!(id, id_again);
+        assert_eq!(manager.session_count().unwrap(), 1);
+        let session = manager.get_session(&id).unwrap().unwrap();
+        assert_eq!(session.last_commit, "def456");
+    }
+
+    #[test]
+    fn get_session_removes_and_returns_none_when_expired() {
+        // An expired session is dropped (and removed) on access.
+        let manager = SessionManager::new(Duration::from_millis(1), 100);
+        let id = manager
+            .create_session("https://github.com/owner/repo.git", "main", "abc123")
+            .unwrap();
+
+        std::thread::sleep(Duration::from_millis(10));
+
+        assert!(manager.get_session(&id).unwrap().is_none());
+        // The expired session was removed, not merely hidden.
+        assert_eq!(manager.session_count().unwrap(), 0);
+    }
+
+    #[test]
+    fn cleanup_expired_removes_expired_and_reports_count() {
+        // Coverage gap fix: the public `cleanup_expired` method and the
+        // `retain`/`info!` body of `cleanup_expired_internal` were untested.
+        let manager = SessionManager::new(Duration::from_millis(1), 100);
+        manager
+            .create_session("https://github.com/owner/a.git", "main", "abc123")
+            .unwrap();
+        manager
+            .create_session("https://github.com/owner/b.git", "main", "def456")
+            .unwrap();
+
+        std::thread::sleep(Duration::from_millis(10));
+
+        let removed = manager.cleanup_expired().unwrap();
+        assert_eq!(removed, 2);
+        assert_eq!(manager.session_count().unwrap(), 0);
+
+        // Idempotent: nothing left to remove.
+        assert_eq!(manager.cleanup_expired().unwrap(), 0);
+    }
+
+    #[test]
+    fn cleanup_expired_keeps_live_sessions() {
+        // The retain "keep" arm: a live session survives cleanup.
+        let manager = SessionManager::new(Duration::from_secs(3600), 100);
+        manager
+            .create_session("https://github.com/owner/repo.git", "main", "abc123")
+            .unwrap();
+
+        assert_eq!(manager.cleanup_expired().unwrap(), 0);
+        assert_eq!(manager.session_count().unwrap(), 1);
+    }
+
+    #[test]
+    fn session_error_display_messages() {
+        // Coverage gap fix: the `Display` impl for every `SessionError`
+        // variant was uncovered.
+        assert_eq!(
+            SessionError::LockPoisoned.to_string(),
+            "session lock poisoned"
+        );
+        assert_eq!(
+            SessionError::NotFound("abc@main".to_string()).to_string(),
+            "session not found: abc@main"
+        );
+        assert_eq!(
+            SessionError::TooManySessions { max: 7 }.to_string(),
+            "too many active sessions (max 7), try again later"
+        );
+    }
+
+    /// Minimal [`std::io::Write`] that appends to a shared buffer so a test
+    /// can capture `tracing` output and assert on it.
+    #[derive(Clone)]
+    struct CaptureWriter(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl std::io::Write for CaptureWriter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0
+                .lock()
+                .expect("capture buffer poisoned")
+                .extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn create_session_log_uses_sanitised_url() {
+        // The `info!` in `create_session` formats the session's *sanitised*
+        // URL via `RepoSession::sanitized_url()`. That call is only evaluated
+        // when an INFO-level subscriber is active, so install a capturing
+        // subscriber and assert the embedded credential never reaches the log.
+        let buffer = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = buffer.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::INFO)
+            .with_writer(move || CaptureWriter(sink.clone()))
+            .finish();
+
+        let manager = SessionManager::new(Duration::from_secs(3600), 100);
+        tracing::subscriber::with_default(subscriber, || {
+            manager
+                .create_session(
+                    "https://user:s3cr3t@github.com/owner/repo.git",
+                    "main",
+                    "abc123",
+                )
+                .unwrap();
+        });
+
+        let logged = String::from_utf8(buffer.lock().unwrap().clone()).unwrap();
+        assert!(logged.contains("session created"), "log was: {logged}");
+        assert!(
+            !logged.contains("s3cr3t"),
+            "credential leaked into log: {logged}"
+        );
+        assert!(logged.contains("github.com"));
+
+        // The fmt layer is line-buffered and may never call the writer's
+        // `flush`, so exercise it directly to confirm it is a clean no-op.
+        std::io::Write::flush(&mut CaptureWriter(buffer)).unwrap();
     }
 }

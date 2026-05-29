@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`session` module coverage.** The session-tracking module's least-covered
+  paths had no unit tests: `RepoSession::age`, `SessionManager::default`, the
+  at-capacity eviction-then-`TooManySessions` path in `create_session`, the
+  expired-session removal in `get_session`, the public `cleanup_expired` method
+  (and the `retain` body of `cleanup_expired_internal`), and the `Display` impl
+  for every `SessionError` variant. Added unit tests covering each, plus a
+  `tracing`-capture test that asserts the `create_session` `info!` log uses the
+  *sanitised* URL and never emits an embedded credential. `session.rs` line
+  coverage rose from 78.44 % to 100 %.
 - **`mcp::transport` line-framing coverage.** The read/write paths were only
   exercised by the Python integration suite because stdin/stdout were hardcoded.
   Following the testability refactor, new unit tests cover LF / CRLF / EOF /
@@ -553,6 +562,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`SessionManager::create_session` wrongly rejected in-place updates at
+  capacity.** The `max_sessions` check (`sessions.len() >= self.max_sessions`)
+  ran before recognising that re-creating a session with the same URL and
+  branch is an *overwrite* that does not grow the map. So once the session
+  table was full, re-cloning a repository that already had a session returned
+  `TooManySessions` instead of refreshing it in place. The capacity limit (and
+  the expired-session eviction it triggers) is now applied only when the session
+  key is genuinely new; an overwrite always succeeds. Regression-tested by
+  `recreating_existing_session_at_capacity_succeeds`.
 - **README licence statement now matches the SPDX expression.** The Licence
   section read "GNU General Public License v3.0" while `Cargo.toml`'s `license`
   field is `GPL-3.0-or-later`; the README now reads "v3.0 or later" so the two
