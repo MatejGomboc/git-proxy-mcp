@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **JSON-RPC dispatch unit tests no longer write to the real stdout** (no
+  production change). The four `handle_transport_result` `#[tokio::test]`s added
+  in v1.2.0 drove the server's write path through `tokio::io::stdout()`, which
+  both polluted the test runner's captured output and relied on Tokio's stdout
+  blocking-thread teardown — a plausible cause of an intermittent `cargo test`
+  process termination (exit 143) observed once on the Windows CI leg. The
+  `StdioTransport` now has a test-only `capture_output()` seam (a `#[cfg(test)]`
+  in-memory sink; the production write path is unchanged and compiles without
+  it), and the dispatch tests redirect to it and additionally assert on the
+  exact JSON-RPC response/error bytes written (a stronger check than before).
+
 ## [1.2.0] - 2026-05-29
 
 ### Added
