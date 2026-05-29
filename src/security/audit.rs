@@ -693,6 +693,43 @@ mod tests {
     }
 
     #[test]
+    fn days_to_ymd_resolves_leap_year_date() {
+        // 19782 days after the Unix epoch is 2024-02-29. 2024 is a leap year,
+        // so this drives the leap-year `days_in_months` arm (29-day February).
+        assert_eq!(days_to_ymd(19782), (2024, 2, 29));
+        // And the first day of that leap year (19723 = 2024-01-01).
+        assert_eq!(days_to_ymd(19723), (2024, 1, 1));
+    }
+
+    #[test]
+    fn audit_logger_exposes_log_path() {
+        let temp_file = NamedTempFile::new().unwrap();
+        let path = temp_file.path().to_path_buf();
+        let logger = AuditLogger::new(&path).unwrap();
+        assert!(logger.is_enabled());
+        assert_eq!(logger.log_path(), path.as_path());
+    }
+
+    #[test]
+    fn audit_logger_new_fails_when_parent_is_a_file() {
+        // The log path's parent is an existing *file*, so `create_dir_all`
+        // cannot create the intermediate directory — surfaces as an IoError.
+        let temp_file = NamedTempFile::new().unwrap();
+        let bad_path = temp_file.path().join("subdir").join("audit.log");
+        let result = AuditLogger::new(&bad_path);
+        assert!(matches!(result, Err(AuditLoggerError::IoError { .. })));
+    }
+
+    #[test]
+    fn audit_logger_new_fails_when_path_is_a_directory() {
+        // Opening an existing directory as an append-mode file fails — surfaces
+        // as an IoError from the open step.
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let result = AuditLogger::new(temp_dir.path());
+        assert!(matches!(result, Err(AuditLoggerError::IoError { .. })));
+    }
+
+    #[test]
     fn audit_event_server_stopped_with_reason() {
         let event = AuditEvent::server_stopped(ShutdownReason::SigInt);
 
