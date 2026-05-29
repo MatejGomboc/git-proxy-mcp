@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **End-to-end repo allow/blocklist enforcement tests.** New
+  `test_repo_filter_enforcement` in the Python integration suite spins up
+  servers configured with (1) a `repo_blocklist` host pattern — which refuses
+  the fixture clone before any network access; (2) a `repo_allowlist` that does
+  not match the fixture — refused (deny by default); and (3) an allowlist that
+  does match — permitted, and the clone succeeds. This exercises the server's
+  filter wiring (`RepoFilter` in the clone dispatch) end to end, which was
+  previously covered only at the unit level despite that wiring being exactly
+  where the earlier `repo_diff`-bypass bug lived. The harness's `McpTestClient`
+  now takes an optional per-client `log_path` so these auxiliary servers do not
+  clobber the shared server log. No production change.
 - **Unit-coverage top-ups for the JSON-RPC dispatch loop and three
   archive/submodule edge cases** (no production change). Added tests for
   previously-unit-uncovered paths that need neither real network access nor
