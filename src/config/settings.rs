@@ -663,6 +663,32 @@ impl Default for SubmoduleConfig {
     }
 }
 
+impl SubmoduleConfig {
+    /// Build an effective config by layering per-request include/exclude glob
+    /// overrides on top of these server defaults.
+    ///
+    /// A per-request override, when present, fully replaces the corresponding
+    /// server-configured pattern list; when absent (`None`) the server default
+    /// is used. The `max_concurrent` and `max_failures` limits always come from
+    /// the server config — they are not per-request overridable.
+    ///
+    /// This is shared by the `repo_clone` and `repo_clone_start` tool handlers
+    /// so the two cannot drift apart.
+    #[must_use]
+    pub fn with_request_overrides(
+        &self,
+        include: Option<Vec<String>>,
+        exclude: Option<Vec<String>>,
+    ) -> Self {
+        Self {
+            max_concurrent: self.max_concurrent,
+            max_failures: self.max_failures,
+            include_patterns: include.or_else(|| self.include_patterns.clone()),
+            exclude_patterns: exclude.or_else(|| self.exclude_patterns.clone()),
+        }
+    }
+}
+
 /// Proxy configuration for network connections.
 ///
 /// When configured, all git fetch/push/connect operations and LFS HTTP
@@ -1130,6 +1156,60 @@ mod tests {
         assert_eq!(config.submodules.max_failures, 3);
         assert!(config.submodules.include_patterns.is_none());
         assert!(config.submodules.exclude_patterns.is_none());
+    }
+
+    #[test]
+    fn submodule_with_request_overrides_layers_correctly() {
+        let server = SubmoduleConfig {
+            max_concurrent: 8,
+            max_failures: 5,
+            include_patterns: Some(vec!["server-include/*".to_string()]),
+            exclude_patterns: Some(vec!["server-exclude/*".to_string()]),
+        };
+
+        // Request overrides replace the server lists entirely; the limits are
+        // always preserved from the server config.
+        let overridden = server.with_request_overrides(
+            Some(vec!["req-include/*".to_string()]),
+            Some(vec!["req-exclude/*".to_string()]),
+        );
+        assert_eq!(overridden.max_concurrent, 8);
+        assert_eq!(overridden.max_failures, 5);
+        assert_eq!(
+            overridden.include_patterns,
+            Some(vec!["req-include/*".to_string()])
+        );
+        assert_eq!(
+            overridden.exclude_patterns,
+            Some(vec!["req-exclude/*".to_string()])
+        );
+
+        // Absent request overrides fall back to the server defaults.
+        let fallback = server.with_request_overrides(None, None);
+        assert_eq!(
+            fallback.include_patterns,
+            Some(vec!["server-include/*".to_string()])
+        );
+        assert_eq!(
+            fallback.exclude_patterns,
+            Some(vec!["server-exclude/*".to_string()])
+        );
+
+        // A mix: include overridden, exclude falls back.
+        let mixed = server.with_request_overrides(Some(vec!["only-include/*".to_string()]), None);
+        assert_eq!(
+            mixed.include_patterns,
+            Some(vec!["only-include/*".to_string()])
+        );
+        assert_eq!(
+            mixed.exclude_patterns,
+            Some(vec!["server-exclude/*".to_string()])
+        );
+
+        // With no server defaults and no overrides, both stay None.
+        let empty = SubmoduleConfig::default().with_request_overrides(None, None);
+        assert!(empty.include_patterns.is_none());
+        assert!(empty.exclude_patterns.is_none());
     }
 
     #[test]

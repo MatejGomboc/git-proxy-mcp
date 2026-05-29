@@ -36,7 +36,7 @@ use tracing::{debug, info};
 
 use crate::config::{LfsConfig, ProxyConfig, SubmoduleConfig};
 use crate::git2_ops::auth::{get_credentials_for_url, sanitize_url_for_logging};
-use crate::git2_ops::clone::{fetch_bare, FetchOptions2};
+use crate::git2_ops::clone::{fetch_bare, FetchOptions2, FetchResult};
 use crate::git2_ops::error::Git2Error;
 use crate::streaming::chunked::{
     StreamingError, StreamingSessionManager, DEFAULT_CHUNK_SIZE, MAX_CHUNK_SIZE,
@@ -201,6 +201,15 @@ impl From<StreamingError> for RepoCloneStartError {
     }
 }
 
+/// Clamp a requested chunk size to the supported range.
+///
+/// `None` selects [`DEFAULT_CHUNK_SIZE`]; any larger request is capped at
+/// [`MAX_CHUNK_SIZE`]. The lower bound (1 KiB) is enforced later by the
+/// streaming session when the session is created.
+fn resolve_chunk_size(requested: Option<usize>) -> usize {
+    requested.map_or(DEFAULT_CHUNK_SIZE, |s| s.min(MAX_CHUNK_SIZE))
+}
+
 /// Handle the `repo_clone_start` tool call.
 ///
 /// This function:
@@ -226,7 +235,6 @@ impl From<StreamingError> for RepoCloneStartError {
 /// - Fetch operation fails (auth, network, etc.)
 /// - Tar creation fails
 /// - Session creation fails (too many active sessions)
-#[allow(clippy::too_many_lines)] // Complex setup with many optional features
 pub fn handle_repo_clone_start(
     args: RepoCloneStartArgs,
     proxy_config: &ProxyConfig,
@@ -234,14 +242,57 @@ pub fn handle_repo_clone_start(
     submodule_config: &SubmoduleConfig,
     session_manager: &StreamingSessionManager,
 ) -> Result<RepoCloneStartResult, RepoCloneStartError> {
-    let sanitized_url = sanitize_url_for_logging(&args.url);
-
     info!(
-        url = %sanitized_url,
+        url = %sanitize_url_for_logging(&args.url),
         branch = ?args.branch,
         chunk_size = ?args.chunk_size,
         "repo_clone_start tool called"
     );
+
+    // Fetch into bare repository
+    let fetch_opts = FetchOptions2 {
+        branch: args.branch.clone(),
+        depth: args.depth,
+        progress: None,
+        proxy_url: proxy_config.url.clone(),
+    };
+
+    let fetch_result = fetch_bare(&args.url, Some(fetch_opts))?;
+
+    build_clone_start_result(
+        &fetch_result,
+        args,
+        proxy_config,
+        lfs_config,
+        submodule_config,
+        session_manager,
+    )
+}
+
+/// Build the [`RepoCloneStartResult`] from an already-fetched bare repository.
+///
+/// Split out from [`handle_repo_clone_start`] so the post-fetch path (LFS
+/// credential retrieval, submodule-config merge, in-memory tar creation,
+/// streaming-session creation and result assembly) can be exercised by unit
+/// tests against a locally-created bare repo, without a real network fetch.
+fn build_clone_start_result(
+    fetch_result: &FetchResult,
+    args: RepoCloneStartArgs,
+    proxy_config: &ProxyConfig,
+    lfs_config: &LfsConfig,
+    submodule_config: &SubmoduleConfig,
+    session_manager: &StreamingSessionManager,
+) -> Result<RepoCloneStartResult, RepoCloneStartError> {
+    debug!(
+        commit = %fetch_result.head_commit,
+        branch = %fetch_result.branch,
+        "fetch complete, creating tar"
+    );
+
+    // Sanitise the URL now, before `args.url` may be moved into the tar
+    // options below. The streaming-session key uses this sanitised form so a
+    // credential embedded in the URL is never stored.
+    let sanitized_url = sanitize_url_for_logging(&args.url);
 
     // Log info about optional features
     if let Some(depth) = args.depth {
@@ -256,67 +307,35 @@ pub fn handle_repo_clone_start(
     if let Some(max_size) = args.max_file_size {
         debug!(max_size = max_size, "max file size limit set");
     }
-    if args.resolve_lfs == Some(true) {
-        debug!("LFS resolution enabled");
-    }
     if args.include_submodules == Some(true) {
         debug!("submodule inclusion enabled");
     }
 
-    // Determine chunk size
-    let chunk_size = args
-        .chunk_size
-        .map_or(DEFAULT_CHUNK_SIZE, |s| s.min(MAX_CHUNK_SIZE));
-
-    // Fetch into bare repository
-    let fetch_opts = FetchOptions2 {
-        branch: args.branch.clone(),
-        depth: args.depth,
-        progress: None,
-        proxy_url: proxy_config.url.clone(),
-    };
-
-    let fetch_result = fetch_bare(&args.url, Some(fetch_opts))?;
-
-    debug!(
-        commit = %fetch_result.head_commit,
-        branch = %fetch_result.branch,
-        "fetch complete, creating tar"
-    );
+    let chunk_size = resolve_chunk_size(args.chunk_size);
 
     // Get LFS credentials from git credential helper if LFS resolution is enabled
     // Credentials are retrieved on-demand from OS credential stores (macOS Keychain,
     // Windows Credential Manager, etc.) and NEVER sent to AI - they stay on user's PC.
-    let lfs_credentials = if args.resolve_lfs == Some(true) {
+    let resolve_lfs = args.resolve_lfs == Some(true);
+    let lfs_credentials = if resolve_lfs {
         debug!("LFS enabled, retrieving credentials from OS credential store");
         get_credentials_for_url(&args.url)
     } else {
         None
     };
 
-    // Build effective submodule config: merge per-request overrides with server defaults
-    let effective_sub_config = SubmoduleConfig {
-        max_concurrent: submodule_config.max_concurrent,
-        max_failures: submodule_config.max_failures,
-        include_patterns: args
-            .submodule_include
-            .or_else(|| submodule_config.include_patterns.clone()),
-        exclude_patterns: args
-            .submodule_exclude
-            .or_else(|| submodule_config.exclude_patterns.clone()),
-    };
+    // Build effective submodule config: merge per-request overrides with server defaults.
+    let effective_sub_config =
+        submodule_config.with_request_overrides(args.submodule_include, args.submodule_exclude);
 
-    // Create tar.gz from tree (in memory), with optional filtering
+    // Create tar.gz from tree (in memory), with optional filtering.
+    // `repo_url` is only consumed when LFS resolution is enabled.
     let tar_opts = TarOptions {
         sparse_patterns: args.sparse,
         exclude_binary: args.exclude_binary,
         max_file_size: args.max_file_size,
         resolve_lfs: args.resolve_lfs,
-        repo_url: if args.resolve_lfs == Some(true) {
-            Some(args.url.clone())
-        } else {
-            None
-        },
+        repo_url: if resolve_lfs { Some(args.url) } else { None },
         lfs_credentials, // From OS credential store, NEVER sent to AI
         include_submodules: args.include_submodules,
         proxy_url: proxy_config.url.clone(),
@@ -348,7 +367,7 @@ pub fn handle_repo_clone_start(
         "tar creation complete, creating streaming session"
     );
 
-    // Create streaming session
+    // Create streaming session.
     let session_info = session_manager.create_session(
         &sanitized_url,
         &fetch_result.branch,
@@ -576,5 +595,226 @@ mod tests {
         let submods = SubmoduleConfig::default();
         let manager = StreamingSessionManager::default();
         assert!(handle_repo_clone_start(args, &proxy, &lfs, &submods, &manager).is_err());
+    }
+
+    #[test]
+    fn resolve_chunk_size_clamps_and_defaults() {
+        assert_eq!(resolve_chunk_size(None), DEFAULT_CHUNK_SIZE);
+        assert_eq!(resolve_chunk_size(Some(1024)), 1024);
+        assert_eq!(resolve_chunk_size(Some(MAX_CHUNK_SIZE)), MAX_CHUNK_SIZE);
+        assert_eq!(resolve_chunk_size(Some(MAX_CHUNK_SIZE + 1)), MAX_CHUNK_SIZE);
+        assert_eq!(resolve_chunk_size(Some(usize::MAX)), MAX_CHUNK_SIZE);
+    }
+
+    /// Run a closure with a DEBUG-level `tracing` subscriber active (output
+    /// discarded), so the `debug!`/`info!` field expressions in the handlers
+    /// are actually evaluated and counted as covered.
+    fn run_with_debug_logs<T>(f: impl FnOnce() -> T) -> T {
+        let subscriber = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::DEBUG)
+            .with_writer(std::io::sink)
+            .finish();
+        tracing::subscriber::with_default(subscriber, f)
+    }
+
+    /// Build a `FetchResult` around a locally-created bare repo (no network)
+    /// so the post-fetch `build_clone_start_result` path can be exercised
+    /// directly. The repo has two files: `README.md` and `src/main.rs`.
+    fn local_fetch_result() -> FetchResult {
+        use git2::Repository;
+        let temp = tempfile::TempDir::new().unwrap();
+        let commit = {
+            let repo = Repository::init_bare(temp.path()).unwrap();
+            let readme = repo.blob(b"# Test Repo\n").unwrap();
+            let main_rs = repo.blob(b"fn main() {}\n").unwrap();
+            let mut tb = repo.treebuilder(None).unwrap();
+            tb.insert("README.md", readme, 0o100_644).unwrap();
+            let src = {
+                let mut sb = repo.treebuilder(None).unwrap();
+                sb.insert("main.rs", main_rs, 0o100_644).unwrap();
+                sb.write().unwrap()
+            };
+            tb.insert("src", src, 0o040_000).unwrap();
+            let tree_oid = tb.write().unwrap();
+            let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+            let tree = repo.find_tree(tree_oid).unwrap();
+            repo.commit(Some("HEAD"), &sig, &sig, "test", &tree, &[])
+                .unwrap()
+        };
+        let repo = Repository::open_bare(temp.path()).unwrap();
+        FetchResult::from_parts_for_test(repo, commit, "main".to_string(), temp)
+    }
+
+    fn start_args(url: &str) -> RepoCloneStartArgs {
+        RepoCloneStartArgs {
+            url: url.to_string(),
+            branch: None,
+            depth: None,
+            sparse: None,
+            chunk_size: None,
+            exclude_binary: None,
+            max_file_size: None,
+            resolve_lfs: None,
+            include_submodules: None,
+            submodule_depth: None,
+            submodule_include: None,
+            submodule_exclude: None,
+        }
+    }
+
+    #[test]
+    fn build_clone_start_result_creates_retrievable_session() {
+        let fetch = local_fetch_result();
+        let expected_commit = fetch.head_commit.to_string();
+        let manager = StreamingSessionManager::default();
+
+        let mut args = start_args("https://github.com/owner/repo.git");
+        // Below the 1 KiB minimum; the session clamps it up to 1024.
+        args.chunk_size = Some(64);
+
+        let result = build_clone_start_result(
+            &fetch,
+            args,
+            &ProxyConfig::default(),
+            &LfsConfig::default(),
+            &SubmoduleConfig::default(),
+            &manager,
+        )
+        .unwrap();
+
+        assert_eq!(result.commit, expected_commit);
+        assert_eq!(result.branch, "main");
+        assert_eq!(result.file_count, 2);
+        assert_eq!(result.chunk_size, 1024); // clamped up from 64
+        assert!(result.total_chunks >= 1);
+        assert!(!result.session_id.is_empty());
+
+        // The session is registered and its chunk count matches the result.
+        let status = manager.get_session_status(&result.session_id).unwrap();
+        assert_eq!(status.total_chunks, result.total_chunks);
+        assert!(!status.is_complete);
+    }
+
+    #[test]
+    fn build_clone_start_result_applies_sparse_and_logs_options() {
+        // Exercises the optional-feature debug branches and the sparse filter.
+        let fetch = local_fetch_result();
+        let manager = StreamingSessionManager::default();
+
+        let mut args = start_args("https://github.com/owner/repo.git");
+        args.depth = Some(1);
+        args.sparse = Some(vec!["**/*.rs".to_string()]);
+        args.exclude_binary = Some(true);
+        args.max_file_size = Some(1_048_576);
+        args.include_submodules = Some(true);
+
+        // Run under a live subscriber so the per-feature `debug!` lines and the
+        // completion `info!` are evaluated.
+        let result = run_with_debug_logs(|| {
+            build_clone_start_result(
+                &fetch,
+                args,
+                &ProxyConfig::default(),
+                &LfsConfig::default(),
+                &SubmoduleConfig::default(),
+                &manager,
+            )
+        })
+        .unwrap();
+
+        assert_eq!(result.file_count, 1);
+        assert_eq!(result.skipped_by_filter, 1);
+    }
+
+    #[test]
+    fn build_clone_start_result_with_lfs_resolution() {
+        // Exercises the `resolve_lfs == Some(true)` branch: credentials are
+        // retrieved (gracefully None without a helper / git), `repo_url` is set
+        // and an LFS client is created. The repo has no LFS pointers, so no
+        // network request is made.
+        let fetch = local_fetch_result();
+        let manager = StreamingSessionManager::default();
+        let mut args = start_args("https://github.com/owner/repo.git");
+        args.resolve_lfs = Some(true);
+
+        let result = build_clone_start_result(
+            &fetch,
+            args,
+            &ProxyConfig::default(),
+            &LfsConfig::default(),
+            &SubmoduleConfig::default(),
+            &manager,
+        )
+        .unwrap();
+
+        assert_eq!(result.file_count, 2);
+        assert_eq!(result.lfs_resolved, 0);
+    }
+
+    #[test]
+    fn handle_repo_clone_start_emits_entry_log_then_fails_on_invalid_url() {
+        // Drives the outer handler under a live subscriber so its entry
+        // `info!` is evaluated; the invalid URL fails fast at the fetch.
+        let manager = StreamingSessionManager::default();
+        let result = run_with_debug_logs(|| {
+            handle_repo_clone_start(
+                start_args("not-a-url"),
+                &ProxyConfig::default(),
+                &LfsConfig::default(),
+                &SubmoduleConfig::default(),
+                &manager,
+            )
+        });
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn repo_clone_start_error_from_streaming_error() {
+        // The `From<StreamingError>` conversion is used by `?` when session
+        // creation fails (e.g. too many sessions).
+        let err: RepoCloneStartError = StreamingError::TooManySessions { max: 3 }.into();
+        assert!(err.message.contains('3') || !err.message.is_empty());
+    }
+
+    #[test]
+    fn build_clone_start_result_propagates_tar_error_for_unknown_commit() {
+        // A commit that does not exist makes tar creation fail; the error must
+        // propagate (covers the `?` error path before session creation).
+        use git2::Repository;
+        let temp = tempfile::TempDir::new().unwrap();
+        Repository::init_bare(temp.path()).unwrap();
+        let repo = Repository::open_bare(temp.path()).unwrap();
+        let bogus = git2::Oid::from_str("dead00000000000000000000000000000000beef").unwrap();
+        let fetch = FetchResult::from_parts_for_test(repo, bogus, "main".to_string(), temp);
+        let manager = StreamingSessionManager::default();
+
+        let result = build_clone_start_result(
+            &fetch,
+            start_args("https://github.com/owner/repo.git"),
+            &ProxyConfig::default(),
+            &LfsConfig::default(),
+            &SubmoduleConfig::default(),
+            &manager,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn build_clone_start_result_propagates_session_error_when_full() {
+        // A session manager with zero capacity makes `create_session` fail
+        // after a successful tar build; the `StreamingError` must propagate as
+        // a `RepoCloneStartError` (covers the session-creation `?` path).
+        let fetch = local_fetch_result();
+        let manager = StreamingSessionManager::new(std::time::Duration::from_secs(3600), 0);
+
+        let result = build_clone_start_result(
+            &fetch,
+            start_args("https://github.com/owner/repo.git"),
+            &ProxyConfig::default(),
+            &LfsConfig::default(),
+            &SubmoduleConfig::default(),
+            &manager,
+        );
+        assert!(result.is_err());
     }
 }
