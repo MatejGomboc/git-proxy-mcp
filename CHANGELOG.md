@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **End-to-end submodule include/exclude/depth filtering test.** New
+  `test_clone_submodule_filtering` in the Python integration suite clones the
+  fixture with `include_submodules: true` and asserts that a matching
+  `submodule_exclude`, a non-matching `submodule_include`, and
+  `submodule_depth: 0` each reduce the number of submodules attempted to zero.
+  Because bare-repo submodule detection is environment-dependent (the existing
+  `test_clone_with_submodules` already tolerates a zero-detected outcome), the
+  test self-calibrates: it first clones with no filter to learn whether the
+  fixture's submodule is attempted at all, and skips the filter assertions with
+  a NOTE (rather than asserting vacuously) when detection reports none. The
+  nested child-submodule recursion arm is intentionally not covered — it
+  requires a submodule whose own repository contains a submodule, which the
+  fixture's external, uncontrolled submodule target cannot provide. No
+  production change.
 - **End-to-end repo allow/blocklist enforcement tests.** New
   `test_repo_filter_enforcement` in the Python integration suite spins up
   servers configured with (1) a `repo_blocklist` host pattern — which refuses
