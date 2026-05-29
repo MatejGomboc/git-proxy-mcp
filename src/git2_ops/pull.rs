@@ -688,13 +688,27 @@ mod tests {
         let tree = repo.find_tree(tree_oid).unwrap();
         let files = vec!["sub/nested.txt".to_string()];
         let archive = create_files_archive(&repo, &tree, &files).unwrap();
-        // The nested file matched and was archived, so the result is a real
-        // (non-trivial) tar.gz, larger than the empty envelope.
-        assert!(
-            archive.len() >= 100,
-            "expected a non-empty archive with the nested file, got {} bytes",
-            archive.len()
-        );
+
+        // Decode the archive and confirm the nested file is present with its
+        // content. This proves the walk descended into the subtree and joined
+        // the nested path (rather than relying on a brittle compressed-size
+        // threshold).
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(&archive)
+            .unwrap();
+        let mut tar = tar::Archive::new(flate2::read::GzDecoder::new(&bytes[..]));
+        let mut found = false;
+        for entry in tar.entries().unwrap() {
+            let mut entry = entry.unwrap();
+            let path = entry.path().unwrap().to_string_lossy().into_owned();
+            if path == "sub/nested.txt" {
+                found = true;
+                let mut content = String::new();
+                std::io::Read::read_to_string(&mut entry, &mut content).unwrap();
+                assert_eq!(content, "nested content\n");
+            }
+        }
+        assert!(found, "the nested file should be present in the archive");
     }
 
     /// Builds a `file://` URL for a local path (Windows-friendly).
