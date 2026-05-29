@@ -543,6 +543,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`limits.max_output_bytes` validation was undocumented.** `Config::validate`
+  rejects a zero `limits.max_output_bytes` (it sits in the same `nonzero_usize`
+  check as the session limits — see `src/config/settings.rs`), but the field was
+  missing from every narrative description of the validation rules: the
+  `validate` rustdoc, the README "Validation" prose, and the `docs/errors.md`
+  validation-rules table each listed the timeout, rate-limit, session, and
+  log-level checks but not this one. A user setting `max_output_bytes: 0` would
+  hit a `configuration validation failed` abort that none of the docs predicted.
+  Added it to all three.
+- **`docs/AI_WORKFLOW.md` workflow diagram showed a `repo_push` response shape
+  the server never returns.** The "Complete Workflow" ASCII diagram's PUSH step
+  said `Receives: { success: true, url: "…/commit/…" }`, but `RepoPushResult`
+  (see `src/mcp/tools/repo_push.rs`) has no `success` or `url` field — it returns
+  `branch`, `commit`, `force`, `remote_url`, and `hint`, exactly as the detailed
+  example later in the same document already shows. Updated the diagram to list
+  the real fields.
 - **`RateLimiter::time_until_available` could panic on a config-valid input.**
   It computed `Duration::from_secs_f64(1.0 / refill_rate)`, which panics when the
   result overflows `Duration`. A finite, positive but minuscule
@@ -956,7 +972,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`README.md` configuration table omitted defaults for half the
   options.** `git_identity.{name,email}`, `security.{protected_branches,
   repo_allowlist, repo_blocklist}`, `logging.{level, audit_log_path}`,
-  `proxy.{url, no_proxy}`, `lfs.{max_object_size, max_total_size}`, and
+  `proxy.{url, no_proxy}`, `lfs.max_object_size`, and
   `submodules.{include_patterns, exclude_patterns}` had no default
   documented. Added the actual defaults from `src/config/settings.rs`
   (mostly `null`/empty/`warn`) so users no longer have to guess what

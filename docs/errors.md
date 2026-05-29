@@ -98,6 +98,7 @@ accepted as-is.
 | Field(s) | Rule | Why |
 |----------|------|-----|
 | `timeouts.request_timeout_secs`, `lfs.request_timeout_secs`, `lfs.connect_timeout_secs`, `lfs.download_timeout_secs` | must be > 0 | a zero `Duration` makes every request time out immediately |
+| `limits.max_output_bytes` | must be > 0 | a zero limit would truncate every command's combined stdout+stderr to nothing |
 | `rate_limits.max_burst` | must be > 0 | the token bucket would never hand out a token, blocking every operation |
 | `rate_limits.refill_rate_per_sec` | finite and ≥ 0 | `NaN` panics in `time_until_available`; `±∞`/negatives break the token-bucket maths; `0.0` is allowed ("burst once, never refill") |
 | `sessions.timeout_secs`, `sessions.max_streaming_sessions`, `sessions.max_repo_sessions` | must be > 0 | sessions would expire instantly or never be creatable |
