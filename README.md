@@ -345,10 +345,10 @@ Get a Python helper script for processing results (decoding base64, extracting t
 #### Git CLI
 
 The server invokes `git` for two operations: `git credential fill` (to read your stored
-credentials via the OS credential helper — see `src/git2_ops/auth.rs`) and `git bundle unbundle`
-(to apply a `repo_push` payload before the authenticated push — see `src/git2_ops/push.rs`).
-Any reasonably modern git (2.x) on `PATH` works; bundles produced by git ≥ 2.53 (with the
-`# v3 git bundle` header) are also accepted.
+credentials via the OS credential helper — see `src/git2_ops/auth.rs`) and `git fetch` from a
+bundle file (to apply a `repo_push` payload before the authenticated push — see
+`src/git2_ops/push.rs`). Any reasonably modern git (2.x) on `PATH` works; bundles produced by
+git ≥ 2.53 (with the `# v3 git bundle` header) are also accepted.
 
 #### Git authentication
 

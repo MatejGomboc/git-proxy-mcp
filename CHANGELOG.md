@@ -553,6 +553,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **README "Git CLI" prerequisite named the wrong git subcommand.** It said the
+  server invokes `git bundle unbundle` to apply a `repo_push` payload, but
+  `git2_ops::push::unbundle` actually shells out to
+  `git fetch --no-tags <bundle> refs/heads/*:refs/heads/*` (libgit2 cannot fetch
+  from bundle files reliably — see `src/git2_ops/push.rs`). Changed the prose to
+  "`git fetch` from a bundle file".
+- **`docs/SECURITY.md`'s `sanitize_url_for_logging` snippet had drifted from the
+  code.** The shown implementation found the first `@` anywhere in the URL; the
+  real function (`src/git2_ops/auth.rs`) scans only the authority component for
+  the userinfo `@` per RFC 3986 — the fix that stopped it mangling URLs with an
+  `@` in the path or query. Replaced the snippet and prose with the
+  authority-scoped logic. Also softened the adjacent "temp directory permissions
+  are 0700" claim: the code sets no explicit mode and relies on the `tempfile`
+  crate's owner-only default (0700 on Unix; the user's profile ACL on Windows).
+- **Source-tree diagrams omitted `src/util.rs`.** The shared `sanitize_for_log`
+  helper module was missing from the trees in both `docs/ARCHITECTURE.md` and
+  `.claude/CLAUDE.md`; added it. Also added a `CODE_OF_CONDUCT.md` row to
+  `CONTRIBUTING.md`'s "Types of Documentation" table, tightened
+  `docs/ARCHITECTURE.md`'s Tier 2 disk-threshold wording from "≥ 10 MiB" to
+  "larger than 10 MiB" (the code uses a strict `>`), and refreshed
+  `docs/errors.md`'s "Last updated" date.
 - **`limits.max_output_bytes` validation was undocumented.** `Config::validate`
   rejects a zero `limits.max_output_bytes` (it sits in the same `nonzero_usize`
   check as the session limits — see `src/config/settings.rs`), but the field was
