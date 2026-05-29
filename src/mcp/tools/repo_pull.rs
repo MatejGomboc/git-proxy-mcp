@@ -34,7 +34,7 @@ use tracing::info;
 use crate::config::ProxyConfig;
 use crate::git2_ops::auth::sanitize_url_for_logging;
 use crate::git2_ops::error::Git2Error;
-use crate::git2_ops::pull::{pull_changes, ChangedFile, PullStats};
+use crate::git2_ops::pull::{pull_changes, ChangedFile, PullResult, PullStats};
 
 /// Arguments for the `repo_pull` tool.
 #[derive(Debug, Clone, Deserialize)]
@@ -150,6 +150,14 @@ pub fn handle_repo_pull(
         proxy_config.url.as_deref(),
     )?;
 
+    Ok(build_pull_result(pull_result))
+}
+
+/// Assemble the [`RepoPullResult`] from a completed pull.
+///
+/// Split out from [`handle_repo_pull`] so the up-to-date/changed branch
+/// logging and result shaping can be unit-tested without a real network fetch.
+fn build_pull_result(pull_result: PullResult) -> RepoPullResult {
     if pull_result.up_to_date {
         info!("repo_pull: already up to date");
     } else {
@@ -163,7 +171,7 @@ pub fn handle_repo_pull(
         );
     }
 
-    Ok(RepoPullResult {
+    RepoPullResult {
         diff: pull_result.diff,
         files_archive: pull_result.files_archive,
         changed_files: pull_result.changed_files,
@@ -173,12 +181,13 @@ pub fn handle_repo_pull(
         stats: pull_result.stats,
         up_to_date: pull_result.up_to_date,
         hint: "Use helper_script tool to get git_proxy_helper.py, then: python git_proxy_helper.py extract <result.json> <output_dir>".to_string(),
-    })
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mcp::tools::run_with_debug_logs;
 
     #[test]
     fn repo_pull_args_parses() {
@@ -307,5 +316,64 @@ mod tests {
         let json = serde_json::to_value(&cf).unwrap();
         assert_eq!(json["path"], "file.rs");
         assert!(json.get("old_path").is_none() || json["old_path"].is_null());
+    }
+
+    #[test]
+    fn build_pull_result_up_to_date_branch() {
+        let pull_result = PullResult {
+            diff: String::new(),
+            files_archive: String::new(),
+            changed_files: vec![],
+            deleted_files: vec![],
+            base_commit: "abc123".to_string(),
+            new_commit: "abc123".to_string(),
+            stats: PullStats::default(),
+            up_to_date: true,
+        };
+        let result = run_with_debug_logs(|| build_pull_result(pull_result));
+        assert!(result.up_to_date);
+        assert_eq!(result.base_commit, "abc123");
+        assert!(result.changed_files.is_empty());
+        assert!(result.hint.contains("extract"));
+    }
+
+    #[test]
+    fn build_pull_result_with_changes_branch() {
+        let pull_result = PullResult {
+            diff: "a diff".to_string(),
+            files_archive: "an archive".to_string(),
+            changed_files: vec![ChangedFile {
+                path: "file.rs".to_string(),
+                change_type: "modified".to_string(),
+                old_path: None,
+            }],
+            deleted_files: vec!["gone.rs".to_string()],
+            base_commit: "abc123".to_string(),
+            new_commit: "def456".to_string(),
+            stats: PullStats::default(),
+            up_to_date: false,
+        };
+        let result = run_with_debug_logs(|| build_pull_result(pull_result));
+        assert!(!result.up_to_date);
+        assert_eq!(result.new_commit, "def456");
+        assert_eq!(result.changed_files.len(), 1);
+        assert_eq!(result.deleted_files, vec!["gone.rs".to_string()]);
+        assert_eq!(result.diff, "a diff");
+        assert_eq!(result.files_archive, "an archive");
+    }
+
+    #[test]
+    fn handle_repo_pull_emits_entry_log_then_fails_on_invalid_url() {
+        let result = run_with_debug_logs(|| {
+            handle_repo_pull(
+                RepoPullArgs {
+                    url: "not-a-url".to_string(),
+                    branch: "main".to_string(),
+                    since_commit: "abc123".to_string(),
+                },
+                &ProxyConfig::default(),
+            )
+        });
+        assert!(result.is_err());
     }
 }

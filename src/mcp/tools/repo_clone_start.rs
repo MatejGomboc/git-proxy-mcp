@@ -408,6 +408,7 @@ fn build_clone_start_result(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mcp::tools::run_with_debug_logs;
 
     #[test]
     fn repo_clone_start_args_defaults() {
@@ -604,17 +605,6 @@ mod tests {
         assert_eq!(resolve_chunk_size(Some(MAX_CHUNK_SIZE)), MAX_CHUNK_SIZE);
         assert_eq!(resolve_chunk_size(Some(MAX_CHUNK_SIZE + 1)), MAX_CHUNK_SIZE);
         assert_eq!(resolve_chunk_size(Some(usize::MAX)), MAX_CHUNK_SIZE);
-    }
-
-    /// Run a closure with a DEBUG-level `tracing` subscriber active (output
-    /// discarded), so the `debug!`/`info!` field expressions in the handlers
-    /// are actually evaluated and counted as covered.
-    fn run_with_debug_logs<T>(f: impl FnOnce() -> T) -> T {
-        let subscriber = tracing_subscriber::fmt()
-            .with_max_level(tracing::Level::DEBUG)
-            .with_writer(std::io::sink)
-            .finish();
-        tracing::subscriber::with_default(subscriber, f)
     }
 
     /// Build a `FetchResult` around a locally-created bare repo (no network)

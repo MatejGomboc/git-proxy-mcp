@@ -55,3 +55,19 @@ pub use repo_diff::{handle_repo_diff, RepoDiffArgs, RepoDiffResult};
 pub use repo_pull::{handle_repo_pull, RepoPullArgs, RepoPullResult};
 pub use repo_push::{handle_repo_push, RepoPushArgs, RepoPushResult};
 pub use repo_refs::{handle_repo_refs, RepoRefsArgs, RepoRefsResult};
+
+/// Run a closure with a DEBUG-level `tracing` subscriber active (output
+/// discarded), so the `debug!`/`info!` field expressions in the tool handlers
+/// are actually evaluated and counted as covered. Without an active subscriber
+/// `tracing` skips evaluating the field values entirely, leaving them as
+/// phantom-uncovered lines under coverage instrumentation.
+///
+/// Shared by the tool handlers' unit tests.
+#[cfg(test)]
+pub(crate) fn run_with_debug_logs<T>(f: impl FnOnce() -> T) -> T {
+    let subscriber = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .with_writer(std::io::sink)
+        .finish();
+    tracing::subscriber::with_default(subscriber, f)
+}

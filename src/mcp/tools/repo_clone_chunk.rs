@@ -242,6 +242,7 @@ pub fn handle_repo_clone_cancel(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mcp::tools::run_with_debug_logs;
 
     #[test]
     fn repo_clone_chunk_args_deserialize() {
@@ -350,17 +351,6 @@ mod tests {
         let converted: RepoCloneChunkError =
             StreamingError::SessionNotFound("xyz".to_string()).into();
         assert!(converted.message.contains("xyz"));
-    }
-
-    /// Run a closure with a DEBUG-level `tracing` subscriber active (output
-    /// discarded), so the `debug!`/`info!` field expressions in the handlers
-    /// are actually evaluated and counted as covered.
-    fn run_with_debug_logs<T>(f: impl FnOnce() -> T) -> T {
-        let subscriber = tracing_subscriber::fmt()
-            .with_max_level(tracing::Level::DEBUG)
-            .with_writer(std::io::sink)
-            .finish();
-        tracing::subscriber::with_default(subscriber, f)
     }
 
     /// Create an in-memory streaming session and return the manager, its

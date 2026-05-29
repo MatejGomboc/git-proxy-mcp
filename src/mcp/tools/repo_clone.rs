@@ -383,6 +383,7 @@ fn build_clone_result(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mcp::tools::run_with_debug_logs;
 
     #[test]
     fn repo_clone_args_defaults() {
@@ -638,18 +639,6 @@ mod tests {
         assert!(is_zero(&0));
         assert!(!is_zero(&1));
         assert!(!is_zero(&100));
-    }
-
-    /// Run a closure with a DEBUG-level `tracing` subscriber active (output
-    /// discarded), so the `debug!`/`info!` field expressions in the handlers
-    /// are actually evaluated and counted as covered. Without an active
-    /// subscriber, `tracing` skips evaluating the field values entirely.
-    fn run_with_debug_logs<T>(f: impl FnOnce() -> T) -> T {
-        let subscriber = tracing_subscriber::fmt()
-            .with_max_level(tracing::Level::DEBUG)
-            .with_writer(std::io::sink)
-            .finish();
-        tracing::subscriber::with_default(subscriber, f)
     }
 
     /// Build a `FetchResult` around a locally-created bare repo (no network)
