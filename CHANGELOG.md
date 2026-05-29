@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`mcp::server` tool-dispatch coverage.** The `call_*_tool` methods (which
+  run the rate-limit, repo-filter and branch/push-guard checks before invoking
+  a handler) were exercised almost entirely by the Python integration suite.
+  Added unit tests that drive each through its parse / rate-limit / filter /
+  guard / handler-error paths without network access — passing `"not-a-url"`
+  reaches the handler and fails at synchronous URL validation, and a valid
+  bundle header carries `repo_push` to its push step. New coverage includes the
+  `repo_clone` / `repo_push` / `repo_clone_start` filter-block and error paths,
+  force-push-to-protected-branch and force-push-disabled blocks, the
+  force-push-allowed fall-through, the clone/push/start/refs rate-limit
+  branches, the chunk/cancel unknown-session paths, the explicit-protected-branch
+  and allowlist constructor branches, `GitIdentity::is_configured`, and the
+  `handle_transport_result` EOF and blank-line paths (`#[tokio::test]`).
+  `server.rs` line coverage rose from 78.79 % to 91.27 %; the remaining lines
+  are the tool success paths and the async stdin/signal run loop, both
+  exercised end-to-end by the Python integration tests.
 - **`session` module coverage.** The session-tracking module's least-covered
   paths had no unit tests: `RepoSession::age`, `SessionManager::default`, the
   at-capacity eviction-then-`TooManySessions` path in `create_session`, the
