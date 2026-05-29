@@ -439,11 +439,11 @@ mod tests {
         let json = r#"{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}"#;
         let msg = parse_message(json).unwrap();
 
-        let IncomingMessage::Request(req) = msg else {
-            panic!("Expected Request, got Notification");
-        };
-        assert_eq!(req.id, RequestId::Number(1));
-        assert_eq!(req.method, "initialize");
+        assert!(
+            matches!(&msg, IncomingMessage::Request(req)
+                if req.id == RequestId::Number(1) && req.method == "initialize"),
+            "expected Request(id=1, method=initialize)"
+        );
     }
 
     #[test]
@@ -451,10 +451,11 @@ mod tests {
         let json = r#"{"jsonrpc": "2.0", "method": "notifications/initialized"}"#;
         let msg = parse_message(json).unwrap();
 
-        let IncomingMessage::Notification(notif) = msg else {
-            panic!("Expected Notification, got Request");
-        };
-        assert_eq!(notif.method, "notifications/initialized");
+        assert!(
+            matches!(&msg, IncomingMessage::Notification(notif)
+                if notif.method == "notifications/initialized"),
+            "expected notifications/initialized notification"
+        );
     }
 
     #[test]
@@ -462,10 +463,11 @@ mod tests {
         let json = r#"{"jsonrpc": "2.0", "id": "abc-123", "method": "test"}"#;
         let msg = parse_message(json).unwrap();
 
-        let IncomingMessage::Request(req) = msg else {
-            panic!("Expected Request, got Notification");
-        };
-        assert_eq!(req.id, RequestId::String("abc-123".to_string()));
+        assert!(
+            matches!(&msg, IncomingMessage::Request(req)
+                if req.id == RequestId::String("abc-123".to_string())),
+            "expected Request with string id abc-123"
+        );
     }
 
     #[test]

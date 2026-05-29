@@ -754,22 +754,23 @@ mod tests {
         let (tx, rx) = ProgressSender::new("t".to_string());
         tx.send_transfer(100, 200, 5, 10, 5);
         let received = rx.recv().unwrap();
-        match received {
-            ProgressUpdate::Transfer {
-                received_bytes,
-                total_bytes,
-                received_objects,
-                total_objects,
-                indexed_objects,
-            } => {
-                assert_eq!(received_bytes, 100);
-                assert_eq!(total_bytes, 200);
-                assert_eq!(received_objects, 5);
-                assert_eq!(total_objects, 10);
-                assert_eq!(indexed_objects, 5);
-            }
-            other => panic!("expected Transfer, got {other:?}"),
-        }
+        assert!(
+            matches!(
+                received,
+                ProgressUpdate::Transfer {
+                    received_bytes,
+                    total_bytes,
+                    received_objects,
+                    total_objects,
+                    indexed_objects,
+                } if received_bytes == 100
+                    && total_bytes == 200
+                    && received_objects == 5
+                    && total_objects == 10
+                    && indexed_objects == 5
+            ),
+            "expected Transfer with the sent fields, got {received:?}"
+        );
     }
 
     #[test]
@@ -777,18 +778,41 @@ mod tests {
         let (tx, rx) = ProgressSender::new("t".to_string());
         tx.send_file_progress(1, 5, Some("a.txt"));
         let received = rx.recv().unwrap();
-        match received {
-            ProgressUpdate::FileProcessing {
-                processed,
-                total,
-                current_file,
-            } => {
-                assert_eq!(processed, 1);
-                assert_eq!(total, 5);
-                assert_eq!(current_file, Some("a.txt".to_string()));
-            }
-            other => panic!("expected FileProcessing, got {other:?}"),
-        }
+        assert!(
+            matches!(
+                received,
+                ProgressUpdate::FileProcessing {
+                    processed: 1,
+                    total: 5,
+                    current_file: Some(ref f),
+                } if f == "a.txt"
+            ),
+            "expected FileProcessing with the sent fields, got {received:?}"
+        );
+    }
+
+    #[test]
+    fn send_recovers_from_poisoned_last_sent_mutex() {
+        use std::panic::{catch_unwind, AssertUnwindSafe};
+
+        let (tx, _rx) = ProgressSender::new("t".to_string());
+
+        // Poison the `last_sent` mutex by panicking while holding the lock.
+        let poison_outcome = catch_unwind(AssertUnwindSafe(|| {
+            let _guard = tx.last_sent.lock().unwrap();
+            panic!("intentional poison");
+        }));
+        assert!(poison_outcome.is_err());
+
+        // A non-Complete update takes the rate-limit path, which locks
+        // `last_sent`. It must recover from the poison rather than panicking.
+        let _ = tx.send(ProgressUpdate::Transfer {
+            received_bytes: 1,
+            total_bytes: 2,
+            received_objects: 1,
+            total_objects: 2,
+            indexed_objects: 1,
+        });
     }
 
     #[test]
