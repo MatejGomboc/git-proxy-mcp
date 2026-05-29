@@ -48,7 +48,7 @@ commits from human commits.
 {
   "protocolVersion": "2024-11-05",
   "capabilities": { "tools": {} },
-  "serverInfo": { "name": "git-proxy-mcp", "version": "1.1.0" },
+  "serverInfo": { "name": "git-proxy-mcp", "version": "1.2.0" },
   "gitIdentity": {
     "name": "Claude AI",
     "email": "ai-assistant@example.com"
