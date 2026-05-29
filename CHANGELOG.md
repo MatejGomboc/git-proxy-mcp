@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`mcp::progress` and `mcp::protocol` coverage top-ups.** Added a test that
+  poisons `ProgressSender`'s `last_sent` mutex (via `catch_unwind`) and confirms
+  `send` recovers rather than panicking, taking `progress.rs` to 100 % line
+  coverage. Reworked three `protocol::parse_message` tests and two `progress`
+  send tests from `let-else { panic! }` / `match { _ => panic! }` shapes — whose
+  unreachable panic arms showed as uncovered — into single `assert!(matches!(…))`
+  forms, taking `protocol.rs` to 100 % line coverage. No production change.
+  (`config/mod.rs`'s only remaining gap is the `default_config_path()` →
+  `None` arm, reachable solely when `dirs::home_dir()` returns `None`, which is
+  not portably forceable in a test.)
 - **`git2_ops::auth` and `security::audit` coverage top-ups.** Added direct
   unit tests for `auth::credentials_callback`'s `DEFAULT` branch (deterministic)
   and its ssh-agent branch (no-panic exercise, since the outcome depends on
