@@ -35,6 +35,14 @@ pub struct StdioTransport {
     reader: BufReader<tokio::io::Stdin>,
     /// Handle for stdout.
     writer: tokio::io::Stdout,
+    /// Test-only capture sink. When set, [`StdioTransport::write_raw`] appends
+    /// framed messages here instead of writing to the real stdout, so unit
+    /// tests can drive and assert on the write path without touching the
+    /// process's stdout (which both pollutes the test runner output and relies
+    /// on `tokio::io::stdout()`'s blocking-thread teardown — an intermittent
+    /// source of hangs on Windows CI). Compiled out of non-test builds.
+    #[cfg(test)]
+    test_sink: Option<std::sync::Arc<std::sync::Mutex<Vec<u8>>>>,
 }
 
 impl StdioTransport {
@@ -44,7 +52,22 @@ impl StdioTransport {
         Self {
             reader: BufReader::new(tokio::io::stdin()),
             writer: tokio::io::stdout(),
+            #[cfg(test)]
+            test_sink: None,
         }
+    }
+
+    /// Redirects all subsequent writes to an in-memory buffer instead of the
+    /// real stdout, returning a shared handle to inspect what was written.
+    ///
+    /// Test-only: lets unit tests that exercise the write path (e.g. the
+    /// JSON-RPC dispatch tests) assert on the bytes written without going
+    /// through `tokio::io::stdout()`.
+    #[cfg(test)]
+    pub(crate) fn capture_output(&mut self) -> std::sync::Arc<std::sync::Mutex<Vec<u8>>> {
+        let sink = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        self.test_sink = Some(std::sync::Arc::clone(&sink));
+        sink
     }
 
     /// Reads the next message line from stdin.
@@ -115,6 +138,24 @@ impl StdioTransport {
     ///
     /// Returns an error if writing fails.
     async fn write_raw(&mut self, json: &str) -> io::Result<()> {
+        #[cfg(test)]
+        if let Some(sink) = &self.test_sink {
+            // In-memory capture: append the framed message synchronously. The
+            // framing matches `write_message_line` (message + '\n'), and there
+            // is no real I/O, so the lock is never held across an await. The
+            // guard is scoped tightly so it is released before returning.
+            debug_assert!(
+                !json.contains('\n'),
+                "JSON message must not contain embedded newlines"
+            );
+            {
+                let mut buf = sink.lock().expect("test_sink mutex poisoned");
+                buf.extend_from_slice(json.as_bytes());
+                buf.push(b'\n');
+            }
+            return Ok(());
+        }
+
         write_message_line(&mut self.writer, json).await
     }
 
@@ -317,5 +358,24 @@ mod tests {
         write_message_line(&mut buf, "a").await.unwrap();
         write_message_line(&mut buf, "b").await.unwrap();
         assert_eq!(String::from_utf8(buf).unwrap(), "a\nb\n");
+    }
+
+    #[tokio::test]
+    async fn capture_output_records_framed_writes_in_memory() {
+        // With capture enabled, write_response/write_error go to the in-memory
+        // sink (newline-framed) instead of the real stdout.
+        let mut transport = StdioTransport::new();
+        let sink = transport.capture_output();
+
+        let response = JsonRpcResponse::success(RequestId::Number(1), serde_json::json!({}));
+        transport.write_response(&response).await.unwrap();
+        let error = JsonRpcError::method_not_found(RequestId::Number(2), "no/such");
+        transport.write_error(&error).await.unwrap();
+
+        let written = String::from_utf8(sink.lock().unwrap().clone()).unwrap();
+        // Two newline-framed messages.
+        assert_eq!(written.matches('\n').count(), 2);
+        assert!(written.contains("\"result\"") && written.contains("\"id\":1"));
+        assert!(written.contains("\"error\"") && written.contains("-32601"));
     }
 }

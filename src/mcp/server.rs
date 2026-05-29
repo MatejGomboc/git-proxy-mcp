@@ -2645,9 +2645,16 @@ mod tests {
         assert_eq!(server.state(), ServerState::AwaitingInit);
     }
 
+    /// Reads the captured transport output as a UTF-8 string.
+    fn captured(sink: &std::sync::Arc<std::sync::Mutex<Vec<u8>>>) -> String {
+        String::from_utf8(sink.lock().unwrap().clone()).unwrap()
+    }
+
     #[tokio::test]
     async fn handle_transport_result_dispatches_request_and_continues() {
         let mut server = create_test_server();
+        // Capture writes in memory rather than the process's real stdout.
+        let sink = server.transport.capture_output();
         // A non-empty line carrying a valid `ping` request routes through
         // handle_line -> handle_message -> handle_request -> the ping dispatch
         // arm, and a response is written. `ping` needs no prior initialise, so
@@ -2659,11 +2666,15 @@ mod tests {
             .unwrap();
         assert!(outcome.is_none());
         assert_eq!(server.state(), ServerState::AwaitingInit);
+        // A successful result response was written for the request's id.
+        let written = captured(&sink);
+        assert!(written.contains("\"result\"") && written.contains("\"id\":1"));
     }
 
     #[tokio::test]
     async fn handle_transport_result_writes_error_for_unknown_method() {
         let mut server = create_test_server();
+        let sink = server.transport.capture_output();
         // A well-formed request for an unknown method parses successfully but
         // hits the method-not-found dispatch arm, which writes a JSON-RPC error
         // rather than a response.
@@ -2674,11 +2685,15 @@ mod tests {
             .unwrap();
         assert!(outcome.is_none());
         assert_eq!(server.state(), ServerState::AwaitingInit);
+        // Method-not-found is JSON-RPC error -32601.
+        let written = captured(&sink);
+        assert!(written.contains("\"error\"") && written.contains("-32601"));
     }
 
     #[tokio::test]
     async fn handle_transport_result_writes_error_for_malformed_json() {
         let mut server = create_test_server();
+        let sink = server.transport.capture_output();
         // A non-empty line that is not valid JSON makes parse_message return
         // Err, which handle_line writes back as a JSON-RPC parse error.
         let line = "{ this is not valid json".to_string();
@@ -2688,14 +2703,18 @@ mod tests {
             .unwrap();
         assert!(outcome.is_none());
         assert_eq!(server.state(), ServerState::AwaitingInit);
+        // Malformed JSON is JSON-RPC parse error -32700.
+        let written = captured(&sink);
+        assert!(written.contains("\"error\"") && written.contains("-32700"));
     }
 
     #[tokio::test]
     async fn handle_transport_result_processes_notification() {
         let mut server = create_test_server();
+        let sink = server.transport.capture_output();
         // A message with no `id` is a notification, routing through the
         // Notification arm of handle_message. An unknown notification is
-        // ignored without changing state and without writing a response.
+        // ignored without changing state and without writing any response.
         let line = r#"{"jsonrpc":"2.0","method":"some/notification"}"#.to_string();
         let outcome = server
             .handle_transport_result(Ok(Some(line)))
@@ -2703,5 +2722,7 @@ mod tests {
             .unwrap();
         assert!(outcome.is_none());
         assert_eq!(server.state(), ServerState::AwaitingInit);
+        // Notifications produce no wire response.
+        assert!(sink.lock().unwrap().is_empty());
     }
 }
