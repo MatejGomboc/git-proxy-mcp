@@ -1391,6 +1391,68 @@ mod tests {
     }
 
     #[test]
+    fn create_tar_keeps_unparseable_lfs_pointer_verbatim() {
+        // A blob whose first line is exactly the v1 version line (so
+        // `is_lfs_pointer` is true) but which lacks the `oid`/`size` fields (so
+        // `parse_lfs_pointer` returns None). With an LFS client created (valid
+        // https repo_url), the Batch API is never called — the malformed pointer
+        // is archived verbatim. Exercises the is-pointer-but-unparseable arm.
+        let temp = tempfile::TempDir::new().unwrap();
+        let commit_oid = {
+            let repo = Repository::init_bare(temp.path()).unwrap();
+            let blob = repo
+                .blob(b"version https://git-lfs.github.com/spec/v1\n")
+                .unwrap();
+            let mut tb = repo.treebuilder(None).unwrap();
+            tb.insert("not-a-real-pointer.bin", blob, 0o100_644)
+                .unwrap();
+            let tree = repo.find_tree(tb.write().unwrap()).unwrap();
+            let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+            repo.commit(Some("HEAD"), &sig, &sig, "bad pointer", &tree, &[])
+                .unwrap()
+        };
+        let repo = open_test_repo(&temp);
+        let opts = TarOptions {
+            resolve_lfs: Some(true),
+            repo_url: Some("https://github.com/owner/repo.git".to_string()),
+            ..Default::default()
+        };
+        let result = create_tar_from_tree_with_options(&repo, commit_oid, Some(opts)).unwrap();
+        assert_eq!(result.lfs_resolved, 0);
+        assert_eq!(
+            result.lfs_failed, 0,
+            "unparseable pointer is not a fetch failure"
+        );
+        assert_eq!(result.file_count, 1, "the file is archived verbatim");
+    }
+
+    #[test]
+    fn create_tar_skips_blob_with_missing_object() {
+        // Hand-write a tree with a blob entry pointing at a missing (all-zero)
+        // OID, bypassing treebuilder's existence validation. The walk visits the
+        // entry (a top-level blob needs no subtree descent), but `find_blob`
+        // then fails — exercising the Err arm that logs and skips the blob while
+        // the archive still finishes.
+        let temp = tempfile::TempDir::new().unwrap();
+        let commit_oid = {
+            let repo = Repository::init_bare(temp.path()).unwrap();
+            let odb = repo.odb().unwrap();
+            let mut tree_bytes = Vec::new();
+            tree_bytes.extend_from_slice(b"100644 missing.txt\0");
+            tree_bytes.extend_from_slice(&[0u8; 20]);
+            let tree_oid = odb.write(git2::ObjectType::Tree, &tree_bytes).unwrap();
+            let tree = repo.find_tree(tree_oid).unwrap();
+            let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+            repo.commit(Some("HEAD"), &sig, &sig, "missing blob", &tree, &[])
+                .unwrap()
+        };
+        let repo = open_test_repo(&temp);
+        let result = create_tar_from_tree(&repo, commit_oid).unwrap();
+        assert_eq!(result.file_count, 0, "the unreadable blob is skipped");
+        assert!(!result.data.is_empty(), "the archive still finishes");
+    }
+
+    #[test]
     fn tar_mode_for_filemode_maps_correctly() {
         // Regular files keep their permission bits; a symlink (0o120000) has
         // none and must fall back to a readable 0o644 rather than 0o000.
