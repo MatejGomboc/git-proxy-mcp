@@ -547,40 +547,6 @@ impl StreamingSessionManager {
         Ok((chunk, next_missing))
     }
 
-    /// Get session info without retrieving a chunk.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the session doesn't exist.
-    #[allow(clippy::significant_drop_tightening)]
-    pub fn get_session_info(
-        &self,
-        session_id: &str,
-    ) -> Result<StreamingSessionInfo, StreamingError> {
-        let sessions = self
-            .sessions
-            .read()
-            .map_err(|_| StreamingError::LockPoisoned)?;
-
-        let session = sessions
-            .get(session_id)
-            .ok_or_else(|| StreamingError::SessionNotFound(session_id.to_string()))?;
-
-        let delivered = session.retrieved_chunks.iter().filter(|&&r| r).count();
-
-        Ok(StreamingSessionInfo {
-            session_id: session.id.clone(),
-            total_chunks: session.total_chunks(),
-            total_size: session.total_size(),
-            chunk_size: session.chunk_size,
-            commit: session.commit.clone(),
-            branch: session.branch.clone(),
-            delivered_chunks: delivered,
-            next_missing_chunk: session.next_missing_chunk(),
-            progress_percent: session.progress(),
-        })
-    }
-
     /// Cancel a session explicitly.
     ///
     /// # Errors
@@ -979,13 +945,7 @@ mod tests {
             .get_chunk(&info.session_id, 99)
             .expect_err("must reject out-of-range chunk index");
         assert!(
-            matches!(
-                err,
-                StreamingError::InvalidChunkIndex {
-                    index: 99,
-                    total: 2,
-                }
-            ),
+            matches!(err, StreamingError::InvalidChunkIndex { index, total } if index == 99 && total == 2),
             "expected InvalidChunkIndex, got {err:?}"
         );
     }
@@ -1360,5 +1320,65 @@ mod tests {
         assert_eq!(info.delivered_chunks, 0);
         assert_eq!(info.next_missing_chunk, Some(0));
         assert!((info.progress_percent - 0.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn streaming_session_age_advances() {
+        // Coverage: `StreamingSession::age()` had no caller.
+        let session = StreamingSession::new(
+            "id".to_string(),
+            "url".to_string(),
+            "main".to_string(),
+            "abc".to_string(),
+            vec![0u8; 100],
+            1024,
+        )
+        .unwrap();
+        let first = session.age();
+        std::thread::sleep(Duration::from_millis(5));
+        let second = session.age();
+        assert!(second >= first);
+        assert!(second >= Duration::from_millis(5));
+    }
+
+    #[test]
+    fn progress_is_complete_for_zero_chunk_session() {
+        // An empty archive yields a zero-chunk session; `progress()` must take
+        // the empty-`retrieved_chunks` branch and report 100%.
+        let session = StreamingSession::new(
+            "id".to_string(),
+            "url".to_string(),
+            "main".to_string(),
+            "abc".to_string(),
+            Vec::new(),
+            1024,
+        )
+        .unwrap();
+        assert_eq!(session.total_chunks(), 0);
+        assert!((session.progress() - 100.0).abs() < f64::EPSILON);
+        assert!(session.is_complete());
+    }
+
+    #[test]
+    fn streaming_error_display_and_from_io() {
+        // Coverage: the Display arms for SessionExpired / InvalidChunkIndex /
+        // LockPoisoned / IoError, and the From<io::Error> conversion.
+        assert!(StreamingError::SessionExpired("s1".to_string())
+            .to_string()
+            .contains("expired"));
+        let idx = StreamingError::InvalidChunkIndex { index: 3, total: 2 }.to_string();
+        assert!(
+            idx.contains("invalid chunk index 3") && idx.contains("total chunks: 2"),
+            "got: {idx}"
+        );
+        assert!(StreamingError::LockPoisoned
+            .to_string()
+            .contains("poisoned"));
+        assert!(StreamingError::IoError("disk gone".to_string())
+            .to_string()
+            .contains("disk gone"));
+
+        let from_io: StreamingError = std::io::Error::other("boom").into();
+        assert!(matches!(from_io, StreamingError::IoError(ref m) if m.contains("boom")));
     }
 }

@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`streaming::tar` and `streaming::chunked` coverage top-ups.** For `tar.rs`,
+  a test drives the LFS-resolution path with an unreachable LFS server
+  (`127.0.0.1:1`, `retry_max_attempts: 0`) so the pointer is parsed, a fetch is
+  attempted and fails fast, `lfs_failed` is counted, and the pointer is archived
+  verbatim — plus the LFS progress-report path. For `chunked.rs`, tests cover
+  `StreamingSession::age`, `progress()` on a zero-chunk (empty-archive) session,
+  and the `StreamingError` `Display` arms (`SessionExpired` / `InvalidChunkIndex`
+  / `LockPoisoned` / `IoError`) and `From<io::Error>` conversion; a literal-field
+  `matches!` was reworked to bind-and-guard to drop its phantom non-match arm.
+  `tar.rs` 92.82 % -> 97.46 %, `chunked.rs` 91.33 % -> 99.24 % line coverage.
+  Verified that `chunked::create_session` does **not** share the
+  overwrite-at-capacity bug fixed in `session.rs`: it assigns a fresh unique
+  `generate_id()` per call, so every create is a genuine new insert (no
+  in-place-overwrite case exists).
 - **`mcp::progress` and `mcp::protocol` coverage top-ups.** Added a test that
   poisons `ProgressSender`'s `last_sent` mutex (via `catch_unwind`) and confirms
   `send` recovers rather than panicking, taking `progress.rs` to 100 % line
@@ -1236,6 +1250,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **`StreamingSessionManager::get_session_info` deleted.** It was `pub` but had
+  zero callers outside its own (absent) tests — a dead duplicate of the live
+  `get_session_status`, which the `repo_clone_status` tool actually uses. Same
+  dead-`pub`-API cleanup as `fetch_batch` / `parse_bundle_info`. ~30 lines
+  removed; no behaviour change.
 - **`LfsClient::fetch_batch` and the `LfsBatchResult` struct deleted.**
   Both were `pub` but had zero callers outside `lfs.rs`'s own tests
   (the only LFS consumer, `streaming/tar.rs`, calls `fetch_content` per

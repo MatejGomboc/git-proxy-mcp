@@ -1308,6 +1308,50 @@ mod tests {
     }
 
     #[test]
+    fn create_tar_counts_lfs_failure_when_server_unreachable() {
+        // resolve_lfs = true with a valid-but-unreachable repo_url: the LFS
+        // client IS created, the pointer is parsed and a fetch is attempted,
+        // which fails fast (connection refused on 127.0.0.1:1). The failure is
+        // counted in `lfs_failed` and the pointer is archived verbatim.
+        // `retry_max_attempts: 0` makes the fetch a single attempt (no backoff).
+        let temp = tempfile::TempDir::new().unwrap();
+        let pointer = b"version https://git-lfs.github.com/spec/v1\n\
+                        oid sha256:1111111111111111111111111111111111111111111111111111111111111111\n\
+                        size 12\n";
+        let commit_oid = {
+            let repo = Repository::init_bare(temp.path()).unwrap();
+            let blob = repo.blob(pointer).unwrap();
+            let mut tb = repo.treebuilder(None).unwrap();
+            tb.insert("big.bin", blob, 0o100_644).unwrap();
+            let tree = repo.find_tree(tb.write().unwrap()).unwrap();
+            let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+            repo.commit(Some("HEAD"), &sig, &sig, "lfs pointer", &tree, &[])
+                .unwrap()
+        };
+        let repo = open_test_repo(&temp);
+        // A progress sender so the pre-fetch LFS progress report is exercised
+        // too; the receiver is kept alive so sends don't fail.
+        let (sender, _receiver) = crate::mcp::progress::ProgressSender::new("t".to_string());
+        let opts = TarOptions {
+            resolve_lfs: Some(true),
+            repo_url: Some("https://127.0.0.1:1/repo.git".to_string()),
+            lfs_config: Some(crate::config::LfsConfig {
+                retry_max_attempts: 0,
+                ..Default::default()
+            }),
+            progress: Some(sender),
+            ..Default::default()
+        };
+        let result = create_tar_from_tree_with_options(&repo, commit_oid, Some(opts)).unwrap();
+        assert_eq!(result.lfs_resolved, 0);
+        assert_eq!(result.lfs_failed, 1);
+        assert_eq!(
+            result.file_count, 1,
+            "pointer file is archived verbatim on fetch failure"
+        );
+    }
+
+    #[test]
     fn create_tar_handles_resolve_lfs_with_unsupported_repo_url() {
         // resolve_lfs = true with a repo_url whose scheme derive_lfs_url
         // rejects (ftp://): LfsClient::new errors, the "failed to create LFS
