@@ -26,7 +26,7 @@ This document explains how an AI assistant uses git-proxy-mcp to work with priva
 │  3. PUSH                                                                    │
 │     AI creates: git bundle create changes.bundle main..HEAD               │
 │     AI calls: repo_push { url: "...", branch: "feature/fix-bug", bundle } │
-│     Receives: { success: true, url: "https://github.com/.../commit/..." } │
+│     Receives: { branch, commit, force, remote_url, hint }                 │
 │                                                                             │
 │  4. ITERATE (if needed)                                                     │
 │     Make more changes locally                                              │

@@ -94,7 +94,7 @@ fn clone_and_stream(url: &str) -> Result<Archive> {
 - Source files NEVER written to user's disk
 - Only git pack files in temp (compressed, deduplicated objects)
 - No risk of leftover files after disconnect
-- Temp directory permissions are 0700 (owner only)
+- Temp directories use the `tempfile` crate's owner-only default (0700 on Unix; the user's profile ACL on Windows)
 
 ### 3. Audit Trail Without Secrets
 
@@ -206,20 +206,26 @@ if !limiter.try_acquire() {
 
 The actual implementation lives at `src/git2_ops/auth.rs::sanitize_url_for_logging`
 and uses byte-safe `find` operations rather than a regex (the project has no
-regex dependency). The behaviour is: if the URL contains both `://` and `@`,
-everything between the scheme and the `@` is replaced with `***`.
+regex dependency). Per RFC 3986 it scans only the URL's authority component
+(between `://` and the first `/`, `?`, or `#`) for the userinfo `@`; if one is
+found, everything between the scheme and that `@` is replaced with `***`. An `@`
+in the path, query, or fragment is left untouched, and SSH-style URLs without
+`://` are returned unchanged.
 
 ```rust
-/// Remove credentials from URLs before logging.
+/// Remove credentials from URLs before logging. Only the authority
+/// (between `://` and the first `/`, `?`, or `#`) is scanned for `@`,
+/// so an `@` in the path or query is preserved (RFC 3986).
 pub fn sanitize_url_for_logging(url: &str) -> String {
-    if let Some(at_pos) = url.find('@') {
-        if let Some(scheme_end) = url.find("://") {
-            let scheme = &url[..scheme_end + 3];
-            let after_at = &url[at_pos + 1..];
-            return format!("{scheme}***@{after_at}");
-        }
+    let Some(scheme_end) = url.find("://") else {
+        return url.to_string(); // SSH-style / non-URL: nothing to strip
+    };
+    let after_scheme = &url[scheme_end + 3..];
+    let authority_end = after_scheme.find(['/', '?', '#']).unwrap_or(after_scheme.len());
+    match after_scheme[..authority_end].rfind('@') {
+        Some(at) => format!("{}***@{}", &url[..scheme_end + 3], &after_scheme[at + 1..]),
+        None => url.to_string(),
     }
-    url.to_string()
 }
 ```
 

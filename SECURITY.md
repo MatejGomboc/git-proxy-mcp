@@ -78,30 +78,10 @@ Given our focus on credential security, we consider these especially critical:
 
 ### Git Configuration
 
-The MCP server uses your existing Git setup. Ensure your credentials are stored securely:
-
-**For HTTPS (PATs):**
-
-```bash
-# macOS - use Keychain
-git config --global credential.helper osxkeychain
-
-# Windows - use Credential Manager
-git config --global credential.helper manager
-
-# Linux - use libsecret or cache
-git config --global credential.helper libsecret
-```
-
-**For SSH:**
-
-```bash
-# Add key to ssh-agent (prompted for passphrase once)
-ssh-add ~/.ssh/id_ed25519
-
-# macOS: store passphrase in Keychain
-ssh-add --apple-use-keychain ~/.ssh/id_ed25519
-```
+The MCP server uses your existing Git setup, so your credentials must be stored
+securely — with an OS credential helper for HTTPS (PATs) or ssh-agent for SSH.
+The README's [Git authentication](README.md#git-authentication) section has the
+exact per-platform setup commands.
 
 ### Credential Recommendations
 

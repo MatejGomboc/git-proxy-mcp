@@ -125,7 +125,7 @@ repo.checkout_head(...)?;                  // Would write files!
 | Bundle file | Temp only | For unbundle operation |
 | Credentials | **NO** | System helpers only |
 | Tar archive (Tier 1) | **NO** | Built in memory |
-| Tar archive (Tier 2) | Temp only when ≥ 10 MiB | Disk-backed via `NamedTempFile`; deleted when session ends or expires |
+| Tar archive (Tier 2) | Temp only when larger than 10 MiB | Disk-backed via `NamedTempFile`; deleted when session ends or expires |
 
 ### Temp Directory Contents
 
@@ -232,6 +232,7 @@ src/
 ├── main.rs                      # CLI entry point
 ├── error.rs                     # Top-level error types
 ├── session.rs                   # Session tracking (no files!)
+├── util.rs                      # Shared helpers (sanitise_for_log)
 │
 ├── config/                      # Configuration
 │   ├── mod.rs                   # Module exports

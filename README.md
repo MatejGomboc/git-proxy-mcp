@@ -344,11 +344,14 @@ Get a Python helper script for processing results (decoding base64, extracting t
 
 #### Git CLI
 
-The server invokes `git` for two operations: `git credential fill` (to read your stored
-credentials via the OS credential helper — see `src/git2_ops/auth.rs`) and `git bundle unbundle`
-(to apply a `repo_push` payload before the authenticated push — see `src/git2_ops/push.rs`).
-Any reasonably modern git (2.x) on `PATH` works; bundles produced by git ≥ 2.53 (with the
-`# v3 git bundle` header) are also accepted.
+Most of the server's Git operations (clone, push, pull, diff, refs) authenticate in-process
+via libgit2's credential callbacks and never shell out to `git` (see `src/git2_ops/auth.rs`).
+The `git` CLI is required nonetheless, because the server invokes it for two narrower tasks:
+`git credential fill` (to read your stored credentials via the OS credential helper, used for
+Git LFS object downloads) and `git fetch` from a bundle file (to apply a `repo_push` payload
+before the authenticated push — see `src/git2_ops/push.rs`). Any reasonably modern git (2.x)
+on `PATH` works; bundles produced by git ≥ 2.53 (with the `# v3 git bundle` header) are also
+accepted.
 
 #### Git authentication
 
@@ -370,6 +373,9 @@ For SSH, ensure your key is in ssh-agent:
 ```bash
 eval "$(ssh-agent -s)"
 ssh-add ~/.ssh/id_ed25519
+
+# macOS: also cache the key's passphrase in the Keychain
+ssh-add --apple-use-keychain ~/.ssh/id_ed25519
 ```
 
 ### Usage with Claude Desktop
@@ -481,8 +487,10 @@ The configuration is validated when it loads; an invalid value aborts startup
 with a `configuration validation failed: …` message naming the offending field.
 The checks reject only values that would render a subsystem unusable: a zero
 `timeouts.request_timeout_secs` or any of the `lfs.*_timeout_secs` (every request
-would time out immediately), `rate_limits.max_burst` of `0` (every operation
-blocked forever), a non-finite or negative `rate_limits.refill_rate_per_sec`
+would time out immediately), a zero `limits.max_output_bytes` (every command's
+combined stdout+stderr would be truncated to nothing), `rate_limits.max_burst`
+of `0` (every operation blocked forever), a non-finite or negative
+`rate_limits.refill_rate_per_sec`
 (`0.0` is allowed — it means "burst once, never refill"), a zero
 `sessions.timeout_secs` / `sessions.max_streaming_sessions` /
 `sessions.max_repo_sessions`, and a `logging.level` outside
@@ -503,7 +511,7 @@ Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 Copyright (C) 2026 Matej Gomboc <https://github.com/MatejGomboc/git-proxy-mcp>.
 
-GNU General Public License v3.0 — see [LICENCE](LICENCE).
+GNU General Public License v3.0 or later — see [LICENCE](LICENCE).
 
 ---
 
