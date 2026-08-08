@@ -5,8 +5,10 @@ updates:
     - package-ecosystem: "github-actions"
       directory: "/"
       schedule:
-        interval: "daily"
+        interval: weekly
+        day: saturday
         time: "00:00"
+        timezone: "Europe/Ljubljana"
 
     # Cargo: large transitive dependency surface (~250+ crates).
     # Weekly cadence + grouping keeps PR noise manageable while
@@ -16,9 +18,10 @@ updates:
     - package-ecosystem: "cargo"
       directory: "/"
       schedule:
-        interval: "weekly"
-        day: "monday"
+        interval: weekly
+        day: saturday
         time: "00:00"
+        timezone: "Europe/Ljubljana"
       open-pull-requests-limit: 5
       groups:
         cargo-dependencies:
