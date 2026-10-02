@@ -396,7 +396,7 @@ mod tests {
         assert_eq!(first.chunk_size, 1024);
         assert!(!first.is_last);
         assert_eq!(first.next_missing_chunk, Some(1));
-        assert!(!first.data.is_empty());
+        assert_ne!(first.data, "");
 
         // The final chunk reports is_last and no further missing chunk.
         let last = handle_repo_clone_chunk(

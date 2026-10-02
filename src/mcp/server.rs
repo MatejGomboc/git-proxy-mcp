@@ -1626,7 +1626,7 @@ mod tests {
         assert!(!tools.is_empty());
 
         for tool in &tools {
-            assert!(!tool.name.is_empty());
+            assert_ne!(tool.name, "");
             assert!(tool.input_schema.is_object());
         }
     }
@@ -1665,7 +1665,7 @@ mod tests {
     fn server_info_default() {
         let info = ServerInfo::default();
         assert_eq!(info.name, SERVER_NAME);
-        assert!(!info.version.is_empty());
+        assert_ne!(info.version, "");
     }
 
     fn make_request(id: i64, method: &str, params: Option<Value>) -> JsonRpcRequest {
@@ -2296,7 +2296,7 @@ mod tests {
         let info = ServerInfo::default();
         assert_eq!(info.name, "git-proxy-mcp");
         // Version should match Cargo.toml package version
-        assert!(!info.version.is_empty());
+        assert_ne!(info.version, "");
         assert!(info.version.chars().any(|c| c.is_ascii_digit()));
     }
 

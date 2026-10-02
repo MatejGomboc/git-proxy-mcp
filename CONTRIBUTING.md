@@ -123,7 +123,7 @@ When submitting:
 
 ### Prerequisites
 
-- Rust — the toolchain is pinned to 1.95.0 in `rust-toolchain.toml` and auto-installed by
+- Rust — the toolchain is pinned to 1.99.0 in `rust-toolchain.toml` and auto-installed by
   rustup when you run any `cargo` command in the repo (`Cargo.toml`'s `rust-version = 1.75`
   records the minimum the code compiles against)
 - Git 2.x (must be in PATH)

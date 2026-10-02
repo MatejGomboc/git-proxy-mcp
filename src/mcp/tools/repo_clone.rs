@@ -702,7 +702,7 @@ mod tests {
         assert_eq!(result.commit, expected_commit);
         assert_eq!(result.branch, "main");
         assert_eq!(result.file_count, 2); // README.md + src/main.rs
-        assert!(!result.archive.is_empty());
+        assert_ne!(result.archive, "");
         assert!(result.archive_size > 0);
         assert_eq!(result.skipped_by_filter, 0);
     }

@@ -677,7 +677,7 @@ mod tests {
         assert_eq!(result.file_count, 2);
         assert_eq!(result.chunk_size, 1024); // clamped up from 64
         assert!(result.total_chunks >= 1);
-        assert!(!result.session_id.is_empty());
+        assert_ne!(result.session_id, "");
 
         // The session is registered and its chunk count matches the result.
         let status = manager.get_session_status(&result.session_id).unwrap();
