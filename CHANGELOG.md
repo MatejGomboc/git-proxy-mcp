@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Rust toolchain bumped 1.95.0 → 1.99.0** — `rust-toolchain.toml` and every
+  `dtolnay/rust-toolchain` action pin (now the `v1.99.0` branch SHA) updated
+  together, as `check-toolchain-pin.sh` requires. Clippy 1.99 adds the pedantic
+  `assert_is_empty` lint, so 15 test assertions of the form
+  `assert!(x.is_empty())` / `assert!(!x.is_empty())` became `assert_eq!` /
+  `assert_ne!` against an empty value, which also prints the offending value on
+  failure. No production change.
 - **JSON-RPC dispatch unit tests no longer write to the real stdout** (no
   production change). The four `handle_transport_result` `#[tokio::test]`s added
   in v1.2.0 drove the server's write path through `tokio::io::stdout()`, which

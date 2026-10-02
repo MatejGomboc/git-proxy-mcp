@@ -644,7 +644,7 @@ mod tests {
         let tree = commit.tree().unwrap();
         let files = vec!["file.txt".to_string()];
         let archive = create_files_archive(&repo, &tree, &files).unwrap();
-        assert!(!archive.is_empty()); // Base64 encoded tar.gz
+        assert_ne!(archive, ""); // Base64 encoded tar.gz
     }
 
     #[test]
@@ -802,7 +802,7 @@ mod tests {
             .any(|f| f.path == "a.txt" && f.change_type == "modified"));
 
         assert!(result.stats.commits >= 1);
-        assert!(!result.files_archive.is_empty());
+        assert_ne!(result.files_archive, "");
         assert!(result.diff.contains("c.txt"), "diff: {}", result.diff);
     }
 
@@ -818,7 +818,7 @@ mod tests {
         .unwrap();
         assert!(result.up_to_date);
         assert!(result.changed_files.is_empty());
-        assert!(result.diff.is_empty());
+        assert_eq!(result.diff, "");
         assert_eq!(result.base_commit, head.to_string());
         assert_eq!(result.new_commit, head.to_string());
     }

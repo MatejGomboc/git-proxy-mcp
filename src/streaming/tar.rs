@@ -877,7 +877,7 @@ mod tests {
         }
 
         // The archive should contain the submodule file under its path prefix.
-        assert!(!archive.is_empty());
+        assert_ne!(archive, b"");
     }
 
     #[test]
@@ -1035,7 +1035,7 @@ mod tests {
         let result = create_tar_from_tree(&repo, commit_oid).unwrap();
         assert!(result.file_count >= 3);
         assert!(result.uncompressed_size > 0);
-        assert!(!result.data.is_empty());
+        assert_ne!(result.data, b"");
     }
 
     #[test]

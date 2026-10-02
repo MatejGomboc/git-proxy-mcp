@@ -348,7 +348,7 @@ mod tests {
             .create_session("https://github.com/owner/repo.git", "main", "abc123")
             .unwrap();
 
-        assert!(!session_id.is_empty());
+        assert_ne!(session_id, "");
 
         let session = manager.get_session(&session_id).unwrap().unwrap();
         assert_eq!(session.branch, "main");

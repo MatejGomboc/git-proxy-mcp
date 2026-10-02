@@ -755,7 +755,7 @@ mod tests {
     fn security_config_defaults() {
         let config = SecurityConfig::default();
         assert!(!config.allow_force_push);
-        assert!(config.protected_branches.is_empty());
+        assert_eq!(config.protected_branches, Vec::<String>::new());
         assert!(config.repo_allowlist.is_none());
         assert!(config.repo_blocklist.is_none());
     }

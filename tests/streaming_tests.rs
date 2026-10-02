@@ -106,7 +106,7 @@ fn test_decode_bundle_empty() {
     let result = decode_bundle("");
     // Empty base64 decodes to empty bytes, which is technically valid
     assert!(result.is_ok());
-    assert!(result.unwrap().is_empty());
+    assert_eq!(result.unwrap(), b"");
 }
 
 #[test]
@@ -152,7 +152,7 @@ fn test_encode_base64_binary() {
     let data = vec![0u8, 1, 2, 255, 254, 253];
     let encoded = encode_base64(&data);
     // Should be valid base64
-    assert!(!encoded.is_empty());
+    assert_ne!(encoded, "");
     // Decode back to verify
     let decoded = decode_bundle(&encoded).unwrap();
     assert_eq!(decoded, data);
